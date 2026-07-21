@@ -133,8 +133,8 @@ end
 function Mnorm(; solver::rpdhgSolver, x::CuArray, y::CuArray,
      tau::rpdhg_float, sigma::rpdhg_float, AxTemp::dualVector)
     solver.primalMV!(solver.data.coeff, x, AxTemp);
-    yAx = CUDA.dot(y, AxTemp.y)
-    return CUDA.dot(x, x) / tau - 2 * yAx + CUDA.dot(y, y) / sigma
+    yAx = dot(y, AxTemp.y)
+    return dot(x, x) / tau - 2 * yAx + dot(y, y) / sigma
 end
 
 function approximate_cal!(; solver::rpdhgSolver, h1::primalVector, h2::dualVector,
@@ -218,8 +218,8 @@ end
 function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVector, dual_sol::dualVector, slack::solVecPrimal, dual_sol_temp::solVecDual, converge_info::PDHGCLPConvergeInfo)
     pObj = dot(primal_sol.x, solver.data.d_c)
     solver.adjointMV!(solver.data.coeffTrans, dual_sol, slack.primal_sol.x)
-    AtyInf = CUDA.norm(slack.primal_sol.x, Inf)
-    AtyNrm1 = CUDA.norm(slack.primal_sol.x, 1)
+    AtyInf = norm(slack.primal_sol.x, Inf)
+    AtyNrm1 = norm(slack.primal_sol.x, 1)
     slack.primal_sol.x .= solver.data.c - slack.primal_sol.x;
     slack.primal_sol_lag.x .= max.(0, slack.primal_sol.x)
     slack.primal_sol_mean.x .= min.(0, slack.primal_sol.x)
@@ -231,14 +231,14 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
 
     # dual_sol_temp.dual_sol_mean = Gx
     solver.primalMV!(solver.data.coeff, primal_sol.x, dual_sol_temp.dual_sol_mean);
-    AxInf = CUDA.norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    AxNrm1 = CUDA.norm(dual_sol_temp.dual_sol_mean.y, 1)
+    AxInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
 
     dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
-    l_2_abs_primal_res = CUDA.norm(dual_sol_temp.dual_sol_temp.y);
+    l_2_abs_primal_res = norm(dual_sol_temp.dual_sol_temp.y);
     l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(solver.data.hNrm1, AxNrm1));
     l_inf_abs_primal_res = CUDA.maximum(abs.(dual_sol_temp.dual_sol_temp.y));
     l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(solver.data.hNrmInf, AxInf));
@@ -279,7 +279,7 @@ function infeasibility_info_calculation(; solver::rpdhgSolver,
     # primal_ray ./= norm(primal_ray, 2)
     # dual_ray ./= norm(dual_ray, 2)
     if pObj === nothing
-        pObj = CUDA.dot(primal_ray.x, solver.data.d_c)
+        pObj = dot(primal_ray.x, solver.data.d_c)
     end
     if l_inf_primal_ray_infeasibility === nothing && pObj < 0.0
         # dual_sol_temp.dual_sol_mean = Gx
@@ -814,7 +814,7 @@ dGType<:Union{
             proj_diagonal! = x -> println("proj_diagonal! not implemented"),
             recovered_dual = solVecDualRecovered(deepCopyDualVector(dual_sol_struct), deepCopyDualVector(dual_sol_struct))
         )
-        # println("norm(y.dual_sol.y, Inf): $(CUDA.norm(y.dual_sol.y, Inf))")
+        # println("norm(y.dual_sol.y, Inf): $(norm(y.dual_sol.y, Inf))")
         dual_sol_temp = solVecDual(
             dual_sol = deepCopyDualVector(dual_sol_struct),
             dual_sol_lag = deepCopyDualVector(dual_sol_lag_struct),
@@ -936,12 +936,12 @@ dGType<:Union{
 
     if use_preconditioner
         # scale data
-        nrm1G = CUDA.norm(solver.data.coeff.d_G, 1)
-        nrmInfG = CUDA.norm(solver.data.coeff.d_G, Inf)
+        nrm1G = norm(solver.data.coeff.d_G, 1)
+        nrmInfG = norm(solver.data.coeff.d_G, Inf)
         # @info ("initial nrm1G: $(nrm1G), initial nrmInfG: $(nrmInfG)")
-        # @info ("initial nrm1c: $(CUDA.norm(solver.data.d_c, 1))")
-        # @info ("initial nrm1h: $(CUDA.norm(solver.data.coeff.d_h, 1))")
-        # @info ("initial nrmInfc: $(CUDA.norm(solver.data.d_c, Inf))")
+        # @info ("initial nrm1c: $(norm(solver.data.d_c, 1))")
+        # @info ("initial nrm1h: $(norm(solver.data.coeff.d_h, 1))")
+        # @info ("initial nrmInfc: $(norm(solver.data.d_c, Inf))")
         if rescaling_method == :ruiz
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
@@ -993,13 +993,13 @@ dGType<:Union{
         )
         if verbose == 2
             @info ("max Dr_product:$(CUDA.maximum(solver.data.diagonal_scale.Dr_product.x))")
-            @info ("norm Dr_product:$(CUDA.norm(solver.data.diagonal_scale.Dr_product.x, 2))")
+            @info ("norm Dr_product:$(norm(solver.data.diagonal_scale.Dr_product.x, 2))")
             @info ("max Dl_product:$(CUDA.maximum(solver.data.diagonal_scale.Dl_product.y))")
-            @info ("norm Dl_product:$(CUDA.norm(solver.data.diagonal_scale.Dl_product.y, 2))")
-            @info ("after scaling, norm1 c: $(CUDA.norm(solver.data.d_c, 1))")
-            @info ("after scaling, normInf c: $(CUDA.norm(solver.data.d_c, Inf))")
-            @info ("after scaling, norm1 G: $(CUDA.norm(solver.data.coeff.d_G, 1))")
-            @info ("after scaling, normInf G: $(CUDA.norm(solver.data.coeff.d_G, Inf))")
+            @info ("norm Dl_product:$(norm(solver.data.diagonal_scale.Dl_product.y, 2))")
+            @info ("after scaling, norm1 c: $(norm(solver.data.d_c, 1))")
+            @info ("after scaling, normInf c: $(norm(solver.data.d_c, Inf))")
+            @info ("after scaling, norm1 G: $(norm(solver.data.coeff.d_G, 1))")
+            @info ("after scaling, normInf G: $(norm(solver.data.coeff.d_G, Inf))")
         end
     end # end if use_preconditioner
 
@@ -1111,11 +1111,11 @@ dGType<:Union{
     if verbose > 0
         infoSummary(info = sol.info)
         # if use_preconditioner
-        #     @info (" norm(sol.x.recovered_primal.primal_sol.x, Inf): $(CUDA.norm(sol.x.recovered_primal.primal_sol.x, Inf))")
-        #     @info (" norm(sol.y.recovered_dual.dual_sol.y, Inf): $(CUDA.norm(sol.y.recovered_dual.dual_sol.y, Inf))")
+        #     @info (" norm(sol.x.recovered_primal.primal_sol.x, Inf): $(norm(sol.x.recovered_primal.primal_sol.x, Inf))")
+        #     @info (" norm(sol.y.recovered_dual.dual_sol.y, Inf): $(norm(sol.y.recovered_dual.dual_sol.y, Inf))")
         # else
-        #     @info (" norm(sol.x.primal_sol.x, Inf): $(CUDA.norm(sol.x.primal_sol.x, Inf))")
-        #     @info (" norm(sol.y.dual_sol.y, Inf): $(CUDA.norm(sol.y.dual_sol.y, Inf))")
+        #     @info (" norm(sol.x.primal_sol.x, Inf): $(norm(sol.x.primal_sol.x, Inf))")
+        #     @info (" norm(sol.y.dual_sol.y, Inf): $(norm(sol.y.dual_sol.y, Inf))")
         # end
         @info ("time for projection: $(time_proj)")
         @info ("time for iterative: $(time_iterative)")
@@ -1761,12 +1761,12 @@ function rpdhg_gpu_solve(;
 
     if use_preconditioner
         # scale data
-        nrm1G = CUDA.norm(solver.data.coeff.d_G, 1)
-        nrmInfG = CUDA.norm(solver.data.coeff.d_G, Inf)
+        nrm1G = norm(solver.data.coeff.d_G, 1)
+        nrmInfG = norm(solver.data.coeff.d_G, Inf)
         @info ("initial nrm1G: $(nrm1G), initial nrmInfG: $(nrmInfG)")
-        @info ("initial nrm1c: $(CUDA.norm(solver.data.d_c, 1))")
-        @info ("initial nrm1h: $(CUDA.norm(solver.data.coeff.d_h, 1))")
-        @info ("initial nrmInfc: $(CUDA.norm(solver.data.d_c, Inf))")
+        @info ("initial nrm1c: $(norm(solver.data.d_c, 1))")
+        @info ("initial nrm1h: $(norm(solver.data.coeff.d_h, 1))")
+        @info ("initial nrmInfc: $(norm(solver.data.d_c, Inf))")
         if rescaling_method == :ruiz
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
@@ -1819,13 +1819,13 @@ function rpdhg_gpu_solve(;
         )
         if verbose == 2
             @info ("max Dr_product:$(CUDA.maximum(solver.data.diagonal_scale.Dr_product.x))")
-            @info ("norm Dr_product:$(CUDA.norm(solver.data.diagonal_scale.Dr_product.x, 2))")
+            @info ("norm Dr_product:$(norm(solver.data.diagonal_scale.Dr_product.x, 2))")
             @info ("max Dl_product:$(CUDA.maximum(solver.data.diagonal_scale.Dl_product.y))")
-            @info ("norm Dl_product:$(CUDA.norm(solver.data.diagonal_scale.Dl_product.y, 2))")
-            @info ("after scaling, norm1 c: $(CUDA.norm(solver.data.d_c, 1))")
-            @info ("after scaling, normInf c: $(CUDA.norm(solver.data.d_c, Inf))")
-            @info ("after scaling, norm1 G: $(CUDA.norm(solver.data.coeff.d_G, 1))")
-            @info ("after scaling, normInf G: $(CUDA.norm(solver.data.coeff.d_G, Inf))")
+            @info ("norm Dl_product:$(norm(solver.data.diagonal_scale.Dl_product.y, 2))")
+            @info ("after scaling, norm1 c: $(norm(solver.data.d_c, 1))")
+            @info ("after scaling, normInf c: $(norm(solver.data.d_c, Inf))")
+            @info ("after scaling, norm1 G: $(norm(solver.data.coeff.d_G, 1))")
+            @info ("after scaling, normInf G: $(norm(solver.data.coeff.d_G, Inf))")
         end
     end # end if use_preconditioner
 
@@ -1863,10 +1863,10 @@ function rpdhg_gpu_solve(;
                                             slack = sol.y.slack,
                                             dual_sol_temp = sol.y,
                                             converge_info = sol.info.convergeInfo[1])
-        # println("norm(sol.x.recovered_primal.primal_sol.x, Inf): $(CUDA.norm(sol.x.recovered_primal.primal_sol.x, Inf))")
-        # println("norm(sol.y.recovered_dual.dual_sol.y, Inf): $(CUDA.norm(sol.y.recovered_dual.dual_sol.y, Inf))")
-        # println("norm(sol.x.primal_sol.x, Inf): $(CUDA.norm(sol.x.primal_sol.x, Inf))")
-        # println("norm(sol.y.dual_sol.y, Inf): $(CUDA.norm(sol.y.dual_sol.y, Inf))")
+        # println("norm(sol.x.recovered_primal.primal_sol.x, Inf): $(norm(sol.x.recovered_primal.primal_sol.x, Inf))")
+        # println("norm(sol.y.recovered_dual.dual_sol.y, Inf): $(norm(sol.y.recovered_dual.dual_sol.y, Inf))")
+        # println("norm(sol.x.primal_sol.x, Inf): $(norm(sol.x.primal_sol.x, Inf))")
+        # println("norm(sol.y.dual_sol.y, Inf): $(norm(sol.y.dual_sol.y, Inf))")
         printInfo(infoAll = sol.info);
     else
         converge_info_calculation(solver = solver,
@@ -1940,11 +1940,11 @@ function rpdhg_gpu_solve(;
         @info ("===============================================")
         infoSummary(info = sol.info)
         if use_preconditioner
-            @info (" norm(sol.x.recovered_primal.primal_sol.x, Inf): $(CUDA.norm(sol.x.recovered_primal.primal_sol.x, Inf))")
-            @info (" norm(sol.y.recovered_dual.dual_sol.y, Inf): $(CUDA.norm(sol.y.recovered_dual.dual_sol.y, Inf))")
+            @info (" norm(sol.x.recovered_primal.primal_sol.x, Inf): $(norm(sol.x.recovered_primal.primal_sol.x, Inf))")
+            @info (" norm(sol.y.recovered_dual.dual_sol.y, Inf): $(norm(sol.y.recovered_dual.dual_sol.y, Inf))")
         else
-            @info (" norm(sol.x.primal_sol.x, Inf): $(CUDA.norm(sol.x.primal_sol.x, Inf))")
-            @info (" norm(sol.y.dual_sol.y, Inf): $(CUDA.norm(sol.y.dual_sol.y, Inf))")
+            @info (" norm(sol.x.primal_sol.x, Inf): $(norm(sol.x.primal_sol.x, Inf))")
+            @info (" norm(sol.y.dual_sol.y, Inf): $(norm(sol.y.dual_sol.y, Inf))")
         end
         @info ("time for projection: $(time_proj)")
         @info ("time for iterative: $(time_iterative)")

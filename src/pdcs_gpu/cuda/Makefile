@@ -1,6 +1,9 @@
-# Variables
-NVCC = nvcc
-ARCH = sm_90
+# Build configuration. Override these on the make command line to select a
+# toolkit independently of the system-wide /usr/local/cuda symlink, e.g.
+#   make rebuild-few CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
+CUDA_HOME ?= /usr/local/cuda
+NVCC ?= $(CUDA_HOME)/bin/nvcc
+ARCH ?= sm_90
 CFLAGS = -Xcompiler -fPIC
 PTXFLAGS = -ptx
 SHAREDFLAGS = -shared
@@ -44,7 +47,19 @@ $(PTX_TARGET4): $(SRC5) | $(OUTPUT_DIR)
 
 # Rule for libfew_block_proj.so
 $(SO_TARGET): $(SRC3) | $(OUTPUT_DIR)
-	$(NVCC) $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+
+# Always rebuild only the shared library. This is the preferred target when
+# switching CUDA toolkits because timestamps alone cannot encode CUDA_HOME.
+.PHONY: rebuild-few print-config
+rebuild-few: | $(OUTPUT_DIR)
+	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+
+print-config:
+	@echo "CUDA_HOME=$(CUDA_HOME)"
+	@echo "NVCC=$(NVCC)"
+	@echo "ARCH=$(ARCH)"
+	@$(NVCC) --version | tail -n 1
 
 # Clean up generated files
 clean:

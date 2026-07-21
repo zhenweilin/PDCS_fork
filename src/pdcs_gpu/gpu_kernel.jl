@@ -306,13 +306,11 @@ function create_cublas_handle()
     # Allocate storage for the handle pointer
     h = Ref{cublasHandle_t}(C_NULL)
 
-    # Call cuBLAS create function via ccall
-    # Signature: cublasStatus_t cublasCreate_v2(cublasHandle_t* handle)
-    status = ccall((:cublasCreate_v2, libcublas_path),
-                   cublasStatus_t, (Ref{cublasHandle_t},), h)
-
-    # Check for errors
-    status == CUBLAS_STATUS_SUCCESS || error("cublasCreate_v2 failed: status=$status")
+    # Create the handle through the same shared object that executes
+    # `few_block_proj`. CUDA.jl may use a different major cuBLAS version, and
+    # handles must not be passed between cuBLAS ABIs.
+    create_ptr = Libdl.dlsym(_kernlib_ref[], :create_cublas_handle_inner)
+    ccall(create_ptr, Cvoid, (Ref{cublasHandle_t},), h)
     h[] != C_NULL || error("cublasCreate_v2 returned NULL handle")
 
     return CUBLASHandle(h[])
@@ -330,13 +328,9 @@ function destroy_cublas_handle(ch::CUBLASHandle)
     # Early return if handle is already null
     ch.handle == C_NULL && return nothing
 
-    # Call cuBLAS destroy function
-    # Signature: cublasStatus_t cublasDestroy_v2(cublasHandle_t handle)
-    status = ccall((:cublasDestroy_v2, libcublas_path),
-                   cublasStatus_t, (cublasHandle_t,), ch.handle)
-
-    # Check for errors
-    status == CUBLAS_STATUS_SUCCESS || error("cublasDestroy_v2 failed: status=$status")
+    # Destroy it through the library that created it (see above).
+    destroy_ptr = Libdl.dlsym(_kernlib_ref[], :destroy_cublas_handle_inner)
+    ccall(destroy_ptr, Cvoid, (cublasHandle_t,), ch.handle)
     # Mark handle as destroyed
     ch.handle = C_NULL
     return nothing

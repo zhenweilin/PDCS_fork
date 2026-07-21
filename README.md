@@ -70,6 +70,7 @@ julia ./test/test_soc.jl         # Test second-order cone solver (CPU)
 ```julia
 julia ./test/test_exp_gpu.jl     # Test exponential cone solver (GPU)
 julia ./test/test_soc_gpu.jl     # Test second-order cone solver (GPU)
+julia --project=. ./benchmark/random_soc_projection.jl  # Benchmark random SOC projections by size/count
 ```
 
 ### Convergence Criteria

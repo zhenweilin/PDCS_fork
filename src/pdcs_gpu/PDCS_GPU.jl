@@ -95,6 +95,7 @@ include("./gpu_kernel.jl")
 include("./def_struct.jl")
 include("./exp_proj.jl")
 include("./soc_rsoc_proj.jl")
+include("./projection_strategy.jl")
 include("./def_rpdhg_gen.jl")
 include("./preprocess.jl")
 include("./postprocess.jl")
@@ -115,7 +116,7 @@ include("./cvxpy_wrapper/data_updating.jl")
 include("./precompile.jl")
 redirect_stdout(devnull) do; 
     SnoopPrecompile.@precompile_all_calls begin
-        if CUDA.has_cuda()
+        if CUDA.has_cuda() && get(ENV, "PDCS_SKIP_GPU_PRECOMPILE", "0") != "1"
             __init__()
             @info "============precompile PDCS_GPU============"
             __precompile_gpu()

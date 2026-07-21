@@ -338,17 +338,21 @@ function setFunctionPointerPrimal!(sol::solVecPrimal, primalConstScale::Vector{B
     sol.primal_sol.x_slice_proj_kernel_diagonal_device = CuArray{Int64}(sol.primal_sol.x_slice_proj_kernel_diagonal)
     sol.primal_sol.x_slice_proj_kernel_slack_device = CuArray{Int64}(sol.primal_sol.x_slice_proj_kernel_slack)
 
-    if sol.primal_sol.blkLen <= 3 && !any(k -> k in (8, 9, 10, 23, 24, 25), sol.primal_sol.x_slice_proj_kernel)
+    projection_strategy = select_projection_strategy(
+        sol.primal_sol.x_slice_length_cpu,
+        sol.primal_sol.x_slice_proj_kernel,
+    )
+    if projection_strategy === :few
         # @info("few primal proj");
         sol.proj! = few_primal_proj!
         sol.slack_proj! = few_slack_proj!
         sol.proj_diagonal! = few_primal_proj_diagonal!
-    elseif sol.primal_sol.blkLen <= 1000 || maximum(sol.primal_sol.x_slice_length_cpu[3:end]) >= 2000
+    elseif projection_strategy === :moderate
         # @info("moderate primal proj");
         sol.proj! = moderate_primal_proj!
         sol.slack_proj! = moderate_slack_proj!
         sol.proj_diagonal! = moderate_primal_proj_diagonal!
-    elseif sol.primal_sol.blkLen <= 60000 || maximum(sol.primal_sol.x_slice_length_cpu[3:end]) >= 150
+    elseif projection_strategy === :sufficient
         # @info("sufficient primal proj");
         sol.proj! = sufficient_primal_proj!
         sol.slack_proj! = sufficient_slack_proj!
@@ -803,17 +807,21 @@ function setFunctionPointerDual!(dualSol::solVecDual, primalConstScale::Vector{B
     dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal_device = dualSol.dual_sol.y_slice_proj_kernel_diagonal_device
     dualSol.dual_sol_temp.y_slice_con_proj_kernel_device = dualSol.dual_sol.y_slice_con_proj_kernel_device
 
-    if dualSol.dual_sol.blkLen <= 3 && !any(k -> k in (8, 9, 10, 23, 24, 25), dualSol.dual_sol.y_slice_proj_kernel)
+    projection_strategy = select_projection_strategy(
+        dualSol.dual_sol.y_slice_length_cpu,
+        dualSol.dual_sol.y_slice_proj_kernel,
+    )
+    if projection_strategy === :few
         # @info("few dual proj");
         dualSol.proj! = few_dual_proj!
         dualSol.proj_diagonal! = few_dual_proj_diagonal!
         dualSol.con_proj! = few_con_proj!
-    elseif dualSol.dual_sol.blkLen <= 1000 || maximum(dualSol.dual_sol.y_slice_length_cpu[3:end]) >= 2000
+    elseif projection_strategy === :moderate
         # @info("moderate dual proj");
         dualSol.proj! = moderate_dual_proj!
         dualSol.proj_diagonal! = moderate_dual_proj_diagonal!
         dualSol.con_proj! = moderate_con_proj!
-    elseif dualSol.dual_sol.blkLen <= 60000 || maximum(dualSol.dual_sol.y_slice_length_cpu[3:end]) >= 150
+    elseif projection_strategy === :sufficient
         # @info("sufficient dual proj");
         dualSol.proj! = sufficient_dual_proj!
         dualSol.proj_diagonal! = sufficient_dual_proj_diagonal!
@@ -883,7 +891,7 @@ end
 
 function dotCoeffdUnion(coeff::coeffUnion, y::dualVector)
     # val = dot(coeff.d_h, y.y)
-    val = CUDA.dot(coeff.d_h, y.y)
+    val = dot(coeff.d_h, y.y)
     return val
 end
 
@@ -907,7 +915,7 @@ function power_method!(coeffTrans::coeffTransType, coeff::coeffType, AtAMV!::Fun
         # AtAMV!(coeffTrans, coeff, b, Ab, AtAb);
         CUDA.CUSPARSE.mv!('N', 1, coeff.d_G, b, 0, Ab.y, 'O', CUDA.CUSPARSE.CUSPARSE_SPMV_CSR_ALG2)
         CUDA.CUSPARSE.mv!('T', 1, coeff.d_G, Ab.y, 0, AtAb, 'O', CUDA.CUSPARSE.CUSPARSE_SPMV_CSR_ALG2)
-        lambda = CUDA.dot(b, AtAb);
+        lambda = dot(b, AtAb);
         if abs(lambda - lambda_old) < tol
             return sqrt(lambda), 0;
         end

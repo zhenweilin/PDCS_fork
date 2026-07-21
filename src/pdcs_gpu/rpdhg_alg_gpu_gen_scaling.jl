@@ -110,8 +110,8 @@ function binary_search_duality_gap_diagonal!(; solver::rpdhgSolver,
     # slack.primal_sol_lag.x .= slack.primal_sol.x .- primal.x
     # dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol.y .- dual.y
     calculate_diff(dual_sol_temp.dual_sol.y, dual.y, dual_sol_temp.dual_sol_temp.y, solver.data.m, slack.primal_sol.x, primal.x, slack.primal_sol_lag.x, solver.data.n)
-    val1 = CUDA.dot(h1.x, slack.primal_sol_lag.x)
-    val2 = CUDA.dot(h2.y, dual_sol_temp.dual_sol_temp.y)
+    val1 = dot(h1.x, slack.primal_sol_lag.x)
+    val2 = dot(h2.y, dual_sol_temp.dual_sol_temp.y)
     val = (val1 + val2) / r
     return val
 end
@@ -124,10 +124,10 @@ end
 
 
 function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::primalVector, dual_sol::dualVector, slack::solVecPrimal, dual_sol_temp::solVecDual, converge_info::PDHGCLPConvergeInfo)
-    pObj = CUDA.dot(primal_sol.x, solver.data.raw_data.c)
+    pObj = dot(primal_sol.x, solver.data.raw_data.c)
     solver.adjointMV!(solver.data.raw_data.coeff, dual_sol, slack.primal_sol.x)
-    AtyInf = CUDA.norm(slack.primal_sol.x, Inf)
-    AtyNrm1 = CUDA.norm(slack.primal_sol.x, 1)
+    AtyInf = norm(slack.primal_sol.x, Inf)
+    AtyNrm1 = norm(slack.primal_sol.x, 1)
     # slack.primal_sol.x .= solver.data.raw_data.c .- slack.primal_sol.x;
     slack.primal_sol.x .*= -1.0
     slack.primal_sol.x .+= solver.data.raw_data.c
@@ -141,8 +141,8 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
 
     # dual_sol_temp.dual_sol_mean = Gx
     solver.primalMV!(solver.data.raw_data.coeff, primal_sol.x, dual_sol_temp.dual_sol_mean);
-    AxInf = CUDA.norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    AxNrm1 = CUDA.norm(dual_sol_temp.dual_sol_mean.y, 1)
+    AxInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.addCoeffd!(solver.data.raw_data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
@@ -152,17 +152,17 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     
     slack.primal_sol_lag.x .= slack.primal_sol.x
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
-    sInf = CUDA.norm(slack.primal_sol.x, Inf)
-    sNrm1 = CUDA.norm(slack.primal_sol.x, 1)
+    sInf = norm(slack.primal_sol.x, Inf)
+    sNrm1 = norm(slack.primal_sol.x, 1)
 
-    l_2_abs_primal_res = CUDA.norm(solver.data.diagonal_scale.Dl_temp.y);
+    l_2_abs_primal_res = norm(solver.data.diagonal_scale.Dl_temp.y);
     l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(sNrm1, max(solver.data.raw_data.hNrm1, AxNrm1)));
 
     l_inf_abs_primal_res = CUDA.maximum(CUDA.abs.(solver.data.diagonal_scale.Dl_temp.y));
     l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(sInf, max(solver.data.raw_data.hNrmInf, AxInf)));
 
     solver.data.diagonal_scale.Dr_temp.x .= slack.primal_sol.x .- slack.primal_sol_lag.x
-    l_2_abs_dual_res = CUDA.norm(solver.data.diagonal_scale.Dr_temp.x);
+    l_2_abs_dual_res = norm(solver.data.diagonal_scale.Dr_temp.x);
     l_2_rel_dual_res = l_2_abs_dual_res / (1 + max(solver.data.raw_data.cNrm1, AtyNrm1));
     l_inf_abs_dual_res = CUDA.maximum(CUDA.abs.(solver.data.diagonal_scale.Dr_temp.x));
     l_inf_rel_dual_res = l_inf_abs_dual_res / (1 + max(solver.data.raw_data.cNrmInf, AtyInf));
@@ -196,7 +196,7 @@ function infeasibility_info_calculation_diagonal!(; solver::rpdhgSolver,
     # dual_ray ./= norm(dual_ray, 2)
     if pObj === nothing
         # pObj = dot(primal_ray.x, solver.data.raw_data.c)
-        pObj = CUDA.dot(primal_ray.x, solver.data.raw_data.c)
+        pObj = dot(primal_ray.x, solver.data.raw_data.c)
     end
     if l_inf_primal_ray_infeasibility === nothing && pObj < 0.0
         # dual_sol_temp.dual_sol_mean = Gx
@@ -236,8 +236,8 @@ function infeasibility_info_calculation_diagonal!(; solver::rpdhgSolver,
     else
         infeasibility_info.max_dual_ray_infeasibility = l_inf_dual_ray_infeasibility
     end
-    infeasibility_info.primal_ray_norm = CUDA.norm(primal_ray.x, Inf)
-    infeasibility_info.dual_ray_norm = CUDA.norm(dual_ray.y, Inf)
+    infeasibility_info.primal_ray_norm = norm(primal_ray.x, Inf)
+    infeasibility_info.dual_ray_norm = norm(dual_ray.y, Inf)
     if rand() < 0.25
         push!(infeasibility_info.primalObj_trend, pObj_seq)
         push!(infeasibility_info.dualObj_trend, dObj_seq)
@@ -263,14 +263,14 @@ end
 
 
 function omega_norm_square(; x::CuArray, y::CuArray, omega::rpdhg_float)
-    temp1 = omega * CUDA.norm(x, 2)^2
-    temp2 = CUDA.norm(y, 2)^2 / omega
+    temp1 = omega * norm(x, 2)^2
+    temp2 = norm(y, 2)^2 / omega
     return temp1 + temp2
 end
 
 function initialize_primal_weight(; solver::rpdhgSolver)
-    hNrm2 = CUDA.norm(solver.data.coeff.d_h, 2)
-    cNrm2 = CUDA.norm(solver.data.d_c, 2)
+    hNrm2 = norm(solver.data.coeff.d_h, 2)
+    cNrm2 = norm(solver.data.d_c, 2)
     # @info ("hNrm2: $(hNrm2), cNrm2: $(cNrm2)")
     if hNrm2 > 1e-10 && cNrm2 > 1e-10
         omega = cNrm2 / hNrm2
@@ -282,8 +282,8 @@ end
 
 
 function dynamic_primal_weight_update(; x_diff::CuArray, y_diff::CuArray, omega::rpdhg_float, theta::rpdhg_float, restart_times::Integer, solver::rpdhgSolver)
-    x_diff_norm = CUDA.norm(x_diff, 2)
-    y_diff_norm = CUDA.norm(y_diff, 2)
+    x_diff_norm = norm(x_diff, 2)
+    y_diff_norm = norm(y_diff, 2)
     @info ("omega:$(omega), x_diff_norm:$(x_diff_norm), y_diff_norm:$(y_diff_norm)")
     # if restart_times % 40 == 0 && restart_times != 0 && (omega > 10000 || omega < 1/10000)
     #     return initialize_primal_weight(solver=solver)
@@ -609,12 +609,12 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
                         if sol.params.verbose == 2
                             primal_sol_change.x .-= sol.x.recovered_primal.primal_sol.x
                             dual_sol_change.y .-= sol.y.recovered_dual.dual_sol.y
-                            nrm2_x_recovered = CUDA.norm(sol.x.recovered_primal.primal_sol.x, 2)
-                            nrm2_y_recovered = CUDA.norm(sol.y.recovered_dual.dual_sol.y, 2)
-                            nrmInf_x_recovered = CUDA.norm(sol.x.recovered_primal.primal_sol.x, Inf)
-                            nrmInf_y_recovered = CUDA.norm(sol.y.recovered_dual.dual_sol.y, Inf)
-                            diff_nrm_x_recovered = CUDA.norm(primal_sol_change.x, 2)
-                            diff_nrm_y_recovered = CUDA.norm(dual_sol_change.y, 2)
+                            nrm2_x_recovered = norm(sol.x.recovered_primal.primal_sol.x, 2)
+                            nrm2_y_recovered = norm(sol.y.recovered_dual.dual_sol.y, 2)
+                            nrmInf_x_recovered = norm(sol.x.recovered_primal.primal_sol.x, Inf)
+                            nrmInf_y_recovered = norm(sol.y.recovered_dual.dual_sol.y, Inf)
+                            diff_nrm_x_recovered = norm(primal_sol_change.x, 2)
+                            diff_nrm_y_recovered = norm(dual_sol_change.y, 2)
                             printInfolevel2(infoAll = sol.info, diff_nrm_x_recovered = diff_nrm_x_recovered, diff_nrm_y_recovered = diff_nrm_y_recovered, nrm2_x_recovered = nrm2_x_recovered, nrm2_y_recovered = nrm2_y_recovered, nrmInf_x_recovered = nrmInf_x_recovered, nrmInf_y_recovered = nrmInf_y_recovered, params = sol.params)
                             primal_sol_change.x .= sol.x.recovered_primal.primal_sol.x
                             dual_sol_change.y .= sol.y.recovered_dual.dual_sol.y
@@ -732,12 +732,12 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
                     if sol.params.verbose == 2
                         primal_sol_change.x .-= sol.x.recovered_primal.primal_sol.x
                         dual_sol_change.y .-= sol.y.recovered_dual.dual_sol.y
-                        nrm2_x_recovered = CUDA.norm(sol.x.recovered_primal.primal_sol.x, 2)
-                        nrm2_y_recovered = CUDA.norm(sol.y.recovered_dual.dual_sol.y, 2)
-                        nrmInf_x_recovered = CUDA.norm(sol.x.recovered_primal.primal_sol.x, Inf)
-                        nrmInf_y_recovered = CUDA.norm(sol.y.recovered_dual.dual_sol.y, Inf)
-                        diff_nrm_x_recovered = CUDA.norm(primal_sol_change.x, 2)
-                        diff_nrm_y_recovered = CUDA.norm(dual_sol_change.y, 2)
+                        nrm2_x_recovered = norm(sol.x.recovered_primal.primal_sol.x, 2)
+                        nrm2_y_recovered = norm(sol.y.recovered_dual.dual_sol.y, 2)
+                        nrmInf_x_recovered = norm(sol.x.recovered_primal.primal_sol.x, Inf)
+                        nrmInf_y_recovered = norm(sol.y.recovered_dual.dual_sol.y, Inf)
+                        diff_nrm_x_recovered = norm(primal_sol_change.x, 2)
+                        diff_nrm_y_recovered = norm(dual_sol_change.y, 2)
                         printInfolevel2(infoAll = sol.info, diff_nrm_x_recovered = diff_nrm_x_recovered, diff_nrm_y_recovered = diff_nrm_y_recovered, nrm2_x_recovered = nrm2_x_recovered, nrm2_y_recovered = nrm2_y_recovered, nrmInf_x_recovered = nrmInf_x_recovered, nrmInf_y_recovered = nrmInf_y_recovered, params = sol.params)
                         primal_sol_change.x .= sol.x.recovered_primal.primal_sol.x
                         dual_sol_change.y .= sol.y.recovered_dual.dual_sol.y
@@ -779,7 +779,7 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
     sol.info.omega = initialize_primal_weight(solver = solver)
     primal_sol_diff = deepCopyPrimalVector(sol.x.primal_sol)
     dual_sol_diff = deepCopyDualVector(sol.y.dual_sol)
-    GInf = CUDA.norm(solver.data.coeff.d_G, Inf)
+    GInf = norm(solver.data.coeff.d_G, Inf)
     eta_prime = 1 / GInf
     random_check = false
     for outer_iter = 1 : sol.params.max_outer_iter

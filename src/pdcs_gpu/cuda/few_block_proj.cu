@@ -459,11 +459,11 @@ extern "C" void few_block_proj(cublasHandle_t handle,
     }
     else if (cpu_proj_type[i] == 5 || cpu_proj_type[i] == 7 || cpu_proj_type[i] == 20 || cpu_proj_type[i] == 21){
       long len_cpu = n_cpu - 1;
-      double *d_temp;
-      cudaMalloc(&d_temp, sizeof(double));
-      cudaMemcpy(d_temp, sub_temp, sizeof(double), cudaMemcpyHostToDevice);
-      soc_proj(handle, sol, &n_cpu, n_gpu, &len_cpu, d_temp, ThreadPerBlock, nBlock);
-      cudaFree(d_temp);
+      // sub_temp is already device memory supplied by the caller.  The old
+      // code passed it as a host source to cudaMemcpy, which is invalid, and
+      // allocated/freed a scalar on every projection. cublasDnrm2 overwrites
+      // the workspace before it is read, so use the existing device scalar.
+      soc_proj(handle, sol, &n_cpu, n_gpu, &len_cpu, sub_temp, ThreadPerBlock, nBlock);
     }
     else if (cpu_proj_type[i] == 6 || cpu_proj_type[i] == 22){
       bool* d_auxiliary_flag;

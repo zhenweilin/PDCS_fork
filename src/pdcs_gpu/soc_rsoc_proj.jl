@@ -5,7 +5,7 @@ soc_proj! is a function that projects the vector onto the second order cone.
 function soc_proj!(sol::CuArray)
     t = sol[1]
     x = @view sol[2:end]
-    nrm_x = CUDA.norm(x)
+    nrm_x = norm(x)
     if nrm_x <= -t
         CUDA.fill!(sol, 0.0)
     elseif nrm_x <= t
@@ -88,7 +88,7 @@ function rsoc_proj!(x::CuArray)
     x0y0 = x0 * y0
     x0Squr = x0^2
     y0Squr = y0^2
-    z0Nrm = CUDA.norm(z0)
+    z0Nrm = norm(z0)
     z0NrmSqur = z0Nrm^2
 
     if (2 * x0y0 > z0NrmSqur && x0 >= 0 && y0 >= 0)
@@ -139,7 +139,7 @@ function rsoc_proj!(x::CuArray)
                 # two point are feasible
                 v1 = [xNew1; yNew1; z0New1...]
                 v2 = [xNew2; yNew2; z0New2...]
-                if CUDA.norm(v1 - x) < CUDA.norm(v2 - x)
+                if norm(v1 - x) < norm(v2 - x)
                     x[1] = xNew1
                     x[2] = yNew1
                     z0 .= z0New1
@@ -188,7 +188,7 @@ function oracle_soc_f_sqrt(xi, x, D_scaled_part_mul_x_part, D_scaled_squared_par
     CUDA.@sync begin
         @cuda threads = ThreadPerBlock blocks = NumBlock oracle_soc_f_kernel!(temp_part, D_scaled_part_mul_x_part, D_scaled_squared_part, xi, num_variables)
     end
-    left = CUDA.norm(temp_part)
+    left = norm(temp_part)
     right = (x[1] / (1 - 2 * xi))
     return left - right
 end
@@ -200,7 +200,7 @@ function oracle_soc_h(xi, x, D_scaled_part_mul_x_part, D_scaled_squared_part, te
     CUDA.@sync begin
         @cuda threads = ThreadPerBlock blocks = NumBlock oracle_soc_f_kernel!(temp_part, D_scaled_part_mul_x_part, D_scaled_squared_part, xi, num_variables)
     end
-    # left = CUDA.norm(temp_part)^2
+    # left = norm(temp_part)^2
     left = CUDA.sum(temp_part .^ 2)
     right = (x[1] / (1 - 2 * xi))^2
     f = left - right
@@ -272,14 +272,14 @@ function soc_proj_diagonal!(sol::CuArray,
     sol ./= minVal
     t = sol[1]
     temp_part .= x2end./D_scaled_part 
-    if CUDA.norm(temp_part) <= -sol[1] && sol[1] <= 0
+    if norm(temp_part) <= -sol[1] && sol[1] <= 0
         CUDA.fill!(sol, 0.0)
         projInfo.zero += 1
         projInfo.status = :zero
         return
     end
     D_scaled_part_mul_x_part .= D_scaled_part .* x2end
-    if CUDA.norm(D_scaled_part_mul_x_part) <= sol[1]
+    if norm(D_scaled_part_mul_x_part) <= sol[1]
         sol[1] = max(sol[1], 0)
         sol .*= minVal
         projInfo.interior += 1
@@ -373,7 +373,7 @@ function soc_proj_diagonal!(sol::CuArray,
         # t == 0
         x2end ./= (1 .+ D_scaled_squared_part)
         temp_part .= D_scaled_part .* x2end
-        sol[1] = CUDA.norm(temp_part)
+        sol[1] = norm(temp_part)
         sol .*= minVal
         projInfo.boundary += 1
         projInfo.status = :boundary
@@ -389,7 +389,7 @@ function soc_proj_const_scale!(sol::CuArray,
     t_warm_start::Vector{rpdhg_float}, i::Integer,
     projInfo::timesInfo)
     t = sol[1]
-    nrm_x = CUDA.norm(x2end)
+    nrm_x = norm(x2end)
     if nrm_x <= -t
         CUDA.fill!(sol, 0.0)
         projInfo.status = :zero
@@ -409,7 +409,7 @@ end
 
 function oracle_rsoc_f_sqrt(xi, x0_sqr, y0_sqr, x0y0, x_mul_d_part, D_scaled_squared_part, temp_part)
     temp_part .= x_mul_d_part ./ (1 .+ xi .* D_scaled_squared_part)
-    left = CUDA.norm(temp_part)
+    left = norm(temp_part)
     xi_sqr = xi^2
     xi_sqr_one = xi_sqr - 1
     xi_sqr_one_sqr = xi_sqr_one^2
@@ -793,7 +793,7 @@ function rsoc_proj_const_scale!(x::CuArray,
     x0y0 = x0 * y0
     x0Squr = x0^2
     y0Squr = y0^2
-    z0Nrm = CUDA.norm(z0)
+    z0Nrm = norm(z0)
     z0NrmSqur = z0Nrm^2
 
     z0New1 = x_mul_d_part
