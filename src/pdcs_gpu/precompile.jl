@@ -280,7 +280,6 @@ function __precompile_gpu()
         use_adaptive_restart = true,
         use_adaptive_step_size_weight = true,
         use_resolving = true,
-        use_accelerated = false,
         use_aggressive = true,
         verbose = 2,
         rel_tol = 1e-6,

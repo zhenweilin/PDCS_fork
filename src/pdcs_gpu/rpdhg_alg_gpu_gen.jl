@@ -410,7 +410,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
     use_aggressive::Bool = true,
-    use_accelerated::Bool = false,
+    use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
     primal_sol::CuArray{rpdhg_float} = CuArray(zeros(n)),
     dual_sol::CuArray{rpdhg_float} = CuArray(zeros(m)),
@@ -1075,19 +1075,14 @@ dGType<:Union{
                 @info ("Start average method with preconditioner, adaptive restart and adaptive step size weight")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_accelerated && !use_aggressive
+        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_aggressive
             if verbose > 0
                 @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight and resolving")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && use_accelerated && !use_aggressive
+        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && use_aggressive
             if verbose > 0
-                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight and accelerated")
-            end
-            main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_accelerated!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_accelerated && use_aggressive
-            if verbose > 0
-                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight, resolving and accelerated")
+                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight, resolving and aggressive updates")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_aggressive!
         else
@@ -1242,7 +1237,7 @@ function rpdhg_gpu_solve(;
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
     use_aggressive::Bool = true,
-    use_accelerated::Bool = false,
+    use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
@@ -1906,19 +1901,14 @@ function rpdhg_gpu_solve(;
                 @info ("Start average method with preconditioner, adaptive restart and adaptive step size weight")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_accelerated && !use_aggressive
+        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_aggressive
             if verbose > 0
                 @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight and resolving")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && use_accelerated && !use_aggressive
+        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && use_aggressive
             if verbose > 0
-                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight and accelerated")
-            end
-            main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_accelerated!
-        elseif use_preconditioner && use_adaptive_restart && use_adaptive_step_size_weight && use_resolving && !use_accelerated && use_aggressive
-            if verbose > 0
-                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight, resolving and accelerated")
+                @info ("Start average method with preconditioner, adaptive restart, adaptive step size weight, resolving and aggressive updates")
             end
             main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_aggressive!
         else
@@ -1987,7 +1977,6 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
             use_aggressive = solver.use_aggressive,
-            use_accelerated = solver.use_accelerated,
             use_resolving = solver.use_resolving,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
@@ -2029,7 +2018,6 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
             use_aggressive = solver.use_aggressive,
-            use_accelerated = solver.use_accelerated,
             use_resolving = solver.use_resolving,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,

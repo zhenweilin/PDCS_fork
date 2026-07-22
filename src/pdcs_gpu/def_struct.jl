@@ -1076,7 +1076,6 @@ mutable struct PDCS_GPU_Solver
     use_adaptive_restart::Bool
     use_adaptive_step_size_weight::Bool
     use_aggressive::Bool
-    use_accelerated::Bool
     use_resolving::Bool
     primal_sol::Union{Vector{rpdhg_float}, CuArray}
     dual_sol::Union{Vector{rpdhg_float}, CuArray}
@@ -1125,7 +1124,7 @@ mutable struct PDCS_GPU_Solver
         use_adaptive_restart::Bool = true,
         use_adaptive_step_size_weight::Bool = true,
         use_aggressive::Bool = true,
-        use_accelerated::Bool = false,
+        use_accelerated::Bool = false, # Retained for API compatibility; ignored.
         use_resolving::Bool = true,
         primal_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(n),
         dual_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(m),
@@ -1189,7 +1188,6 @@ mutable struct PDCS_GPU_Solver
             use_adaptive_restart,
             use_adaptive_step_size_weight,
             use_aggressive,
-            use_accelerated,
             use_resolving,
             primal_sol,
             dual_sol,

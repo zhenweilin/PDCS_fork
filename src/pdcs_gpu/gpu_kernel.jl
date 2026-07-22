@@ -417,8 +417,8 @@ utils_path = joinpath(MODULE_DIR, "cuda/utils.ptx")
 # ----------------------------------------------------------------------------
 # Reflection Update Kernel
 # ----------------------------------------------------------------------------
-# Updates primal and dual solutions using reflection/extrapolation techniques.
-# This is used in accelerated variants of the RPDHG algorithm.
+# Updates primal and dual solutions using reflection/extrapolation techniques
+# in the aggressive-update path.
 
 const _reflection_update_mod    = Ref{Union{Nothing,CuModule}}(nothing)
 const _reflection_update_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
@@ -462,8 +462,8 @@ end
 
 Updates primal and dual solutions using reflection/extrapolation techniques.
 
-This kernel implements the reflection step in accelerated RPDHG algorithms,
-which helps improve convergence rates. The reflection uses extrapolation
+This kernel implements the reflection step in the aggressive-update path.
+The reflection uses extrapolation
 coefficients (eta, eta_cum) to combine current and lagged solutions.
 
 Arguments:
@@ -633,7 +633,7 @@ end
 # Extrapolation Update Kernel
 # ----------------------------------------------------------------------------
 # Computes the extrapolation/difference between current and lagged primal solutions.
-# Used for accelerated methods: x_diff = x - x_lag
+# Used by aggressive updates: x_diff = x - x_lag
 
 const _extrapolation_update_mod    = Ref{Union{Nothing,CuModule}}(nothing)
 const _extrapolation_update_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
@@ -677,7 +677,7 @@ end
 Computes the difference between current and lagged primal solutions.
 
 Calculates: primal_sol_diff = primal_sol - primal_sol_lag
-This difference is used in accelerated variants of the algorithm.
+This difference is used by the aggressive-update path.
 
 Arguments:
 - primal_sol_diff: Output difference vector (GPU array, modified in-place)

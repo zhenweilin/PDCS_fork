@@ -558,12 +558,6 @@ function MOI.optimize!(
             println("print_freq is not set, using default value: 5000.")
         end
     end
-    if !haskey(options, :use_accelerated)
-        options[:use_accelerated] = false
-        if options[:verbose] > 0
-            println("use_accelerated is not set, using default value: true.")
-        end
-    end
     if !haskey(options, :use_aggressive)
         options[:use_aggressive] = true
         if options[:verbose] > 0
@@ -634,7 +628,6 @@ function MOI.optimize!(
             use_adaptive_restart = options[:use_adaptive_restart],
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
-            use_accelerated = options[:use_accelerated],
             use_aggressive = options[:use_aggressive],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
@@ -684,7 +677,6 @@ function MOI.optimize!(
             use_adaptive_restart = options[:use_adaptive_restart],
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
-            use_accelerated = options[:use_accelerated],
             use_aggressive = options[:use_aggressive],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
