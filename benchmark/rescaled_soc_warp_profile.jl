@@ -31,6 +31,7 @@ const OUTPUT = option("output", "")
 const WARM_START = flag("warm-start")
 const PROFILE_ONE = flag("profile-one")
 const CHECK = flag("check")
+const HETERO_SIGMA = parse(Float64, option("hetero-sigma", "2.0"))
 const STRATEGIES = (:threadWise, :warpWise, :blockWise)
 
 all(in(("uniform", "similar", "heterogeneous", "mixed_grouped", "mixed_interleaved")), CASES) || error("unknown case in $(join(CASES, ','))")
@@ -42,11 +43,10 @@ DIMENSION >= 3 || error("SOC dimension must be at least 3")
 CUDA.functional() || error("CUDA is not functional")
 
 function make_case(case_name, count, dimension, seed)
-    rng = MersenneTwister(seed)
     total = count * dimension
     x = Vector{Float64}(undef, total)
     scale = Vector{Float64}(undef, total)
-    base_scale = exp.(range(-0.2, 0.2; length=dimension-1))
+    vlen = dimension - 1  # number of tail components per cone
 
     # The two mixed layouts contain exactly the same cone multiset. Only their
     # placement into hardware warps differs.
@@ -61,17 +61,32 @@ function make_case(case_name, count, dimension, seed)
 
     canonical_x = case_name in ("mixed_grouped", "mixed_interleaved") ? Vector{Float64}(undef, total) : x
     canonical_scale = case_name in ("mixed_grouped", "mixed_interleaved") ? Vector{Float64}(undef, total) : scale
+    sigma = case_name == "heterogeneous" ? HETERO_SIGMA : case_name == "similar" ? 0.05 : 0.0
+
+    # Use two independent RNGs: seed + dimension for scales, seed + dimension + 1 for x
+    rng_d = MersenneTwister(seed + dimension)
+    rng_x = MersenneTwister(seed + dimension + 1)
+
+    # Pre-generate all random data at once: each cone gets unique, independent values
+    n_tail = count * vlen
+    noise_d = randn(rng_d, n_tail)   # all scale noises: N(0,1)
+    noise_x = randn(rng_x, n_tail)   # all x-component noises: N(0,1)
 
     for cone in 1:count
         first = (cone-1)*dimension + 1
         canonical_scale[first] = 1.0
-        sigma = case_name == "heterogeneous" ? 2.0 : case_name == "similar" ? 0.05 : 0.0
-        for j in 2:dimension
-            canonical_scale[first+j-1] = clamp(base_scale[j-1] * exp(sigma*randn(rng)), 1e-3, 1e3)
-            canonical_x[first+j-1] = randn(rng)
-        end
-        tail = @view canonical_x[first+1:first+dimension-1]
-        d = @view canonical_scale[first+1:first+dimension-1]
+
+        # Index into pre-generated noise arrays (cone * vlen offset for each cone)
+        start_idx = (cone-1)*vlen + 1
+        idx_range = start_idx:start_idx+vlen-1
+
+        tail_d = @view canonical_scale[first+1:first+vlen]
+        tail_x = @view canonical_x[first+1:first+vlen]
+
+        tail_d .= clamp.(abs.(sigma .* @view(noise_d[idx_range])), 1e-3, 1e3)
+        tail_x .= sigma .* @view(noise_x[idx_range])
+        d = tail_d
+        tail = tail_x
         norm_scaled = sqrt(sum(abs2, d .* tail))
         norm_inverse = sqrt(sum(abs2, tail ./ d))
         cls = canonical_class(cone)
