@@ -461,7 +461,6 @@ dGType<:Union{
     global time_restart_check = 0.0
     global time_exit_check = 0.0
     global time_print_info_cal = 0.0
-    global handle = create_cublas_handle()
     if verbose > 0
         @info ("---------------------------------------------------")
         @info ("------------- Parameter Info Summary --------------")
@@ -1099,7 +1098,6 @@ dGType<:Union{
     if verbose > 0
         CUDA.memory_status()
     end
-    destroy_cublas_handle(handle)
     if verbose > 0
         @info ("===============================================")
     end
@@ -1282,7 +1280,6 @@ function rpdhg_gpu_solve(;
     global time_restart_check = 0.0
     global time_exit_check = 0.0
     global time_print_info_cal = 0.0
-    global handle = create_cublas_handle()
     if verbose > 0
         @info ("---------------------------------------------------")
         @info ("------------- Parameter Info Summary --------------")
@@ -1925,7 +1922,6 @@ function rpdhg_gpu_solve(;
     # if verbose > 0
     #     @info CUDA.memory_status()
     # end
-    destroy_cublas_handle(handle)
     if verbose > 0
         @info ("===============================================")
         infoSummary(info = sol.info)

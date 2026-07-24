@@ -117,7 +117,6 @@ include("./precompile.jl")
 redirect_stdout(devnull) do; 
     SnoopPrecompile.@precompile_all_calls begin
         if CUDA.has_cuda() && get(ENV, "PDCS_SKIP_GPU_PRECOMPILE", "0") != "1"
-            __init__()
             @info "============precompile PDCS_GPU============"
             __precompile_gpu()
             __precompile_gpu_clean_pointer()

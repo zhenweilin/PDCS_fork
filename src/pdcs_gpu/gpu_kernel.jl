@@ -273,14 +273,6 @@ warpWise_block_proj(args...) = sufficient_block_proj(args...)
 # We need to create and manage cuBLAS handles for performing linear algebra
 # operations on the GPU (e.g., matrix-vector products, norms).
 
-# Load the shared library containing cuBLAS wrapper functions
-# This library provides create_cublas_handle_inner and destroy_cublas_handle_inner
-# which are C wrappers around cuBLAS functions
-lib = Libdl.dlopen(joinpath(MODULE_DIR, "cuda/libfew_block_proj.so"))
-# Get function pointers from the shared library
-cublasCreate = Libdl.dlsym(lib, Symbol("create_cublas_handle_inner"))
-cublasDestroy = Libdl.dlsym(lib, Symbol("destroy_cublas_handle_inner"))
-
 # cuBLAS library path and type definitions
 const libcublas_path = CUDA.CUBLAS.libcublas  # Path to cuBLAS library
 const cublasStatus_t = Cint                    # cuBLAS status code type
@@ -297,6 +289,12 @@ library's internal state and resources.
 mutable struct CUBLASHandle
     handle::cublasHandle_t  # Opaque pointer to cuBLAS context
 end
+
+# The grid-wise kernel is the only projection strategy that needs a cuBLAS
+# handle. Create it lazily so importing PDCS does not create a CUDA context,
+# and keep ownership in this module rather than in individual solver calls.
+const _gridWise_cublas_handle = Ref{Union{Nothing,CUBLASHandle}}(nothing)
+const _gridWise_cublas_handle_lock = SpinLock()
 
 """
     create_cublas_handle() -> CUBLASHandle
@@ -323,6 +321,30 @@ function create_cublas_handle()
     h[] != C_NULL || error("cublasCreate_v2 returned NULL handle")
 
     return CUBLASHandle(h[])
+end
+
+"""
+    get_gridWise_cublas_handle() -> CUBLASHandle
+
+Return the process-local cuBLAS handle used by `gridWise_block_proj`, creating
+it on first use. The handle is created and consumed through the same native
+library, so it remains valid when CUDA.jl uses a different cuBLAS ABI.
+"""
+function get_gridWise_cublas_handle()
+    current = _gridWise_cublas_handle[]
+    current !== nothing && current.handle != C_NULL && return current
+
+    lock(_gridWise_cublas_handle_lock)
+    try
+        current = _gridWise_cublas_handle[]
+        if current === nothing || current.handle == C_NULL
+            current = create_cublas_handle()
+            _gridWise_cublas_handle[] = current
+        end
+        return current
+    finally
+        unlock(_gridWise_cublas_handle_lock)
+    end
 end
 
 """
@@ -374,8 +396,8 @@ Arguments:
 - cpu_proj_type: Projection type for each block (CPU array)
 - abs_tol, rel_tol: Tolerances for projection
 
-Note: This function requires a global 'handle' variable (cuBLAS handle) and
-'few_block_proj_ptr' (function pointer) to be initialized.
+The native function pointer is initialized by the module's `__init__()` method.
+The cuBLAS handle is initialized lazily on the first grid-wise projection.
 """
 function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, cpu_head_start::Vector{Int64}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, cpu_ns::Vector{Int64}, blkNum::Int64, cpu_proj_type::Vector{Int64}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
     # Calculate number of thread blocks based on maximum block size
@@ -385,10 +407,11 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
     # Get function pointer (must be initialized elsewhere, e.g., in __init__)
     fptr = few_block_proj_ptr[]
     fptr != C_NULL || error("few_block_proj not initialized. Did __init__() run?")
+    gridWise_handle = get_gridWise_cublas_handle()
     
     # Call C function from shared library using @ccall macro
     # The function signature matches the C function in libfew_block_proj.so
-    @ccall $fptr(handle.handle::Ptr{Nothing},      # cuBLAS handle
+    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # cuBLAS handle
                              vec::CuPtr{Cdouble},   # Vector to project
                              bl::CuPtr{Cdouble},    # Lower bounds
                              bu::CuPtr{Cdouble},    # Upper bounds
