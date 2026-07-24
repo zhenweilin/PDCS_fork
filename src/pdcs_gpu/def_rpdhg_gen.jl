@@ -261,6 +261,25 @@ function few_slack_proj!(x::primalVector, sol::solVecPrimal; abs_tol::Float64 = 
     global time_proj += time_end - time_start
 end
 
+# Hierarchy-based public names. The legacy names above remain callable for
+# compatibility with previously published solver versions.
+const threadWise_primal_proj_diagonal! = massive_primal_proj_diagonal!
+const blockWise_primal_proj_diagonal! = moderate_primal_proj_diagonal!
+const warpWise_primal_proj_diagonal! = sufficient_primal_proj_diagonal!
+const gridWise_primal_proj_diagonal! = few_primal_proj_diagonal!
+const threadWise_slack_proj_diagonal! = massive_slack_proj_diagonal!
+const blockWise_slack_proj_diagonal! = moderate_slack_proj_diagonal!
+const warpWise_slack_proj_diagonal! = sufficient_slack_proj_diagonal!
+const gridWise_slack_proj_diagonal! = few_slack_proj_diagonal!
+const threadWise_primal_proj! = massive_primal_proj!
+const blockWise_primal_proj! = moderate_primal_proj!
+const warpWise_primal_proj! = sufficient_primal_proj!
+const gridWise_primal_proj! = few_primal_proj!
+const threadWise_slack_proj! = massive_slack_proj!
+const blockWise_slack_proj! = moderate_slack_proj!
+const warpWise_slack_proj! = sufficient_slack_proj!
+const gridWise_slack_proj! = few_slack_proj!
+
 """
 function for setting the function pointer
     17: box_proj!
@@ -342,26 +361,26 @@ function setFunctionPointerPrimal!(sol::solVecPrimal, primalConstScale::Vector{B
         sol.primal_sol.x_slice_length_cpu,
         sol.primal_sol.x_slice_proj_kernel,
     )
-    if projection_strategy === :few
+    if projection_strategy === :gridWise
         # @info("few primal proj");
-        sol.proj! = few_primal_proj!
-        sol.slack_proj! = few_slack_proj!
-        sol.proj_diagonal! = few_primal_proj_diagonal!
-    elseif projection_strategy === :moderate
+        sol.proj! = gridWise_primal_proj!
+        sol.slack_proj! = gridWise_slack_proj!
+        sol.proj_diagonal! = gridWise_primal_proj_diagonal!
+    elseif projection_strategy === :blockWise
         # @info("moderate primal proj");
-        sol.proj! = moderate_primal_proj!
-        sol.slack_proj! = moderate_slack_proj!
-        sol.proj_diagonal! = moderate_primal_proj_diagonal!
-    elseif projection_strategy === :sufficient
+        sol.proj! = blockWise_primal_proj!
+        sol.slack_proj! = blockWise_slack_proj!
+        sol.proj_diagonal! = blockWise_primal_proj_diagonal!
+    elseif projection_strategy === :warpWise
         # @info("sufficient primal proj");
-        sol.proj! = sufficient_primal_proj!
-        sol.slack_proj! = sufficient_slack_proj!
-        sol.proj_diagonal! = sufficient_primal_proj_diagonal!
+        sol.proj! = warpWise_primal_proj!
+        sol.slack_proj! = warpWise_slack_proj!
+        sol.proj_diagonal! = warpWise_primal_proj_diagonal!
     else
         # @info("massive primal proj");
-        sol.proj! = massive_primal_proj!
-        sol.slack_proj! = massive_slack_proj!
-        sol.proj_diagonal! = massive_primal_proj_diagonal!
+        sol.proj! = threadWise_primal_proj!
+        sol.slack_proj! = threadWise_slack_proj!
+        sol.proj_diagonal! = threadWise_primal_proj_diagonal!
     end
 end
 
@@ -597,6 +616,19 @@ function few_con_proj!(y::dualVector; abs_tol::Float64 = 1e-12, rel_tol::Float64
     global time_proj += time_end - time_start
 end
 
+const threadWise_dual_proj_diagonal! = massive_dual_proj_diagonal!
+const blockWise_dual_proj_diagonal! = moderate_dual_proj_diagonal!
+const warpWise_dual_proj_diagonal! = sufficient_dual_proj_diagonal!
+const gridWise_dual_proj_diagonal! = few_dual_proj_diagonal!
+const threadWise_dual_proj! = massive_dual_proj!
+const blockWise_dual_proj! = moderate_dual_proj!
+const warpWise_dual_proj! = sufficient_dual_proj!
+const gridWise_dual_proj! = few_dual_proj!
+const threadWise_con_proj! = massive_con_proj!
+const blockWise_con_proj! = moderate_con_proj!
+const warpWise_con_proj! = sufficient_con_proj!
+const gridWise_con_proj! = few_con_proj!
+
 
 """
 function for setting function pointers
@@ -811,26 +843,26 @@ function setFunctionPointerDual!(dualSol::solVecDual, primalConstScale::Vector{B
         dualSol.dual_sol.y_slice_length_cpu,
         dualSol.dual_sol.y_slice_proj_kernel,
     )
-    if projection_strategy === :few
+    if projection_strategy === :gridWise
         # @info("few dual proj");
-        dualSol.proj! = few_dual_proj!
-        dualSol.proj_diagonal! = few_dual_proj_diagonal!
-        dualSol.con_proj! = few_con_proj!
-    elseif projection_strategy === :moderate
+        dualSol.proj! = gridWise_dual_proj!
+        dualSol.proj_diagonal! = gridWise_dual_proj_diagonal!
+        dualSol.con_proj! = gridWise_con_proj!
+    elseif projection_strategy === :blockWise
         # @info("moderate dual proj");
-        dualSol.proj! = moderate_dual_proj!
-        dualSol.proj_diagonal! = moderate_dual_proj_diagonal!
-        dualSol.con_proj! = moderate_con_proj!
-    elseif projection_strategy === :sufficient
+        dualSol.proj! = blockWise_dual_proj!
+        dualSol.proj_diagonal! = blockWise_dual_proj_diagonal!
+        dualSol.con_proj! = blockWise_con_proj!
+    elseif projection_strategy === :warpWise
         # @info("sufficient dual proj");
-        dualSol.proj! = sufficient_dual_proj!
-        dualSol.proj_diagonal! = sufficient_dual_proj_diagonal!
-        dualSol.con_proj! = sufficient_con_proj!
+        dualSol.proj! = warpWise_dual_proj!
+        dualSol.proj_diagonal! = warpWise_dual_proj_diagonal!
+        dualSol.con_proj! = warpWise_con_proj!
     else
         # @info("massive dual proj");
-        dualSol.proj! = massive_dual_proj!
-        dualSol.proj_diagonal! = massive_dual_proj_diagonal!
-        dualSol.con_proj! = massive_con_proj!
+        dualSol.proj! = threadWise_dual_proj!
+        dualSol.proj_diagonal! = threadWise_dual_proj_diagonal!
+        dualSol.con_proj! = threadWise_con_proj!
     end
 end
 

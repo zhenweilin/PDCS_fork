@@ -130,6 +130,9 @@ function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared:
     end
 end
 
+"""Thread-wise projection: one GPU thread processes one cone block."""
+threadWise_block_proj(args...) = massive_block_proj(args...)
+
 # ----------------------------------------------------------------------------
 # Moderate Block Projection Kernel
 # ----------------------------------------------------------------------------
@@ -192,6 +195,9 @@ function moderate_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared
         )
     end
 end
+
+"""Block-wise projection: one GPU thread block processes one cone block."""
+blockWise_block_proj(args...) = moderate_block_proj(args...)
 
 
 # ----------------------------------------------------------------------------
@@ -256,6 +262,9 @@ function sufficient_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squar
         )
     end
 end
+
+"""Warp-wise projection: one GPU warp processes one cone block."""
+warpWise_block_proj(args...) = sufficient_block_proj(args...)
 
 # ============================================================================
 # Section 2: cuBLAS Handle Management
@@ -401,6 +410,9 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
     # Synchronize to ensure kernel completion
     CUDA.synchronize()
 end
+
+"""Grid-wise projection: the GPU grid cooperates on a small number of cones."""
+gridWise_block_proj(args...) = few_block_proj(args...)
 
 
 

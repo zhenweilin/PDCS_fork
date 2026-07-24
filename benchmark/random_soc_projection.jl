@@ -12,7 +12,7 @@ using Statistics
 using Printf
 
 CUDA.functional() || error("A functional CUDA device is required")
-# `few_block_proj` uses the solver module's shared cuBLAS handle. Solver setup
+# `gridWise_block_proj` uses the solver module's shared cuBLAS handle. Solver setup
 # normally creates it; this direct-kernel benchmark must do so explicitly.
 Core.eval(PDCS_GPU, :(global handle = create_cublas_handle()))
 
@@ -60,14 +60,14 @@ end
 
 function project!(strategy, b, count)
     args = (b.x, b.bl, b.bu, b.scaled, b.scaled2, b.scaled_x, b.temp, b.warm)
-    if strategy === :few
-        PDCS_GPU.few_block_proj(args..., b.starts, b.sizes_gpu, b.sizes, Int64(count), b.types)
-    elseif strategy === :moderate
-        PDCS_GPU.moderate_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
-    elseif strategy === :sufficient
-        PDCS_GPU.sufficient_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
-    elseif strategy === :massive
-        PDCS_GPU.massive_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
+    if strategy === :gridWise
+        PDCS_GPU.gridWise_block_proj(args..., b.starts, b.sizes_gpu, b.sizes, Int64(count), b.types)
+    elseif strategy === :blockWise
+        PDCS_GPU.blockWise_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
+    elseif strategy === :warpWise
+        PDCS_GPU.warpWise_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
+    elseif strategy === :threadWise
+        PDCS_GPU.threadWise_block_proj(args..., b.starts_gpu, b.sizes_gpu, Int64(count), b.types_gpu)
     else
         error("unknown strategy: $strategy")
     end
@@ -111,9 +111,9 @@ for count in COUNTS, dimension in DIMS
 
     # The few-cone implementation launches once per cone, so deliberately huge
     # counts are excluded from that comparison. The solver never selects it there.
-    strategies = count < 3 ? (:few,) :
-                 count <= 32 ? (:few, :moderate, :sufficient, :massive) :
-                               (:moderate, :sufficient, :massive)
+    strategies = count < 3 ? (:gridWise,) :
+                 count <= 32 ? (:gridWise, :blockWise, :warpWise, :threadWise) :
+                               (:blockWise, :warpWise, :threadWise)
     for strategy in strategies
         elapsed_ms, error_inf, status = benchmark_case(input, dimension, count, strategy)
         label = strategy === chosen ? "$(strategy)*" : string(strategy)
