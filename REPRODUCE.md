@@ -65,6 +65,56 @@ JULIA_DEPOT_PATH="$PWD/.julia-depot" \
 
 `CUDA functional: true` is required before running the benchmark.
 
+### Keep CUDA.jl and the native library on the same local toolkit
+
+On machines where the installed driver supports CUDA 12.5 but a cached Julia
+preference selects CUDA 12.9, both CUDA.jl's own cuBLAS calls and the native
+grid-wise library can fail with `SIGFPE`/`DivideError`. Configure CUDA.jl to use
+the same local toolkit used to compile the native library:
+
+```bash
+CUDA_ROOT=/usr/local/cuda-12.5
+CUDA_VERSION=12.5
+
+PATH="$CUDA_ROOT/bin:$PATH" \
+CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
+JULIA_DEPOT_PATH="$PWD/.julia-depot" \
+  ./.julia-bin/julia --startup-file=no -e '
+    using TOML
+    path = joinpath(pwd(), "LocalPreferences.toml")
+    preferences = isfile(path) ? TOML.parsefile(path) : Dict{String,Any}()
+    preferences["CUDA_Runtime_jll"] = Dict(
+        "local" => "true",
+        "version" => ARGS[1],
+    )
+    open(path, "w") do io
+        TOML.print(io, preferences; sorted=true)
+    end
+  ' "$CUDA_VERSION"
+```
+
+Restart Julia, then test a real cuBLAS operation:
+
+```bash
+PATH="$CUDA_ROOT/bin:$PATH" \
+CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
+JULIA_DEPOT_PATH="$PWD/.julia-depot" \
+PDCS_SKIP_GPU_PRECOMPILE=1 \
+  ./.julia-bin/julia --project=. -e '
+    using CUDA, LinearAlgebra
+    CUDA.versioninfo()
+    value = norm(CUDA.ones(Float64, 33), 2)
+    @assert isfinite(value)
+    println("cuBLAS preflight PASS: ", value)
+  '
+```
+
+This selects the local toolkit without downloading a CUDA runtime artifact.
+The experiment runner performs these configuration and preflight steps by
+default when passed `--cuda-home`; use `--cuda-runtime artifact` only when a
+compatible artifact runtime is deliberately required. CUDA.jl documents this
+mechanism in its [toolkit installation guide](https://cuda.juliagpu.org/stable/installation/overview/).
+
 ## Workflow A: build and test with CUDA 12.6
 
 ### A1. Confirm the selected compiler
@@ -216,6 +266,24 @@ awk -F, 'NR > 1 {count[$8]++} END {for (key in count) print key, count[key]}' \
 The current file has 95 lines including the header and reports `PASS 94`.
 
 ## Troubleshooting
+
+### `gridWise_block_proj` reports an undefined or invalid cuBLAS handle
+
+The grid-wise wrapper owns a process-local cuBLAS handle and creates it lazily
+on its first call. Callers and benchmark scripts must not create a module-level
+`handle` manually. This also works with `PDCS_SKIP_GPU_PRECOMPILE=1`; that flag
+skips warm-up compilation, not Julia's automatic module `__init__()` call.
+
+Verify the lazy initialization on a GPU machine with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+JULIA_DEPOT_PATH="$PWD/.julia-depot" \
+PDCS_SKIP_GPU_PRECOMPILE=1 \
+  ./.julia-bin/julia --project=. test/test_gridwise_lazy_handle_gpu.jl
+```
+
+The expected result is seven passing tests in `gridWise lazy cuBLAS handle`.
 
 ### CUDA.jl reports `CUDA runtime not found`
 

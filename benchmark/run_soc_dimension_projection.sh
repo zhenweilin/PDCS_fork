@@ -14,10 +14,11 @@ SMOKE=0
 NO_BUILD=0
 NO_PLOT=0
 DRY_RUN=0
+CUDA_RUNTIME_SOURCE="${PDCS_CUDA_RUNTIME_SOURCE:-local}"
 CUSTOM_DIMENSIONS=""
 CUSTOM_TRIALS=""
 CUSTOM_CONE_COUNT="100"
-CUSTOM_STRATEGIES="few,moderate,sufficient,massive"
+CUSTOM_STRATEGIES="gridWise,blockWise,warpWise,threadWise"
 SKIPPED_STRATEGIES=""
 
 usage() {
@@ -39,12 +40,13 @@ usage() {
 #   --dimensions LIST     Comma-separated full SOC dimensions
 #   --trials N            Independent trials per dimension and strategy
 #   --cone-count N        Fixed number of SOC blocks (default: 100)
-#   --strategies LIST     Internal names to run: few,moderate,sufficient,massive
+#   --strategies LIST     Names to run: gridWise,blockWise,warpWise,threadWise
 #   --skip-strategies LIST  Record omitted methods as SKIPPED_TIMEOUT_RISK
 #   --smoke               Run dimensions 4,64,1024 with two trials
 #   --no-build            Use existing PTX/shared-library artifacts
 #   --no-plot             Do not invoke pdflatex/pdftoppm
 #   --dry-run             Print resolved configuration and commands only
+#   --cuda-runtime MODE   local (default) or artifact
 #   --help                Show this help
 
 while (($#)); do
@@ -64,6 +66,7 @@ while (($#)); do
     --no-build) NO_BUILD=1; shift ;;
     --no-plot) NO_PLOT=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --cuda-runtime) CUDA_RUNTIME_SOURCE="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -94,6 +97,13 @@ fi
 CUDA_ROOT="$(cd -- "$CUDA_ROOT" && pwd)"
 NVCC="$CUDA_ROOT/bin/nvcc"
 [[ -x "$NVCC" ]] || { printf 'nvcc is not executable: %s\n' "$NVCC" >&2; exit 1; }
+[[ "$CUDA_RUNTIME_SOURCE" == local || "$CUDA_RUNTIME_SOURCE" == artifact ]] || {
+  printf 'Invalid --cuda-runtime value: %s (expected local or artifact)\n' "$CUDA_RUNTIME_SOURCE" >&2
+  exit 1
+}
+
+CUDA_TOOLKIT="$($NVCC --version | awk '/release/{version=$5; gsub(/,/,"",version); print version; exit}')"
+[[ -n "$CUDA_TOOLKIT" ]] || { printf 'Could not determine CUDA version from %s.\n' "$NVCC" >&2; exit 1; }
 
 RUN_LABEL="${RUN_LABEL:-$(date -u +%Y%m%dT%H%M%SZ)}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/benchmark/results/soc_dimension}"
@@ -118,11 +128,44 @@ command -v nvidia-smi >/dev/null 2>&1 || { printf 'nvidia-smi is required.\n' >&
 nvidia-smi >/dev/null || { printf 'nvidia-smi cannot communicate with the NVIDIA driver.\n' >&2; exit 1; }
 
 mkdir -p "$JULIA_DEPOT" "$RUN_DIR" "$FIGURE_DIR"
+
+# Write the CUDA runtime preference before Pkg.instantiate() or `using CUDA`.
+# This prevents CUDA_Runtime artifact downloads when local mode is selected.
+"$JULIA_BIN" --startup-file=no -e '
+  using TOML
+  project_root, version, source = ARGS
+  path = joinpath(project_root, "LocalPreferences.toml")
+  preferences = isfile(path) ? TOML.parsefile(path) : Dict{String,Any}()
+  runtime = Dict{String,Any}("version" => version)
+  source == "local" && (runtime["local"] = "true")
+  preferences["CUDA_Runtime_jll"] = runtime
+  open(path, "w") do io
+      TOML.print(io, preferences; sorted=true)
+  end
+' "$REPO_ROOT" "$CUDA_TOOLKIT" "$CUDA_RUNTIME_SOURCE"
+
 env JULIA_DEPOT_PATH="$JULIA_DEPOT" "$JULIA_BIN" --project="$REPO_ROOT" \
   -e 'using Pkg; Pkg.instantiate()'
 
+# This must run in a fresh process because CUDA runtime preferences take effect
+# only after Julia restarts. Test a real cuBLAS operation, not just allocation.
+env PATH="$CUDA_ROOT/bin:$PATH" \
+  CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
+  JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+  "$JULIA_BIN" --project="$REPO_ROOT" -e '
+    using CUDA, LinearAlgebra
+    CUDA.functional() || error("CUDA.functional() is false")
+    x = CUDA.ones(Float64, 33)
+    value = norm(x, 2)
+    isfinite(value) || error("CUDA.jl cuBLAS norm returned a non-finite value")
+    println("CUDA.jl cuBLAS preflight PASS: norm=", value)
+    CUDA.versioninfo()
+  '
+
 if [[ -z "$GPU_ARCH" ]]; then
-  GPU_ARCH="$(env JULIA_DEPOT_PATH="$JULIA_DEPOT" "$JULIA_BIN" --project="$REPO_ROOT" -e '
+  GPU_ARCH="$(env PATH="$CUDA_ROOT/bin:$PATH" \
+    CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+    "$JULIA_BIN" --project="$REPO_ROOT" -e '
     using CUDA
     CUDA.functional() || error("CUDA.functional() is false")
     capability = CUDA.capability(CUDA.device())
@@ -131,10 +174,9 @@ if [[ -z "$GPU_ARCH" ]]; then
 fi
 [[ "$GPU_ARCH" =~ ^sm_[0-9]+$ ]] || { printf 'Invalid GPU architecture: %s\n' "$GPU_ARCH" >&2; exit 1; }
 
-CUDA_TOOLKIT="$($NVCC --version | awk '/release/{sub(/,/,"",$6); print $6; exit}')"
-[[ -n "$CUDA_TOOLKIT" ]] || CUDA_TOOLKIT=unknown
 NVIDIA_DRIVER="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n 1 | tr -d '[:space:]')"
-printf 'Detected architecture: %s\nCUDA toolkit: %s\n' "$GPU_ARCH" "$CUDA_TOOLKIT"
+printf 'Detected architecture: %s\nCUDA toolkit/runtime: %s (%s)\n' \
+  "$GPU_ARCH" "$CUDA_TOOLKIT" "$CUDA_RUNTIME_SOURCE"
 
 if ((!NO_BUILD)); then
   make -C "$REPO_ROOT/src/pdcs_gpu/cuda" rebuild-gpu CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH"
@@ -162,6 +204,8 @@ fi
 [[ -n "$CUSTOM_TRIALS" ]] && TRIALS="$CUSTOM_TRIALS"
 
 env JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+  PATH="$CUDA_ROOT/bin:$PATH" \
+  CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
   PDCS_SKIP_GPU_PRECOMPILE=1 \
   PDCS_RUN_ID="$RUN_LABEL" \
   PDCS_CUDA_TOOLKIT="$CUDA_TOOLKIT" \
@@ -173,7 +217,10 @@ env JULIA_DEPOT_PATH="$JULIA_DEPOT" \
   --strategies "$CUSTOM_STRATEGIES" --skip-strategies "$SKIPPED_STRATEGIES" --output "$RAW_CSV" \
   2>"$RUN_DIR/benchmark.log"
 
-env JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SOC_TRIALS="$TRIALS" "$JULIA_BIN" --project="$REPO_ROOT" \
+env JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SOC_TRIALS="$TRIALS" \
+  PATH="$CUDA_ROOT/bin:$PATH" \
+  CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
+  "$JULIA_BIN" --project="$REPO_ROOT" \
   "$REPO_ROOT/benchmark/summarize_soc_dimension.jl" \
   --raw "$RAW_CSV" --summary "$SUMMARY_CSV" --report "$REPORT" --figure-tex "$FIGURE_TEX" \
   2>"$RUN_DIR/summary.log"

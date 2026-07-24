@@ -12,9 +12,7 @@ using Statistics
 using Printf
 
 CUDA.functional() || error("A functional CUDA device is required")
-# `gridWise_block_proj` uses the solver module's shared cuBLAS handle. Solver setup
-# normally creates it; this direct-kernel benchmark must do so explicitly.
-Core.eval(PDCS_GPU, :(global handle = create_cublas_handle()))
+# `gridWise_block_proj` creates its module-owned cuBLAS handle lazily.
 
 parse_list(name, default) = parse.(Int, split(get(ENV, name, default), ','))
 const DIMS = parse_list("PDCS_SOC_DIMS", "4,16,64,256,2048")
@@ -122,5 +120,3 @@ for count in COUNTS, dimension in DIMS
         flush(stdout)
     end
 end
-
-PDCS_GPU.destroy_cublas_handle(PDCS_GPU.handle)

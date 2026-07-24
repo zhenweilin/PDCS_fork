@@ -123,9 +123,7 @@ end
 mkpath(dirname(OUTPUT))
 open(OUTPUT, "w") do io
     println(io, "run_id,timestamp_utc,gpu_name,gpu_uuid,compute_capability,driver_version,cuda_toolkit,cuda_runtime,julia_version,git_commit,cone_count,cone_dimension,total_dimension,strategy,trial,seed,runtime_ms,max_error,status,note")
-    Core.eval(PDCS_GPU, :(global handle = create_cublas_handle()))
-    try
-        for dimension in DIMENSIONS
+    for dimension in DIMENSIONS
             for strategy in SKIPPED_STRATEGIES
                 write_row(io; dimension, strategy, trial=0, seed=BASE_SEED,
                           status="SKIPPED_TIMEOUT_RISK",
@@ -207,9 +205,6 @@ open(OUTPUT, "w") do io
             b = nothing
             CUDA.reclaim()
         end
-    finally
-        PDCS_GPU.destroy_cublas_handle(PDCS_GPU.handle)
-    end
 end
 
 @info "SOC dimension benchmark complete" output=OUTPUT gpu=META.gpu

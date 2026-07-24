@@ -7,6 +7,7 @@ ARCH ?= sm_90
 CFLAGS = -Xcompiler -fPIC
 PTXFLAGS = -ptx
 SHAREDFLAGS = -shared
+RPATHFLAGS = -Xlinker -rpath -Xlinker $(CUDA_HOME)/lib64
 OUTPUT_DIR = .
 
 # Targets
@@ -47,7 +48,7 @@ $(PTX_TARGET4): $(SRC5) | $(OUTPUT_DIR)
 
 # Rule for libfew_block_proj.so
 $(SO_TARGET): $(SRC3) | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
 
 # Always rebuild only the shared library. This is the preferred target when
 # switching CUDA toolkits because timestamps alone cannot encode CUDA_HOME.
@@ -57,10 +58,10 @@ rebuild-gpu: | $(OUTPUT_DIR)
 	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
 	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC4) -o $(PTX_TARGET3)
 	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC5) -o $(PTX_TARGET4)
-	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
 
 rebuild-few: | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
 
 print-config:
 	@echo "CUDA_HOME=$(CUDA_HOME)"
