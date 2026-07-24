@@ -1,5 +1,8 @@
 # Reproducing the GPU SOC projection benchmark
 
+Exponential-cone projection has a separate count, correctness, divergence, and
+GPU-utilization workflow in `rebuttal_plan/exp_projection.md`.
+
 This guide reproduces the random second-order-cone (SOC) projection benchmark
 with either CUDA 12.6 or CUDA 13.2. Run every command from the repository root.
 
