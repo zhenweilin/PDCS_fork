@@ -23,6 +23,7 @@ const CONE_COUNT = parse(Int, argument("cone-count", get(ENV, "PDCS_SOC_CONE_COU
 const DIMENSIONS = parse_int_list(argument("dimensions", get(ENV, "PDCS_SOC_DIMS", "4,16,64,256,1024,4096,16384,65536,262144,1048576,4194304")))
 const TRIALS = parse(Int, argument("trials", get(ENV, "PDCS_SOC_TRIALS", "10")))
 const BASE_SEED = parse(Int, argument("seed", get(ENV, "PDCS_SOC_SEED", "2026")))
+const SIGMA = parse(Float64, argument("sigma", get(ENV, "PDCS_SOC_SIGMA", "1.0")))
 const TIMEOUT_SECONDS = parse(Float64, argument("timeout", get(ENV, "PDCS_SOC_TIMEOUT", "15")))
 const MEMORY_RESERVE = parse(Float64, argument("memory-reserve", get(ENV, "PDCS_SOC_MEMORY_RESERVE", "0.20")))
 const OUTPUT = abspath(argument("output", get(ENV, "PDCS_SOC_RAW_CSV", "benchmark/results/soc_dimension_raw.csv")))
@@ -38,6 +39,7 @@ const LABELS = Dict(:gridWise => "Grid-wise", :blockWise => "Block-wise",
 
 CONE_COUNT >= 3 || error("cone count must be at least 3 for all three GPU strategies")
 TRIALS >= 1 || error("trials must be positive")
+isfinite(SIGMA) && SIGMA > 0 || error("--sigma must be finite and positive")
 all(>=(2), DIMENSIONS) || error("every full SOC dimension must be at least 2")
 all(in(ALL_STRATEGIES), STRATEGIES) || error("unknown strategy in --strategies")
 all(in(ALL_STRATEGIES), SKIPPED_STRATEGIES) || error("unknown strategy in --skip-strategies")
@@ -109,7 +111,7 @@ end
 function write_row(io; dimension, strategy, trial, seed, runtime_ms="", max_error="", status, note="")
     fields = (META.run_id, META.timestamp, META.gpu, META.uuid, META.capability,
               META.driver, META.toolkit, META.runtime, META.julia, META.commit,
-              CONE_COUNT, dimension, CONE_COUNT * dimension, LABELS[strategy],
+              CONE_COUNT, dimension, CONE_COUNT * dimension, SIGMA, LABELS[strategy],
               trial, seed, runtime_ms, max_error, status, note)
     println(io, join(csv.(fields), ','))
     flush(io)
@@ -122,7 +124,7 @@ end
 
 mkpath(dirname(OUTPUT))
 open(OUTPUT, "w") do io
-    println(io, "run_id,timestamp_utc,gpu_name,gpu_uuid,compute_capability,driver_version,cuda_toolkit,cuda_runtime,julia_version,git_commit,cone_count,cone_dimension,total_dimension,strategy,trial,seed,runtime_ms,max_error,status,note")
+    println(io, "run_id,timestamp_utc,gpu_name,gpu_uuid,compute_capability,driver_version,cuda_toolkit,cuda_runtime,julia_version,git_commit,cone_count,cone_dimension,total_dimension,input_sigma,strategy,trial,seed,runtime_ms,max_error,status,note")
     for dimension in DIMENSIONS
             for strategy in SKIPPED_STRATEGIES
                 write_row(io; dimension, strategy, trial=0, seed=BASE_SEED,
@@ -162,6 +164,7 @@ open(OUTPUT, "w") do io
                 # Compile and warm the selected kernel without timing it.
                 CUDA.seed!(BASE_SEED)
                 randn!(b.x)
+                b.x .*= SIGMA
                 project!(strategy, b)
                 CUDA.synchronize()
 
@@ -169,6 +172,7 @@ open(OUTPUT, "w") do io
                     seed = BASE_SEED + 10_000 * findfirst(==(dimension), DIMENSIONS) + trial
                     CUDA.seed!(seed)
                     randn!(b.x)
+                    b.x .*= SIGMA
                     samples = trial == 1 ? sampled_cones(b.x, dimension) : Tuple{Int,Vector{Float64}}[]
                     CUDA.synchronize()
                     start_ns = time_ns()

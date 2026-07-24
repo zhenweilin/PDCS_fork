@@ -31,6 +31,7 @@ const STRATEGIES = Tuple(parse_symbols(option("strategies", "gridWise,blockWise,
 const VARIANTS = Tuple(parse_symbols(option("variants", "primalDiagonal")))
 const INPUT_DISTRIBUTION = option("input-distribution", "heterogeneous")
 const SIGMA = parse(Float64, option("sigma", "1.0"))
+const DIAGONAL_SIGMA = parse(Float64, option("diagonal-sigma", "1.0"))
 const MAX_GRIDWISE_CONES = parse(Int, option("max-gridwise-cones", "10000"))
 const REFERENCE_SAMPLES = parse(Int, option("reference-samples", "256"))
 
@@ -49,6 +50,8 @@ all(in(ALL_VARIANTS), VARIANTS) || error("unknown exponential projection variant
 INPUT_DISTRIBUTION in ("similar", "heterogeneous") ||
     error("--input-distribution must be similar or heterogeneous")
 isfinite(SIGMA) && SIGMA > 0 || error("--sigma must be finite and positive")
+isfinite(DIAGONAL_SIGMA) && DIAGONAL_SIGMA > 0 ||
+    error("--diagonal-sigma must be finite and positive")
 all(>=(3), COUNTS) || error("every cone count must be at least three")
 TRIALS >= 1 || error("trials must be positive")
 REFERENCE_SAMPLES >= 1 || error("reference samples must be positive")
@@ -90,9 +93,11 @@ function make_input(count, seed, distribution, sigma)
     return sigma .* randn(rng, Float64, 3count)
 end
 
-function make_scale(count, seed)
+function make_scale(count, seed, sigma)
     rng = MersenneTwister(seed + 91_337)
-    return exp.(0.02 .* randn(rng, Float64, 3count))
+    # Positive half-normal diagonal entries. Clamping avoids singular or
+    # extreme diagonal rescaling while preserving the requested distribution.
+    return clamp.(abs.(sigma .* randn(rng, Float64, 3count)), 1e-3, 1e3)
 end
 
 function reference!(value, variant, scale)
@@ -167,19 +172,20 @@ function sample_error(x, indices, references)
     return error
 end
 
-header = "run_id,timestamp_utc,gpu_name,gpu_uuid,compute_capability,driver_version,cuda_toolkit,cuda_runtime,julia_version,git_commit,cone_count,cone_dimension,input_distribution,input_sigma,variant,strategy,trial,seed,runtime_ms,max_error,status,note"
+header = "run_id,timestamp_utc,gpu_name,gpu_uuid,compute_capability,driver_version,cuda_toolkit,cuda_runtime,julia_version,git_commit,cone_count,cone_dimension,input_distribution,input_sigma,diagonal_distribution,diagonal_sigma,variant,strategy,trial,seed,runtime_ms,max_error,status,note"
 mkpath(dirname(OUTPUT))
 open(OUTPUT, "w") do io
     println(io, header)
     for count in COUNTS, variant in VARIANTS
         input = make_input(count, SEED + count + VARIANT_CODE[variant], INPUT_DISTRIBUTION, SIGMA)
-        scale = make_scale(count, SEED + count)
+        scale = make_scale(count, SEED + count, DIAGONAL_SIGMA)
         indices, references = reference_samples(input, scale, count, variant)
         for strategy in NORMALIZED_STRATEGIES
             if strategy === :gridWise && count > MAX_GRIDWISE_CONES
                 fields = (META.run_id, META.timestamp, META.gpu, META.uuid, META.capability,
                           META.driver, META.toolkit, META.runtime, META.julia, META.commit,
-                          count, 3, INPUT_DISTRIBUTION, SIGMA, variant, strategy, 0, SEED, "", "",
+                          count, 3, INPUT_DISTRIBUTION, SIGMA, "halfNormal",
+                          DIAGONAL_SIGMA, variant, strategy, 0, SEED, "", "",
                           "SKIPPED", "cone count exceeds --max-gridwise-cones")
                 println(io, join(csv.(fields), ',')); flush(io)
                 continue
@@ -198,7 +204,8 @@ open(OUTPUT, "w") do io
                 status = isfinite(error) && error <= 5e-8 ? "PASS" : "FAIL"
                 fields = (META.run_id, META.timestamp, META.gpu, META.uuid, META.capability,
                           META.driver, META.toolkit, META.runtime, META.julia, META.commit,
-                          count, 3, INPUT_DISTRIBUTION, SIGMA, variant, strategy, trial, SEED,
+                          count, 3, INPUT_DISTRIBUTION, SIGMA, "halfNormal",
+                          DIAGONAL_SIGMA, variant, strategy, trial, SEED,
                           @sprintf("%.9g", runtime_ms), @sprintf("%.9g", error), status, "")
                 println(io, join(csv.(fields), ',')); flush(io)
             end

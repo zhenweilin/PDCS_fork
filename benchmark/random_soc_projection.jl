@@ -20,6 +20,8 @@ const COUNTS = parse_list("PDCS_SOC_COUNTS", "1,2,3,4,32,1024,65536")
 const SAMPLES = parse(Int, get(ENV, "PDCS_SOC_SAMPLES", "10"))
 const MAX_ELEMENTS = parse(Int, get(ENV, "PDCS_SOC_MAX_ELEMENTS", "8000000"))
 const SEED = parse(Int, get(ENV, "PDCS_SOC_SEED", "2026"))
+const SIGMA = parse(Float64, get(ENV, "PDCS_SOC_SIGMA", "1.0"))
+isfinite(SIGMA) && SIGMA > 0 || error("PDCS_SOC_SIGMA must be finite and positive")
 
 "Closed-form Euclidean projection onto {(t,x): ||x|| <= t}."
 function reference_soc_projection!(z, dimension)
@@ -103,7 +105,7 @@ for count in COUNTS, dimension in DIMS
     dimension >= 2 || error("SOC dimensions must be at least two; got dimension=$dimension")
     total = count * dimension
     total <= MAX_ELEMENTS || continue
-    input = randn(rng, Float64, total)
+    input = SIGMA .* randn(rng, Float64, total)
     types = fill(Int64(20), count)
     chosen = PDCS_GPU.select_projection_strategy(fill(Int64(dimension), count), types)
 

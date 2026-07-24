@@ -70,6 +70,7 @@ benchmark/run_exp_projection.sh \
   --variants primalDiagonal \
   --input-distribution heterogeneous \
   --sigma 1.0 \
+  --diagonal-sigma 1.0 \
   --strategies gridWise,blockWise,warpWise,threadWise \
   --trials 10 \
   --max-gridwise-cones 10000 \
@@ -85,10 +86,12 @@ The grid-wise method launches projections sequentially and is deliberately skipp
 - `heterogeneous`: every vector coordinate is independently sampled from
   `Normal(0, sigma²)`, where `sigma` is set by `--sigma`.
 
-For both modes, diagonal entries use the same narrow log-normal law,
-`exp(0.02 * Normal(0,1))`. Thus a sigma sweep changes only the input-vector
-distribution. Both modes use `--seed` (default 2026), so repeated runs generate
-the same vectors and scales.
+Diagonal entries are generated independently as
+`clamp(abs(diagonal_sigma * Normal(0,1)), 1e-3, 1e3)`. The positive clamp
+prevents singular or extreme diagonal rescaling. `--sigma` controls the input
+vectors, while `--diagonal-sigma` independently controls diagonal magnitude.
+Both modes use `--seed` (default 2026), so repeated runs generate the same
+vectors and scales.
 
 Use, for example, the following controlled heterogeneity levels:
 

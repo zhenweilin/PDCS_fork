@@ -354,8 +354,16 @@ grep -n '^# Figure 3 reproduction' \
 
 ## 8. Timing, randomness, and correctness semantics
 
-Every timed vector is generated directly on the GPU from a Float64 standard
-normal distribution. The deterministic seed is
+Every timed vector is generated directly on the GPU with independent Float64
+coordinates
+
+```text
+x_i = sigma × Z_i,  Z_i ~ Normal(0, 1),
+```
+
+so `x_i ~ Normal(0, sigma²)`, where `sigma` is the standard deviation selected
+with `--sigma` (default `1.0`). No feasible, boundary, or other hand-constructed
+SOC cases are mixed into this benchmark. The deterministic seed is
 
 ```text
 2026 + 10000 × dimension_index + trial
