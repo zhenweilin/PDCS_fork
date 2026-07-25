@@ -29,12 +29,17 @@ const OUTPUT = option("output", "")
 const PROFILE_ONE = flag("profile-one")
 const DURATION = parse(Float64, option("duration", "0"))
 const REFERENCE_SAMPLES = parse(Int, option("reference-samples", "256"))
+const INPUT_SIGMA = parse(Float64, option("sigma", "1.0"))
+const DIAGONAL_SIGMA = parse(Float64, option("diagonal-sigma", "1.0"))
 
-const CASES = ("similar", "heterogeneous", "mixed_grouped", "mixed_interleaved")
+const CASES = ("similar", "heterogeneous", "mixed_grouped", "mixed_random", "mixed_interleaved")
 const STRATEGIES = (:threadWise, :warpWise, :blockWise)
 CASE in CASES || error("unknown case: $CASE")
 STRATEGY in STRATEGIES || error("strategy must be threadWise, warpWise, or blockWise")
 COUNT >= 32 && COUNT % 32 == 0 || error("cone count must be a multiple of 32")
+isfinite(INPUT_SIGMA) && INPUT_SIGMA > 0 || error("--sigma must be finite and positive")
+isfinite(DIAGONAL_SIGMA) && DIAGONAL_SIGMA > 0 ||
+    error("--diagonal-sigma must be finite and positive")
 CUDA.functional() || error("CUDA is not functional")
 
 function canonical_cone!(x, first, class, rng; heterogeneous=false)
@@ -65,12 +70,24 @@ function make_case(case_name, count, seed)
             canonical_cone!(canonical, first, 3, rng)
             canonical[first:first+2] .+= 0.01 .* randn(rng, 3)
         elseif case_name == "heterogeneous"
-            canonical_cone!(canonical, first, mod(cone-1, 4)+1, rng; heterogeneous=true)
+            canonical[first:first+2] .= INPUT_SIGMA .* randn(rng, 3)
         else
             canonical_cone!(canonical, first, mod(cone-1, 4)+1, rng)
         end
-        spread = case_name == "heterogeneous" ? 0.8 : 0.12
-        canonical_scale[first:first+2] .= exp.(spread .* randn(rng, 3))
+        canonical_scale[first:first+2] .= clamp.(
+            abs.(DIAGONAL_SIGMA .* randn(rng, 3)), 1e-3, 1e3
+        )
+    end
+    if case_name == "mixed_random"
+        order = randperm(MersenneTwister(seed + 77_777), count)
+        randomized = similar(canonical)
+        randomized_scale = similar(canonical_scale)
+        for destination in 1:count
+            source = order[destination]
+            randomized[3destination-2:3destination] .= canonical[3source-2:3source]
+            randomized_scale[3destination-2:3destination] .= canonical_scale[3source-2:3source]
+        end
+        return randomized, randomized_scale
     end
     case_name != "mixed_grouped" && return canonical, canonical_scale
 
@@ -160,12 +177,13 @@ else
         push!(times, (time_ns()-started)/1e6)
         push!(errors, reference_error(b, input, scale, COUNT))
     end
-    header = "case,strategy,variant,projection_type,cone_count,cone_dimension,seed,trials,mean_ms,std_ms,median_ms,min_ms,max_ms,max_error,status"
+    header = "case,strategy,variant,projection_type,cone_count,cone_dimension,input_sigma,diagonal_distribution,diagonal_sigma,seed,trials,mean_ms,std_ms,median_ms,min_ms,max_ms,max_error,status"
     deviation = length(times) > 1 ? std(times) : 0.0
     max_error = maximum(errors)
     status = isfinite(max_error) && max_error <= 5e-8 ? "PASS" : "FAIL"
-    line = @sprintf("%s,%s,primalDiagonal,27,%d,3,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s",
-                    CASE, STRATEGY, COUNT, SEED, TRIALS, mean(times), deviation,
+    line = @sprintf("%s,%s,primalDiagonal,27,%d,3,%.9g,halfNormal,%.9g,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s",
+                    CASE, STRATEGY, COUNT, INPUT_SIGMA, DIAGONAL_SIGMA,
+                    SEED, TRIALS, mean(times), deviation,
                     median(times), minimum(times), maximum(times), max_error, status)
     if isempty(OUTPUT)
         println(header); println(line)

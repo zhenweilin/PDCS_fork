@@ -1,0 +1,4 @@
+application,instance_size,sequence_index,command
+fisher,"m100_n5000",0,"echo 'Replace with the manuscript Fisher generator/solve command; it must write $PDCS_APPLICATION_TRACE_OUTPUT' && exit 64"
+lasso,"m10000_n100000",0,"echo 'Replace with the manuscript Lasso generator/solve command; it must write $PDCS_APPLICATION_TRACE_OUTPUT' && exit 64"
+portfolio,"T48_assets844",0,"echo 'Replace with the manuscript MPO generator/solve command; it must write $PDCS_APPLICATION_TRACE_OUTPUT' && exit 64"

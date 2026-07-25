@@ -32,6 +32,16 @@ __global__ void positive_proj(double *sol, long *n){
     }
 }
 
+// `exponent_proj_diagonal_kernel` consumes the inverse diagonal. The PTX
+// block/warp/thread-wise kernels perform this conversion before calling their
+// device function; grid-wise must use the same convention.
+__global__ void invert_exp_diagonal(const double* D, double* D_inv){
+    int index = threadIdx.x;
+    if (index < 3){
+        D_inv[index] = 1.0 / D[index];
+    }
+}
+
 
 
 __global__ void soc_proj_scale_kernel(double* sol, double* temp, long* n){
@@ -521,7 +531,8 @@ extern "C" void few_block_proj(cublasHandle_t handle,
     }
     else if (cpu_proj_type[i] == 15 || cpu_proj_type[i] == 27){
       // exponent_proj_diagonal
-      exponent_proj_diagonal_kernel<<<1, 1>>>(sol, sub_D_scaled, &t_warm_start[i], abs_tol, rel_tol);
+      invert_exp_diagonal<<<1, 3>>>(sub_D_scaled, sub_temp);
+      exponent_proj_diagonal_kernel<<<1, 1>>>(sol, sub_temp, &t_warm_start[i], abs_tol, rel_tol);
     }
   }
 }

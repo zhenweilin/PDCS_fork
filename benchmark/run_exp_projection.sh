@@ -11,6 +11,7 @@ COUNTS="3,10,100,1000,10000,100000,1000000"
 VARIANTS="primalDiagonal"
 INPUT_DISTRIBUTION="heterogeneous"
 SIGMA="1.0"
+DIAGONAL_SIGMA="1.0"
 STRATEGIES="gridWise,blockWise,warpWise,threadWise"
 TRIALS=10
 SEED=2026
@@ -37,6 +38,7 @@ usage() {
 #   --variants LIST                 primalDiagonal (default)
 #   --input-distribution MODE       similar|heterogeneous (default: heterogeneous)
 #   --sigma FLOAT                   std. dev. of heterogeneous N(0,sigma^2) inputs
+#   --diagonal-sigma FLOAT          std. dev. before abs() for diagonal entries
 #   --strategies LIST               gridWise,blockWise,warpWise,threadWise
 #   --trials N
 #   --seed N
@@ -58,6 +60,7 @@ while (($#)); do
     --variants) VARIANTS="$2"; shift 2 ;;
     --input-distribution) INPUT_DISTRIBUTION="$2"; shift 2 ;;
     --sigma) SIGMA="$2"; shift 2 ;;
+    --diagonal-sigma) DIAGONAL_SIGMA="$2"; shift 2 ;;
     --strategies) STRATEGIES="$2"; shift 2 ;;
     --trials) TRIALS="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
@@ -162,6 +165,8 @@ REPORT="$RUN_DIR/report.md"
   printf 'variants=%s\n' "$VARIANTS"
   printf 'input_distribution=%s\n' "$INPUT_DISTRIBUTION"
   printf 'input_sigma=%s\n' "$SIGMA"
+  printf 'diagonal_distribution=halfNormal\n'
+  printf 'diagonal_sigma=%s\n' "$DIAGONAL_SIGMA"
   printf 'seed=%s\n' "$SEED"
   printf 'strategies=%s\n' "$STRATEGIES"
   nvidia-smi --query-gpu=name,uuid,memory.total,driver_version --format=csv,noheader
@@ -174,6 +179,7 @@ env PATH="$CUDA_ROOT/bin:$PATH" CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
   "$JULIA_BIN" --project="$REPO_ROOT" "$REPO_ROOT/benchmark/exp_cone_projection.jl" \
     --cone-counts "$COUNTS" --variants "$VARIANTS" \
     --input-distribution "$INPUT_DISTRIBUTION" --sigma "$SIGMA" \
+    --diagonal-sigma "$DIAGONAL_SIGMA" \
     --strategies "$STRATEGIES" \
     --trials "$TRIALS" --seed "$SEED" \
     --max-gridwise-cones "$MAX_GRIDWISE_CONES" --output "$RAW" \

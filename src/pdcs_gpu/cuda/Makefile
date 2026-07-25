@@ -1,6 +1,31 @@
-# Build configuration. Override these on the make command line to select a
-# toolkit independently of the system-wide /usr/local/cuda symlink, e.g.
-#   make rebuild-few CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
+# PDCS GPU build targets
+# ======================
+#
+# Production solver build (no diagnostic counter writes):
+#
+#   make rebuild-gpu CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
+#
+# Root-finding diagnostic build (separate *_profile.ptx files):
+#
+#   make rebuild-profile CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
+#
+# `rebuild-profile` defines PDCS_PROFILE_ROOT_SEARCH and compiles the wrapper
+# sources `*_block_proj_profile.cu`. Those wrappers enable the counter macros
+# used by exp_proj.cu and the SOC/RSOC projection code. The resulting files are
+# separate from the production PTX files:
+#
+#   moderate_block_proj_profile.ptx
+#   massive_block_proj_profile.ptx
+#   sufficient_block_proj_profile.ptx
+#
+# Building the diagnostic targets does not replace the normal solver PTX.
+# Diagnostic PTX performs extra global-memory/atomic counter writes and MUST
+# NOT be used for publication runtime measurements. Use `rebuild-gpu` and the
+# normal projection API for timings; use `rebuild-profile` only with
+# benchmark/rebuttal/diagnostic_root_profile.jl for iteration/divergence data.
+#
+# Override CUDA_HOME to select a toolkit independently of the system-wide
+# /usr/local/cuda symlink. ARCH=sm_90 is H100; ARCH=sm_80 is A100.
 CUDA_HOME ?= /usr/local/cuda
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 ARCH ?= sm_90
@@ -16,6 +41,9 @@ PTX_TARGET2 = $(OUTPUT_DIR)/massive_block_proj.ptx
 PTX_TARGET3 = $(OUTPUT_DIR)/sufficient_block_proj.ptx
 PTX_TARGET4 = $(OUTPUT_DIR)/utils.ptx
 SO_TARGET = $(OUTPUT_DIR)/libfew_block_proj.so
+PROFILE_TARGET1 = $(OUTPUT_DIR)/moderate_block_proj_profile.ptx
+PROFILE_TARGET2 = $(OUTPUT_DIR)/massive_block_proj_profile.ptx
+PROFILE_TARGET3 = $(OUTPUT_DIR)/sufficient_block_proj_profile.ptx
 
 # Source files
 SRC1 = moderate_block_proj.cu
@@ -23,7 +51,8 @@ SRC2 = massive_block_proj.cu
 SRC3 = few_block_proj.cu
 SRC4 = sufficient_block_proj.cu
 SRC5 = utils.cu
-# Default target
+# The default target is the production build. Profile PTX is deliberately not
+# part of `all`, so an ordinary `make` cannot accidentally enable diagnostics.
 all: $(PTX_TARGET1) $(PTX_TARGET2) $(PTX_TARGET3) $(PTX_TARGET4) $(SO_TARGET) 
 
 # Ensure output directory exists
@@ -50,9 +79,23 @@ $(PTX_TARGET4): $(SRC5) | $(OUTPUT_DIR)
 $(SO_TARGET): $(SRC3) | $(OUTPUT_DIR)
 	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
 
-# Always rebuild only the shared library. This is the preferred target when
+# Always rebuild production artifacts. This is the preferred target when
 # switching CUDA toolkits because timestamps alone cannot encode CUDA_HOME.
-.PHONY: rebuild-gpu rebuild-few print-config
+.PHONY: help rebuild-gpu rebuild-few rebuild-profile print-config
+
+help:
+	@echo "PDCS CUDA build targets"
+	@echo "  make rebuild-gpu     Production PTX/shared library; use for solver timings"
+	@echo "  make rebuild-few     Production gridWise shared library only"
+	@echo "  make rebuild-profile Separate diagnostic PTX with root-search counters"
+	@echo "  make print-config    Show the selected CUDA toolkit and GPU architecture"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make rebuild-gpu CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90"
+	@echo "  make rebuild-profile CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90"
+	@echo ""
+	@echo "Do not use *_profile.ptx for publication runtime measurements."
+
 rebuild-gpu: | $(OUTPUT_DIR)
 	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC1) -o $(PTX_TARGET1)
 	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
@@ -62,6 +105,13 @@ rebuild-gpu: | $(OUTPUT_DIR)
 
 rebuild-few: | $(OUTPUT_DIR)
 	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
+
+# Compile diagnostic wrappers into separate output files. This target neither
+# overwrites nor relinks the production PTX/shared-library artifacts.
+rebuild-profile: | $(OUTPUT_DIR)
+	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) -DPDCS_PROFILE_ROOT_SEARCH=1 -DPDCS_PROFILE_MAPPING_BLOCK=1 moderate_block_proj_profile.cu -o $(PROFILE_TARGET1)
+	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) -DPDCS_PROFILE_ROOT_SEARCH=1 -DPDCS_PROFILE_MAPPING_THREAD=1 massive_block_proj_profile.cu -o $(PROFILE_TARGET2)
+	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) -DPDCS_PROFILE_ROOT_SEARCH=1 -DPDCS_PROFILE_MAPPING_WARP=1 sufficient_block_proj_profile.cu -o $(PROFILE_TARGET3)
 
 print-config:
 	@echo "CUDA_HOME=$(CUDA_HOME)"

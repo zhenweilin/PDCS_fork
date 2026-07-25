@@ -492,6 +492,7 @@ __device__ void rsoc_proj(double *sol, long *n, double *temp1, double *temp2, lo
 
 
 __device__ double oracle_soc_f_sqrt(double *xi, double *x, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
   // len not including the first element
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
     temp_part[j] = 1 / (1 + (2 * xi[0]) * D_scaled_squared_part[j]) * D_scaled_part_mul_x_part[j];
@@ -501,6 +502,7 @@ __device__ double oracle_soc_f_sqrt(double *xi, double *x, double *D_scaled_part
 }
 
 __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *f, double *h, long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
   // len not including the first element
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
     temp_part[j] = 1 / (1 + (2 * xi[0]) * D_scaled_squared_part[j]) * D_scaled_part_mul_x_part[j];
@@ -590,6 +592,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
   // newton_soc_rootsearch(&xiLeft, &xiRight, &xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len);
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
+    PDCS_PROFILE_BISECTION();
     *xi = (*xiRight + *xiLeft) / 2;
     *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, thread_idx, blk_dim);
     count++;
@@ -606,6 +609,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
 }
 
 __device__ void soc_increasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ thread_idx, long* __restrict__ blk_dim, double abs_tol, double rel_tol) {
+  PDCS_PROFILE_NEWTON_ATTEMPT();
   *t_warm_start_val_test -= fmax(fmin(*oracleVal / *oracleVal_h, 0.001), -0.001);
   *t_warm_start_val_test = fmax(fmin(*t_warm_start_val_test, *xiRight - rel_tol), *xiLeft + rel_tol);
   // *oracleVal = oracle_soc_f_sqrt(t_warm_start_val_test, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, thread_idx, blk_dim);
@@ -651,6 +655,7 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
   // newton_soc_rootsearch(&xiLeft, &xiRight, &xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len);
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
+    PDCS_PROFILE_BISECTION();
     *xi = (*xiRight + *xiLeft) / 2;
     *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, thread_idx, blk_dim);
     count++;
@@ -688,6 +693,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
   vvrscl(&len, x2end, D_scaled_part, temp_part, thread_idx, blk_dim);
   __syncthreads();
   if (nrm2(&len, temp_part, thread_idx, blk_dim) <= -sol[0] && sol[0] <= 0) {
+    PDCS_PROFILE_BRANCH(1);
     for (long j = *thread_idx; j < *n; j += *blk_dim){
       sol[j] = 0.0;
     }
@@ -695,6 +701,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
   }
   vvscal(&len, D_scaled_part, x2end, D_scaled_mul_x_part, thread_idx, blk_dim);
   if (nrm2(&len, D_scaled_mul_x_part, thread_idx, blk_dim) <= sol[0]) {
+    PDCS_PROFILE_BRANCH(0);
     if (*thread_idx == 0) {
       sol[0] = fmax(sol[0], 0.0);
     }
@@ -703,13 +710,16 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     return;
   }
   if (t > rel_tol) {
+    PDCS_PROFILE_BRANCH(2);
     xiRight = 0.5;
     xiLeft = 0.0;
     oracleVal = 1.0;
     if (t_warm_start[0] > xiLeft && t_warm_start[0] < xiRight){
+      PDCS_PROFILE_WARM_ATTEMPT();
       // oracleVal = oracle_soc_f_sqrt(t_warm_start, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim);
       oracle_soc_h(t_warm_start, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
       if (fabs(oracleVal) < abs_tol * abs_tol){
+        PDCS_PROFILE_WARM_ACCEPT();
         xi = t_warm_start[0];
         soc_proj_diagonal_recover(sol, n, &xi, &minVal, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
         return;
@@ -721,12 +731,14 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     return;
   }
   else if (t < -rel_tol) {
+    PDCS_PROFILE_BRANCH(3);
     xiRight = 1.0;
     xiLeft = 0.5;
     if (t_warm_start_val_test > xiLeft){
       // oracleVal = oracle_soc_f_sqrt(&t_warm_start_val_test, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim);
       oracle_soc_h(&t_warm_start_val_test, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
       if (fabs(oracleVal) < abs_tol * abs_tol){
+        PDCS_PROFILE_WARM_ACCEPT();
         xi = t_warm_start_val_test;
         soc_proj_diagonal_recover(sol, n, &xi, &minVal, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
         return;
@@ -734,6 +746,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       increasing_binary_soc_proj_init(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, thread_idx, blk_dim, abs_tol, rel_tol);
     }
     while (oracle_soc_f_sqrt(&xiRight, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim) < 0) {
+      PDCS_PROFILE_EXPANSION();
       xiLeft = xiRight;
       xiRight *= 2;
     }
@@ -760,6 +773,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
 
 
 __device__ double oracle_rsoc_f_sqrt(double *xi, double *x0_sqr, double *y0_sqr, double *x0y0, double *x_mul_d_part, double *D_scaled_squared_part, double *temp_part, long *len, long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
     temp_part[j] = x_mul_d_part[j] / (1 + xi[0] * D_scaled_squared_part[j]);
   }
@@ -770,6 +784,7 @@ __device__ double oracle_rsoc_f_sqrt(double *xi, double *x0_sqr, double *y0_sqr,
 }
 
 __device__ void oracle_rsoc_h(double *xi, double *x0_sqr, double *y0_sqr, double *x0y0, double *x_mul_d_part, double *D_scaled_part, double *D_scaled_squared_part, double *temp_part, long *len, double *f, double *h, long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
     temp_part[j] = x_mul_d_part[j] / (1 + xi[0] * D_scaled_squared_part[j]);
   }
@@ -829,6 +844,7 @@ __device__ void recover_sol_rsoc(double *sol, long *n, double *minVal, double *x
 }
 
 __device__ void rsoc_decreasing_newton_step(double *sol, long *n, double *x0_sqr, double *y0_sqr, double *x0y0, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ thread_idx, long* __restrict__ blk_dim, double abs_tol, double rel_tol){
+  PDCS_PROFILE_NEWTON_ATTEMPT();
   *t_warm_start_val_test -= fmax(fmin((*oracleVal)/((*oracleVal_h)), 0.001), -0.001);
   *t_warm_start_val_test = fmax(fmin(*t_warm_start_val_test, *xiRight - rel_tol), *xiLeft + rel_tol);
   // *oracleVal = oracle_rsoc_f_sqrt(t_warm_start_val_test, x0_sqr, y0_sqr, x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, thread_idx, blk_dim);
@@ -871,6 +887,7 @@ __device__ void rsoc_proj_decreasing_binary_search(double *x0_sqr, double *y0_sq
   *xi = (*xiRight + *xiLeft) / 2;
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
+    PDCS_PROFILE_BISECTION();
     *xi = (*xiRight + *xiLeft) / 2;
     *oracleVal = oracle_rsoc_f_sqrt(xi, x0_sqr, y0_sqr, x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, thread_idx, blk_dim);
     count++;
@@ -887,6 +904,7 @@ __device__ void rsoc_proj_decreasing_binary_search(double *x0_sqr, double *y0_sq
 }
 
 __device__ void rsoc_increasing_newton_step(double *sol, long *n, double *x0_sqr, double *y0_sqr, double *x0y0, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ thread_idx, long* __restrict__ blk_dim, double abs_tol, double rel_tol){
+  PDCS_PROFILE_NEWTON_ATTEMPT();
   *t_warm_start_val_test -= fmax(fmin((*oracleVal)/((*oracleVal_h)), 0.001), -0.001);
   *t_warm_start_val_test = fmax(fmin(*t_warm_start_val_test, *xiRight - rel_tol), *xiLeft + rel_tol);
   oracle_rsoc_h(t_warm_start_val_test, x0_sqr, y0_sqr, x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, thread_idx, blk_dim);
@@ -928,6 +946,7 @@ __device__ void rsoc_proj_increasing_binary_search(double *x0_sqr, double *y0_sq
   *xi = (*xiRight + *xiLeft) / 2;
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
+    PDCS_PROFILE_BISECTION();
     *xi = (*xiRight + *xiLeft) / 2;
     count++;
     if (count > MAX_ITER){
@@ -1002,8 +1021,10 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
     oracleVal = 1.0;
     xi = (xiRight + xiLeft) / 2;
     if (t_warm_start[0] > xiLeft && t_warm_start[0] < xiRight) {
+      PDCS_PROFILE_WARM_ATTEMPT();
       oracle_rsoc_h(&t_warm_start_val_test, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
       if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
         xi = t_warm_start[0];
         recover_sol_rsoc(sol, n, &minVal, &xi, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
         // __syncthreads();
@@ -1031,9 +1052,11 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
     xiRight = 2.0;
     xiLeft = 1.0;
     if (t_warm_start[0] > xiLeft) {
+      PDCS_PROFILE_WARM_ATTEMPT();
       xiRight = t_warm_start[0];
       oracle_rsoc_h(&t_warm_start_val_test, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
       if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
         recover_sol_rsoc(sol, n, &minVal, &t_warm_start_val_test, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
         // __syncthreads();
         return;
@@ -1041,6 +1064,7 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
       decreasing_binary_rsoc_proj_init(sol, n, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, thread_idx, blk_dim, abs_tol, rel_tol);
     }
     while (oracle_rsoc_f_sqrt(&xiRight, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim) < 0) {
+      PDCS_PROFILE_EXPANSION();
       xiLeft = xiRight;
       xiRight *= 2;
     }
@@ -1057,9 +1081,11 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
       if (sol[1] == 0){
         xiRight = 1.0;
         if (t_warm_start[0] > xiLeft) {
+      PDCS_PROFILE_WARM_ATTEMPT();
           xiRight = t_warm_start[0];
           oracle_rsoc_h(&t_warm_start_val_test, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
           if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
             xi = t_warm_start[0];
             recover_sol_rsoc(sol, n, &minVal, &xi, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
             // __syncthreads();
@@ -1068,6 +1094,7 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
           increasing_binary_rsoc_proj_init(sol, n, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, thread_idx, blk_dim, abs_tol, rel_tol);
         }
         while (oracle_rsoc_f_sqrt(&xiRight, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim) < 0) {
+      PDCS_PROFILE_EXPANSION();
           xiLeft = xiRight;
           xiRight *= 2;
         }
@@ -1082,8 +1109,10 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
       xiRight = 1.0;
       xiLeft = -sol[0] / sol[1];
       if (t_warm_start[0] > xiLeft && t_warm_start[0] < xiRight) {
+      PDCS_PROFILE_WARM_ATTEMPT();
         oracle_rsoc_h(t_warm_start, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
         if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
           xi = t_warm_start[0];
           recover_sol_rsoc(sol, n, &minVal, &xi, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
           // __syncthreads();
@@ -1103,8 +1132,10 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
       if (sol[0] == 0){
         xiRight = 1.0;
         if (t_warm_start[0] > xiLeft && t_warm_start[0] < xiRight) {
+      PDCS_PROFILE_WARM_ATTEMPT();
           oracle_rsoc_h(t_warm_start, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
           if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
             xi = t_warm_start[0];
             recover_sol_rsoc(sol, n, &minVal, &xi, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
             // __syncthreads();
@@ -1114,6 +1145,7 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
         increasing_binary_rsoc_proj_init(sol, n, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, thread_idx, blk_dim, abs_tol, rel_tol);
       }
       while (oracle_rsoc_f_sqrt(&xiRight, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, thread_idx, blk_dim) < 0) {
+      PDCS_PROFILE_EXPANSION();
         xiLeft = xiRight;
         xiRight *= 2;
       }
@@ -1127,8 +1159,10 @@ __device__ void rsoc_proj_diagonal(double *sol, long *n, double *D_scaled, doubl
       xiRight = 1.0;
       xiLeft = -sol[1] / sol[0];
       if (t_warm_start[0] > xiLeft && t_warm_start[0] < xiRight) {
+      PDCS_PROFILE_WARM_ATTEMPT();
         oracle_rsoc_h(t_warm_start, &x0_sqr, &y0_sqr, &x0y0, D_scaled_mul_x_part, D_scaled_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, thread_idx, blk_dim);
         if (fabs(oracleVal) < abs_tol * abs_tol) {
+        PDCS_PROFILE_WARM_ACCEPT();
           xi = t_warm_start[0];
           recover_sol_rsoc(sol, n, &minVal, &xi, t_warm_start, D_scaled_squared, thread_idx, blk_dim);
           // __syncthreads();

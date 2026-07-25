@@ -1,10 +1,23 @@
 #include <math_constants.h>
 #define positive_inf 1e32
 #define negative_inf -1e32
+#ifndef PDCS_PROFILE_BISECTION
+#define PDCS_PROFILE_BISECTION() ((void)0)
+#define PDCS_PROFILE_EXPANSION() ((void)0)
+#define PDCS_PROFILE_ORACLE() ((void)0)
+#define PDCS_PROFILE_NEWTON_ATTEMPT() ((void)0)
+#define PDCS_PROFILE_NEWTON_ACCEPT() ((void)0)
+#define PDCS_PROFILE_MAX_ITER() ((void)0)
+#define PDCS_PROFILE_RESIDUAL(value) ((void)0)
+#define PDCS_PROFILE_BRANCH(code) ((void)0)
+#define PDCS_PROFILE_WARM_ATTEMPT() ((void)0)
+#define PDCS_PROFILE_WARM_ACCEPT() ((void)0)
+#endif
 // #define proj_abs_tol_exp 5e-16
 // #define proj_rel_tol_exp 5e-16
 
 __device__ void oracle_h(double *r, double *s, double *t, double *rho, double *f, double *df){
+    PDCS_PROFILE_ORACLE();
     double exprho = exp(rho[0]);
     double expnegrho = exp(-rho[0]);
     f[0]  = ((rho[0]-1) * r[0] + s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
@@ -12,6 +25,7 @@ __device__ void oracle_h(double *r, double *s, double *t, double *rho, double *f
 }
 
 __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double *f, double *df){
+    PDCS_PROFILE_ORACLE();
     double dtexprho = dt[0] * exp(rho[0]);
     double dt_inv_expnegrho = exp(-rho[0]) / dt[0];
     double rho_minus_one = rho[0] - 1;
@@ -22,12 +36,14 @@ __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, d
 }
 
 __device__ void oracle_f(double *r, double *s, double *t, double *rho, double *f){
+    PDCS_PROFILE_ORACLE();
     double exprho = exp(rho[0]);
     double expnegrho = exp(-rho[0]);
     f[0]  = ((rho[0]-1)*r[0]+s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
 }
 
 __device__ void oracle_f_diagonal(double *r, double *s, double *t, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double *f){
+    PDCS_PROFILE_ORACLE();
     // printf("cuda enter oracle_f_diagonal rho: %.20e\n", rho[0]);
     double dtexprho = dt[0] * exp(rho[0]);
     // printf("cuda dtexprho: %.20e\n", dtexprho);
@@ -478,6 +494,7 @@ __device__ void rho_bound_diagonal(double *r0, double *s0, double *t0,
         double fl = 0.0;
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &low, &fl);
         while (fl > 0.0) {
+            PDCS_PROFILE_EXPANSION();
             upr = fmin(upr, low);
             low *= 2.0;
             oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &low, &fl);
@@ -489,6 +506,7 @@ __device__ void rho_bound_diagonal(double *r0, double *s0, double *t0,
         double fu = 0.0;
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &upr, &fu);
         while (fu < 0.0) {
+            PDCS_PROFILE_EXPANSION();
             low = fmax(low, upr);
             upr *= 2.0;
             oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &upr, &fu);
@@ -517,6 +535,7 @@ __device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, 
     double f = 0.0;
     int count = 0;
     while (true){
+        PDCS_PROFILE_BISECTION();
         oracle_f(r0, s0, t0, rho0, &f);
         if( f < 0.0 ){
             *rhol = *rho0;
@@ -533,10 +552,12 @@ __device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, 
         }
         count++;
         if (count > MAX_ITER){
+            PDCS_PROFILE_MAX_ITER();
             break;
         }
         *rho0 = *rho;
     }
+    PDCS_PROFILE_RESIDUAL(f);
 }
 
 __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *rho, double abs_tol, double rel_tol, int max_iter = 20) {
@@ -546,6 +567,7 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
     double f = 0.0;
     double df = 0.0;
     for (int i = 1; i <= max_iter; ++i) {
+        PDCS_PROFILE_NEWTON_ATTEMPT();
         oracle_h(r0, s0, t0, rho0, &f, &df);
         
         if (f < 0.0) {
@@ -561,6 +583,7 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
         
         if (isfinite(f) && df > abs_tol) {
             *rho = *rho0 - f/df;
+            PDCS_PROFILE_NEWTON_ACCEPT();
         } else {
             break;
         }
@@ -592,6 +615,7 @@ __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, doubl
     double f = 0.0;
     int count = 0;
     while (true){
+        PDCS_PROFILE_BISECTION();
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, rho0, &f);
         if (f < 0.0) {
             *rhol = *rho0;
@@ -609,10 +633,12 @@ __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, doubl
         }
         count++;
         if (count > MAX_ITER){
+            PDCS_PROFILE_MAX_ITER();
             break;
         }
         *rho0 = *rho;
     }
+    PDCS_PROFILE_RESIDUAL(f);
     // printf("*****cuda output rho: %.20e\n", *rho);
 }
 
@@ -624,6 +650,7 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
     double df = 0.0;
     *rho = *rho0;
     for (int i = 1; i <= max_iter; ++i) {
+        PDCS_PROFILE_NEWTON_ATTEMPT();
         oracle_h_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, rho0, &f, &df);
         if (f < 0.0) {
             *rhol = *rho0;
@@ -636,6 +663,7 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
         }
         if (isfinite(f) && df > abs_tol) {
             *rho = *rho0 - f/df;
+            PDCS_PROFILE_NEWTON_ACCEPT();
             // printf("cuda rho: %f\n", *rho);
         } else {
             break;

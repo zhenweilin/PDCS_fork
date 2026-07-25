@@ -11,7 +11,11 @@ These scripts test **primal diagonal exponential-cone projection** (projection c
 - branch-class ordering within hardware warps; and
 - GPU utilization, occupancy, active warps, and warp stalls.
 
-The default publication benchmark is `primalDiagonal`. Each cone receives three deterministic positive log-normal diagonal entries. The CPU oracle is `PDCS_CPU.exponent_proj_diagonal!`. Other variants remain available for implementation diagnostics, but the reviewer experiment and profiler use only primal diagonal projection.
+The default publication benchmark is `primalDiagonal`. Each cone receives
+three deterministic positive half-normal diagonal entries with safety clamping.
+The CPU oracle is `PDCS_CPU.exponent_proj_diagonal!`. Other variants remain
+available for implementation diagnostics, but the reviewer experiment and
+profiler use only primal diagonal projection.
 
 ## Files
 

@@ -34,7 +34,7 @@ const CHECK = flag("check")
 const HETERO_SIGMA = parse(Float64, option("hetero-sigma", "2.0"))
 const STRATEGIES = (:threadWise, :warpWise, :blockWise)
 
-all(in(("uniform", "similar", "heterogeneous", "mixed_grouped", "mixed_interleaved")), CASES) || error("unknown case in $(join(CASES, ','))")
+all(in(("uniform", "similar", "heterogeneous", "mixed_grouped", "mixed_random", "mixed_interleaved")), CASES) || error("unknown case in $(join(CASES, ','))")
 all(in(STRATEGIES), SELECTED_STRATEGIES) || error("strategy must be threadWise, warpWise, or blockWise")
 (PROFILE_ONE || DURATION > 0) && (length(CASES) != 1 || length(SELECTED_STRATEGIES) != 1) && error("profile/duration mode accepts one case and strategy")
 COUNT >= 32 || error("cone count must be at least 32")
@@ -59,8 +59,8 @@ function make_case(case_name, count, dimension, seed)
         return 4offset + cls
     end
 
-    canonical_x = case_name in ("mixed_grouped", "mixed_interleaved") ? Vector{Float64}(undef, total) : x
-    canonical_scale = case_name in ("mixed_grouped", "mixed_interleaved") ? Vector{Float64}(undef, total) : scale
+    canonical_x = startswith(case_name, "mixed_") ? Vector{Float64}(undef, total) : x
+    canonical_scale = startswith(case_name, "mixed_") ? Vector{Float64}(undef, total) : scale
     sigma = case_name == "heterogeneous" ? HETERO_SIGMA : case_name == "similar" ? 0.05 : 0.0
 
     # Use two independent RNGs: seed + dimension for scales, seed + dimension + 1 for x
@@ -106,6 +106,15 @@ function make_case(case_name, count, dimension, seed)
     if case_name == "mixed_grouped"
         for destination in 1:count
             source = source_index(destination)
+            dst = (destination-1)*dimension+1:destination*dimension
+            src = (source-1)*dimension+1:source*dimension
+            x[dst] .= canonical_x[src]
+            scale[dst] .= canonical_scale[src]
+        end
+    elseif case_name == "mixed_random"
+        order = randperm(MersenneTwister(seed + 77_777), count)
+        for destination in 1:count
+            source = order[destination]
             dst = (destination-1)*dimension+1:destination*dimension
             src = (source-1)*dimension+1:source*dimension
             x[dst] .= canonical_x[src]

@@ -18,6 +18,7 @@ CUDA_RUNTIME_SOURCE="${PDCS_CUDA_RUNTIME_SOURCE:-local}"
 CUSTOM_DIMENSIONS=""
 CUSTOM_TRIALS=""
 CUSTOM_CONE_COUNT="100"
+CUSTOM_SIGMA="1.0"
 CUSTOM_STRATEGIES="gridWise,blockWise,warpWise,threadWise"
 SKIPPED_STRATEGIES=""
 
@@ -40,6 +41,7 @@ usage() {
 #   --dimensions LIST     Comma-separated full SOC dimensions
 #   --trials N            Independent trials per dimension and strategy
 #   --cone-count N        Fixed number of SOC blocks (default: 100)
+#   --sigma FLOAT         Input standard deviation (default: 1.0)
 #   --strategies LIST     Names to run: gridWise,blockWise,warpWise,threadWise
 #   --skip-strategies LIST  Record omitted methods as SKIPPED_TIMEOUT_RISK
 #   --smoke               Run dimensions 4,64,1024 with two trials
@@ -60,6 +62,7 @@ while (($#)); do
     --dimensions) CUSTOM_DIMENSIONS="$2"; shift 2 ;;
     --trials) CUSTOM_TRIALS="$2"; shift 2 ;;
     --cone-count) CUSTOM_CONE_COUNT="$2"; shift 2 ;;
+    --sigma) CUSTOM_SIGMA="$2"; shift 2 ;;
     --strategies) CUSTOM_STRATEGIES="$2"; shift 2 ;;
     --skip-strategies) SKIPPED_STRATEGIES="$2"; shift 2 ;;
     --smoke) SMOKE=1; shift ;;
@@ -191,6 +194,7 @@ GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf u
   printf 'cuda_home=%s\n' "$CUDA_ROOT"
   printf 'cuda_toolkit=%s\n' "$CUDA_TOOLKIT"
   printf 'gpu_arch=%s\n' "$GPU_ARCH"
+  printf 'input_sigma=%s\n' "$CUSTOM_SIGMA"
   nvidia-smi --query-gpu=name,uuid,memory.total,driver_version --format=csv,noheader
 } > "$RUN_DIR/environment.txt"
 
@@ -214,6 +218,7 @@ env JULIA_DEPOT_PATH="$JULIA_DEPOT" \
   PDCS_SOC_TRIALS="$TRIALS" \
   "$JULIA_BIN" --project="$REPO_ROOT" "$REPO_ROOT/benchmark/soc_dimension_projection.jl" \
   --cone-count "$CUSTOM_CONE_COUNT" --dimensions "$DIMENSIONS" --trials "$TRIALS" \
+  --sigma "$CUSTOM_SIGMA" \
   --strategies "$CUSTOM_STRATEGIES" --skip-strategies "$SKIPPED_STRATEGIES" --output "$RAW_CSV" \
   2>"$RUN_DIR/benchmark.log"
 
