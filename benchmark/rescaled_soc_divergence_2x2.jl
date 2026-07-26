@@ -375,30 +375,62 @@ function sampled_cpu_error(case, output; samples=min(1024,length(case.ids)))
     worst
 end
 
+function mixed_error_details(a,b)
+    scaled=abs.(a.-b) ./ (5e-8 .+ 5e-8 .* max.(abs.(a),abs.(b)))
+    value,index=findmax(scaled)
+    (; value,index,absolute_error=abs(a[index]-b[index]),a=a[index],b=b[index])
+end
+
 function correctness!(buffers, grouped, interleaved)
     for ((layout, strategy), b) in buffers
-        restore!(b); launch!(strategy, b); CUDA.synchronize()
+        restore!(b)
+        CUDA.synchronize()
+        launch!(strategy, b)
+        CUDA.synchronize()
     end
     tg = Array(buffers[(:grouped,:threadWise)].x)
     wg = Array(buffers[(:grouped,:warpWise)].x)
     ti = Array(buffers[(:interleaved,:threadWise)].x)
     wi = Array(buffers[(:interleaved,:warpWise)].x)
-    mixed_error(a,b)=maximum(abs.(a.-b) ./
-      (5e-8 .+ 5e-8 .* max.(abs.(a),abs.(b)));init=0.0)
-    errors = (mixed_error(tg,wg),mixed_error(ti,wi))
+    grouped_detail=mixed_error_details(tg,wg)
+    interleaved_detail=mixed_error_details(ti,wi)
+    errors = (grouped_detail.value,interleaved_detail.value)
     maxerr = maximum(errors)
     all(isfinite,tg) && all(isfinite,wg) && all(isfinite,ti) && all(isfinite,wi) ||
       error("nonfinite projection output")
-    maxerr <= 1 || error("threadWise/warpWise mixed tolerance failed: $maxerr")
-    cpu_grouped=sampled_cpu_error(grouped,tg)
-    cpu_interleaved=sampled_cpu_error(interleaved,ti)
-    max(cpu_grouped,cpu_interleaved)<=1 ||
-      error("sampled CPU/GPU mixed tolerance failed: grouped=$cpu_grouped interleaved=$cpu_interleaved")
+    cpu_tg=sampled_cpu_error(grouped,tg)
+    cpu_wg=sampled_cpu_error(grouped,wg)
+    cpu_ti=sampled_cpu_error(interleaved,ti)
+    cpu_wi=sampled_cpu_error(interleaved,wi)
+    status=max(maxerr,cpu_tg,cpu_wg,cpu_ti,cpu_wi)<=1 ? "PASS" : "FAIL"
     write_rows(joinpath(OUTPUT_DIR, "correctness.csv"),
       ("experiment","seed","grouped_strategy_error","interleaved_strategy_error",
-       "grouped_cpu_scaled_error","interleaved_cpu_scaled_error","sampled_cones","status"),
-      [(EXPERIMENT,SEED,errors[1],errors[2],cpu_grouped,cpu_interleaved,
-        min(1024,COUNT),"PASS")])
+       "thread_grouped_cpu_scaled_error","warp_grouped_cpu_scaled_error",
+       "thread_interleaved_cpu_scaled_error","warp_interleaved_cpu_scaled_error",
+       "sampled_cones","status"),
+      [(EXPERIMENT,SEED,errors[1],errors[2],cpu_tg,cpu_wg,cpu_ti,cpu_wi,
+        min(1024,COUNT),status)])
+    if status=="FAIL"
+        detail=grouped_detail.value>=interleaved_detail.value ?
+          (layout=:grouped,case=grouped,record=grouped_detail,
+           thread=tg,warp=wg) :
+          (layout=:interleaved,case=interleaved,record=interleaved_detail,
+           thread=ti,warp=wi)
+        cone=cld(detail.record.index,DIMENSION)
+        component=mod1(detail.record.index,DIMENSION)
+        r=(cone-1)*DIMENSION+1:cone*DIMENSION
+        write_rows(joinpath(OUTPUT_DIR,"correctness_failure.csv"),
+          ("experiment","seed","layout","cone_position","cone_id","component",
+           "scaled_error","absolute_error","thread_value","warp_value",
+           "input","diagonal","thread_output","warp_output"),
+          [(EXPERIMENT,SEED,detail.layout,cone,detail.case.ids[cone],component,
+            detail.record.value,detail.record.absolute_error,
+            detail.record.a,detail.record.b,
+            join(collect(@view detail.case.x[:,cone]),';'),
+            join(collect(@view detail.case.diagonal[:,cone]),';'),
+            join(detail.thread[r],';'),join(detail.warp[r],';'))])
+        error("correctness gate failed: strategy_max=$maxerr cpu_thread_grouped=$cpu_tg cpu_warp_grouped=$cpu_wg cpu_thread_interleaved=$cpu_ti cpu_warp_interleaved=$cpu_wi; see correctness_failure.csv")
+    end
 end
 
 function timing!(grouped, interleaved)
