@@ -6,8 +6,8 @@ using Statistics
 export cuda_event_time, repeated_cuda_time, bandwidth_lower_bound
 
 function cuda_event_time(f)
-    start = CUDA.Event()
-    stop = CUDA.Event()
+    start = CUDA.CuEvent()
+    stop = CUDA.CuEvent()
     CUDA.record(start)
     f()
     CUDA.record(stop)

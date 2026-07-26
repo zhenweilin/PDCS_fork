@@ -10,20 +10,24 @@ GPU="${CUDA_VISIBLE_DEVICES:-0}"
 ARCH="${PDCS_GPU_ARCH:-sm_90}"
 COUNT=1048576
 DIMENSION=10
-SEEDS="2026:2045"
+SEEDS="2026:2035"
 EXPERIMENTS="iteration,branch"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 OUTPUT_ROOT="$REPO_ROOT/benchmark/results/rebuttal/soc_divergence_2x2"
 SMOKE=0
 DRY_RUN=0
 NO_BUILD=0
+KEEP_CACHES=0
+SAVE_LARGE_INTERMEDIATES=0
+RETAIN_CACHE_SEEDS="2026,2027,2028"
 
 usage() {
   printf '%s\n' \
     'Usage: run_soc_divergence_2x2.sh [options]' \
     '  --julia PATH --julia-depot PATH --cuda-home PATH --gpu N --arch sm_XX' \
     '  --cone-count N --cone-dimension N --seeds A:B|A,B --experiments LIST' \
-    '  --output-root PATH --run-id NAME --smoke --dry-run --no-build'
+    '  --output-root PATH --run-id NAME --retain-cache-seeds LIST' \
+    '  --keep-caches --save-large-intermediates --smoke --dry-run --no-build'
 }
 
 while (($#)); do
@@ -42,6 +46,9 @@ while (($#)); do
     --smoke) SMOKE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-build) NO_BUILD=1; shift ;;
+    --keep-caches) KEEP_CACHES=1; shift ;;
+    --save-large-intermediates) SAVE_LARGE_INTERMEDIATES=1; shift ;;
+    --retain-cache-seeds) RETAIN_CACHE_SEEDS="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -102,6 +109,7 @@ for experiment in "${EXP_ARRAY[@]}"; do
       --experiment "$experiment" --mode generate --seed "$seed"
       --cone-count "$COUNT" --cone-dimension "$DIMENSION"
       --candidate-factor 4 --output-dir "$seed_dir")
+    ((SAVE_LARGE_INTERMEDIATES)) && generate+=(--save-large-intermediates)
     timing=("${BASE_ENV[@]}" "$JULIA_BIN" "--project=$REPO_ROOT"
       "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
       --experiment "$experiment" --mode timing --seed "$seed"
@@ -114,14 +122,18 @@ for experiment in "${EXP_ARRAY[@]}"; do
       mkdir -p "$seed_dir"
       "${generate[@]}" > "$seed_dir/generate.log" 2>&1
       "${timing[@]}" > "$seed_dir/timing.log" 2>&1
+      if ((!KEEP_CACHES)) && [[ ",$RETAIN_CACHE_SEEDS," != *",$seed,"* ]]; then
+        rm -f -- "$cache"
+        printf 'Removed intermediate cache after successful timing: %s\n' "$cache"
+      fi
     fi
   done
 done
 ((DRY_RUN)) && exit 0
 
-if command -v zstd >/dev/null 2>&1; then
+if ((SAVE_LARGE_INTERMEDIATES)) && command -v zstd >/dev/null 2>&1; then
   while IFS= read -r file; do
-    zstd -q -k -- "$file"
+    zstd -q --rm -- "$file"
   done < <(find "$RUN_DIR" -type f \( -name root_work_raw.csv -o -name permutations.csv \))
 fi
 

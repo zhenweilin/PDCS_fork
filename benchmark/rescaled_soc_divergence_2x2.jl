@@ -42,6 +42,7 @@ const OUTPUT_DIR = abspath(opt("output-dir",
     "benchmark/results/rebuttal/soc_divergence_2x2/$(Dates.format(now(UTC), "yyyymmddTHHMMSS"))"))
 const CASE_CACHE = opt("case-cache", "")
 const DRY_RUN = flag("dry-run")
+const SAVE_LARGE_INTERMEDIATES = flag("save-large-intermediates")
 const ABS_TOL = 1e-12
 const REL_TOL = 1e-12
 
@@ -105,7 +106,7 @@ end
 
 function event_time!(strategy, b)
     restore!(b)
-    start, stop = CUDA.Event(), CUDA.Event()
+    start, stop = CUDA.CuEvent(), CUDA.CuEvent()
     CUDA.record(start)
     launch!(strategy, b)
     CUDA.record(stop)
@@ -258,16 +259,20 @@ function save_manifest(grouped, interleaved, meta)
         meta.family,meta.expanded,ABS_TOL,REL_TOL,
         permutation_hash(grouped),permutation_hash(interleaved),
         multiset_hash(grouped),multiset_hash(interleaved))])
-    write_rows(joinpath(OUTPUT_DIR, "permutations.csv"),
-      ("position","grouped_source","interleaved_source",
-       "grouped_inverse","interleaved_inverse"),
-      [(i,meta.gp[i],meta.ip[i],meta.gi[i],meta.ii[i]) for i in 1:COUNT])
+    if SAVE_LARGE_INTERMEDIATES
+        write_rows(joinpath(OUTPUT_DIR, "permutations.csv"),
+          ("position","grouped_source","interleaved_source",
+           "grouped_inverse","interleaved_inverse"),
+          ((i,meta.gp[i],meta.ip[i],meta.gi[i],meta.ii[i]) for i in 1:COUNT))
+    end
     if hasproperty(meta, :selected_work)
         checks=Any[]
         medians=Dict{Symbol,Tuple{Float64,Float64}}()
-        root_path=joinpath(OUTPUT_DIR,"root_work_raw.csv")
-        open(root_path,"w") do io
-          println(io,"experiment,seed,layout,position,cone_id,primary_work,expansion_iterations,bisection_iterations,oracle_evaluations,newton_attempts,newton_accepts,termination_reason,max_iter_reached,output_finite,final_residual,final_bracket_left,final_bracket_right,normalized_bracket_width,warp,warp_spread,modeled_active_lane_efficiency")
+        root_io = SAVE_LARGE_INTERMEDIATES ?
+          open(joinpath(OUTPUT_DIR,"root_work_raw.csv"),"w") : devnull
+        try
+          SAVE_LARGE_INTERMEDIATES &&
+            println(root_io,"experiment,seed,layout,position,cone_id,primary_work,expansion_iterations,bisection_iterations,oracle_evaluations,newton_attempts,newton_accepts,termination_reason,max_iter_reached,output_finite,final_residual,final_bracket_left,final_bracket_right,normalized_bracket_width,warp,warp_spread,modeled_active_lane_efficiency")
           for (layout,case) in ((:grouped,grouped),(:interleaved,interleaved))
             h=[meta.selected_work[id] for id in case.ids]
             spreads=Float64[]; efficiencies=Float64[]
@@ -281,16 +286,19 @@ function save_manifest(grouped, interleaved, meta)
             medians[layout]=(median(spreads),median(efficiencies))
             for i in 1:COUNT
               r=meta.records[case.ids[i]]
-              println(io,join((EXPERIMENT,SEED,layout,i,case.ids[i],h[i],
-                r.interval_expansion_iterations,r.bisection_iterations,
-                r.oracle_evaluations,r.newton_attempts,r.newton_accepts,
-                r.termination_reason,r.max_iter_reached,r.output_finite,
-                r.final_residual,
-                r.final_bracket_left,r.final_bracket_right,
-                r.normalized_bracket_width,cld(i,32),spreads[cld(i,32)],
-                efficiencies[cld(i,32)]),','))
+              SAVE_LARGE_INTERMEDIATES &&
+                println(root_io,join((EXPERIMENT,SEED,layout,i,case.ids[i],h[i],
+                  r.interval_expansion_iterations,r.bisection_iterations,
+                  r.oracle_evaluations,r.newton_attempts,r.newton_accepts,
+                  r.termination_reason,r.max_iter_reached,r.output_finite,
+                  r.final_residual,
+                  r.final_bracket_left,r.final_bracket_right,
+                  r.normalized_bracket_width,cld(i,32),spreads[cld(i,32)],
+                  efficiencies[cld(i,32)]),','))
             end
           end
+        finally
+          SAVE_LARGE_INTERMEDIATES && close(root_io)
         end
         sg,eg=medians[:grouped]; si,ei=medians[:interleaved]
         pass=si>sg && eg>=0.90 && ei<=eg-0.10
@@ -498,7 +506,7 @@ function one_or_duration!(grouped, interleaved)
 end
 
 function event_time_without_restore!(strategy,b)
-    start,stop=CUDA.Event(),CUDA.Event()
+    start,stop=CUDA.CuEvent(),CUDA.CuEvent()
     CUDA.record(start); launch!(strategy,b); CUDA.record(stop); CUDA.synchronize(stop)
     1000CUDA.elapsed(start,stop)
 end

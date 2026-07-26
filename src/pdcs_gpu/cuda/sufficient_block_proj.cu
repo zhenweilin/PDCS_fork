@@ -492,7 +492,6 @@ __device__ double oracle_soc_f_sqrt(double *xi, double *x, double *D_scaled_part
   for (long j = *lane_idx; j < *len; j += warpSize) {
     temp_part[j] = 1 / (1 + (2 * xi[0]) * D_scaled_squared_part[j]) * D_scaled_part_mul_x_part[j];
   }
-  // __syncwarp();
   return nrm2(len, temp_part, lane_idx) - (x[0] / (1 - 2 * xi[0]));
 }
 
@@ -604,7 +603,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_xi = *xi;
   double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len, lane_idx);
   PDCS_PROFILE_RESIDUAL(profile_residual);
@@ -675,7 +674,7 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_xi = *xi;
   double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len, lane_idx);
   PDCS_PROFILE_RESIDUAL(profile_residual);
@@ -748,7 +747,9 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     }
     soc_proj_decreasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
     PDCS_PROFILE_RESIDUAL(oracleVal);
-    xi = (xiRight + xiLeft) / 2;
+    // `xi` is the point whose residual satisfied the stopping rule.  Replacing
+    // it with the bracket midpoint is wrong when residual convergence occurs
+    // before the bracket collapses (for example, D=I and t=-0.2*||x_tail||).
     soc_proj_diagonal_recover(sol, n, &xi, D_scaled_squared, t_warm_start, &minVal, lane_idx);
     // __syncwarp();
     return;
@@ -774,7 +775,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     }
     soc_proj_increasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
     PDCS_PROFILE_RESIDUAL(oracleVal);
-    xi = (xiRight + xiLeft) / 2;
+    // Preserve the last evaluated root candidate; see the decreasing branch.
     soc_proj_diagonal_recover(sol, n, &xi, D_scaled_squared, t_warm_start, &minVal, lane_idx);
     // __syncwarp();
     return;

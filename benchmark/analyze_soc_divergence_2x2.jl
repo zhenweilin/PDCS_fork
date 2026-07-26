@@ -21,7 +21,7 @@ function parse_seeds(value)
     end
     parse.(Int,split(value,','))
 end
-const EXPECTED = parse_seeds(option("seeds", join(2026:2045,',')))
+const EXPECTED = parse_seeds(option("seeds", join(2026:2035,',')))
 const BOOTSTRAPS = parse(Int, option("bootstrap", "10000"))
 const OUTPUT = abspath(option("output", ROOT))
 

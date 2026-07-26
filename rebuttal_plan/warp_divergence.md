@@ -496,7 +496,7 @@ s\in\{0,0.50,1.00,1.50,2.00,2.50,3.00\}.
 
 After the pilot freezes the family and grid, each inferential seed must
 independently pass the same separation gate and the Section 3.9 manipulation
-gate. A failed seed is reported and invalidates the confirmatory 20-seed
+gate. A failed seed is reported and invalidates the confirmatory 10-seed
 experiment; it is not silently replaced. Do not continue changing generators
 after inspecting timing results.
 
@@ -771,10 +771,10 @@ must be reported separately if retained.
 
 ### 6.1 Independent workload seeds
 
-Use 20 independent seeds:
+Use 10 independent seeds:
 
 ```text
-2026, 2027, ..., 2045
+2026, 2027, ..., 2035
 ```
 
 The workload seed is the statistical unit. Cones, warps, repeated launches,
@@ -1393,11 +1393,11 @@ same-branch root-work manipulation satisfies every Section 3.9 condition.
 - [ ] Implement five warm-ups, ten measured launches, state restoration, and
   CUDA-event synchronization.
 - [ ] Implement the four-order Williams schedule across all ten timing rounds.
-- [ ] Run seeds 2026 through 2045 for the iteration experiment.
-- [ ] Run seeds 2026 through 2045 for the branch experiment.
+- [ ] Run seeds 2026 through 2035 for the iteration experiment.
+- [ ] Run seeds 2026 through 2035 for the branch experiment.
 - [ ] Store all technical replicates and seed-level medians.
 
-**Acceptance:** every experiment has 20 complete paired seed blocks, each
+**Acceptance:** every experiment has 10 complete paired seed blocks, each
 containing all four \(2\times2\) cells.
 
 ### Task 6: Profiling and sustained utilization

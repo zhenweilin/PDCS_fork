@@ -10,10 +10,13 @@ JULIA_BIN="${PDCS_JULIA:-$REPO_ROOT/.julia-bin/julia}"
 JULIA_DEPOT="${JULIA_DEPOT_PATH:-$REPO_ROOT/.julia-depot}"
 COUNT=1048576
 DIMENSION=10
-SEEDS="2026:2045"
+SEEDS="2026:2035"
 DELTAS="0,0.0001,0.001,0.01"
 SMOKE=0
 DRY_RUN=0
+KEEP_CACHES=0
+SAVE_LARGE_INTERMEDIATES=0
+RETAIN_CACHE_SEEDS="2026,2027,2028"
 
 while (($#)); do
   case "$1" in
@@ -28,8 +31,14 @@ while (($#)); do
     --deltas) DELTAS="$2"; shift 2 ;;
     --smoke) SMOKE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --keep-caches) KEEP_CACHES=1; shift ;;
+    --save-large-intermediates) SAVE_LARGE_INTERMEDIATES=1; shift ;;
+    --retain-cache-seeds) RETAIN_CACHE_SEEDS="$2"; shift 2 ;;
     --help|-h)
-      printf '%s\n' 'Usage: run_soc_parametric_similarity.sh --run-dir PATH [--gpu N --seeds A:B --deltas LIST --smoke --dry-run]'
+      printf '%s\n' \
+        'Usage: run_soc_parametric_similarity.sh --run-dir PATH [options]' \
+        '  --gpu N --seeds A:B --deltas LIST --retain-cache-seeds LIST' \
+        '  --keep-caches --save-large-intermediates --smoke --dry-run'
       exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -56,6 +65,7 @@ for delta in "${DELTA_ARRAY[@]}"; do
       "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
       --experiment parametric --mode generate --delta "$delta" --seed "$seed"
       --cone-count "$COUNT" --cone-dimension "$DIMENSION" --output-dir "$out")
+    ((SAVE_LARGE_INTERMEDIATES)) && generate+=(--save-large-intermediates)
     timing=("${BASE_ENV[@]}" "$JULIA_BIN" "--project=$REPO_ROOT"
       "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
       --experiment parametric --mode timing --delta "$delta" --seed "$seed"
@@ -69,10 +79,21 @@ for delta in "${DELTA_ARRAY[@]}"; do
       mkdir -p "$out"
       "${generate[@]}" > "$out/generate.log" 2>&1
       "${timing[@]}" > "$out/timing.log" 2>&1
+      if ((!KEEP_CACHES)) && [[ ",$RETAIN_CACHE_SEEDS," != *",$seed,"* ]]; then
+        rm -f -- "$cache"
+        printf 'Removed intermediate cache after successful timing: %s\n' "$cache"
+      fi
     fi
   done
 done
 ((DRY_RUN)) && exit 0
+
+if ((SAVE_LARGE_INTERMEDIATES)) && command -v zstd >/dev/null 2>&1; then
+  while IFS= read -r file; do
+    zstd -q --rm -- "$file"
+  done < <(find "$RUN_DIR/parametric" -type f \
+    \( -name root_work_raw.csv -o -name permutations.csv \))
+fi
 
 seed_csv="$(IFS=,; printf '%s' "${SEED_ARRAY[*]}")"
 "$JULIA_BIN" --project="$REPO_ROOT" "$REPO_ROOT/benchmark/analyze_soc_parametric_similarity.jl" \

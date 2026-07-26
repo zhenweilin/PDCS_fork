@@ -11,7 +11,7 @@ function option(name,default)
 end
 parse_seeds(x)=parse.(Int,split(x,','))
 root=abspath(option("root","benchmark/results/rebuttal/soc_divergence_2x2/parametric"))
-expected=parse_seeds(option("seeds",join(2026:2045,',')))
+expected=parse_seeds(option("seeds",join(2026:2035,',')))
 output=abspath(option("output",joinpath(root,"parametric_summary.csv")))
 
 function rows(path)

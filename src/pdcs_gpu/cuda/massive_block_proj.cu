@@ -504,7 +504,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_xi = *xi;
   double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len);
   PDCS_PROFILE_RESIDUAL(profile_residual);
@@ -576,7 +576,7 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_xi = *xi;
   double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len);
   PDCS_PROFILE_RESIDUAL(profile_residual);
