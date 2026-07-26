@@ -604,13 +604,13 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  *xi = (*xiRight + *xiLeft) / 2;
-  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len, lane_idx);
-  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_RESIDUAL(profile_residual);
   PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
   PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
-      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+      (fabs(profile_residual) <= abs_tol ? 1 : 2));
 #endif
 }
 
@@ -675,13 +675,13 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
     }
   }
 #ifdef PDCS_PROFILE_ROOT_SEARCH
-  *xi = (*xiRight + *xiLeft) / 2;
-  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+  double profile_xi = (*xiRight + *xiLeft) / 2;
+  double profile_residual = oracle_soc_f_sqrt(&profile_xi, sol, D_scaled_mul_x_part,
       D_scaled_squared_part, temp_part, len, lane_idx);
-  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_RESIDUAL(profile_residual);
   PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
   PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
-      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+      (fabs(profile_residual) <= abs_tol ? 1 : 2));
 #endif
 }
 
