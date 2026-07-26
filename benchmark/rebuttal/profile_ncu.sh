@@ -20,6 +20,7 @@ JULIA_DEPOT="${JULIA_DEPOT_PATH:-$REPO_ROOT/.julia-depot}"
 OUTPUT_ROOT="$REPO_ROOT/benchmark/results/rebuttal/ncu"
 RUN_ID=""
 DRY_RUN=0
+JULIA_OPT_LEVEL=1
 
 usage() {
   printf '%s\n' \
@@ -49,6 +50,7 @@ while (($#)); do
     --julia-depot) JULIA_DEPOT="$2"; shift 2 ;;
     --output-root) OUTPUT_ROOT="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
+    --julia-opt-level) JULIA_OPT_LEVEL="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
@@ -66,6 +68,8 @@ if ((WARM_START)) && [[ "$KIND" != soc ]]; then
   printf '%s\n' '--warm-start is supported only for SOC.' >&2
   exit 2
 fi
+[[ "$JULIA_OPT_LEVEL" =~ ^[0-3]$ ]] ||
+  { printf 'Invalid Julia optimization level: %s\n' "$JULIA_OPT_LEVEL" >&2; exit 2; }
 
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)_${KIND}_${CASE_NAME}_${STRATEGY}_seed${SEED}}"
 RUN_DIR="$OUTPUT_ROOT/$RUN_ID"
@@ -87,16 +91,17 @@ else
     --diagonal-sigma "$DIAGONAL_SIGMA" --seed "$SEED")
 fi
 
-NCU_ARGS=(--target-processes all --kernel-name "regex:$KERNEL"
+NCU_ARGS=(--kernel-name "regex:^$KERNEL$"
   --launch-skip 1 --launch-count 1
   --section SpeedOfLight --section Occupancy --section SchedulerStats
   --section WarpStateStats --section SourceCounters
-  --force-overwrite=false --export "$RUN_DIR/profile")
+  --export "$RUN_DIR/profile")
 
 printf 'Run directory: %s\n' "$RUN_DIR"
-printf 'Command: env CUDA_VISIBLE_DEVICES=%q JULIA_DEPOT_PATH=%q PDCS_SKIP_GPU_PRECOMPILE=1 %q' \
+printf 'Command: env CUDA_VISIBLE_DEVICES=%q JULIA_CONDAPKG_BACKEND=Null JULIA_DEPOT_PATH=%q PDCS_SKIP_GPU_PRECOMPILE=1 %q' \
   "$GPU" "$JULIA_DEPOT" "$NCU"
-printf ' %q' "${NCU_ARGS[@]}" "$JULIA_BIN" "--project=$REPO_ROOT" "$HARNESS" "${HARNESS_ARGS[@]}"
+printf ' %q' "${NCU_ARGS[@]}" "$JULIA_BIN" "-O$JULIA_OPT_LEVEL" \
+  "--project=$REPO_ROOT" "$HARNESS" "${HARNESS_ARGS[@]}"
 printf '\n'
 ((DRY_RUN)) && exit 0
 
@@ -114,9 +119,11 @@ mkdir -p "$RUN_DIR"
 set +e
 env CUDA_VISIBLE_DEVICES="$GPU" PATH="$CUDA_ROOT/bin:$PATH" \
   CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT" \
-  JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SKIP_GPU_PRECOMPILE=1 \
+  JULIA_CONDAPKG_BACKEND=Null JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+  PDCS_SKIP_GPU_PRECOMPILE=1 \
   "$NCU" "${NCU_ARGS[@]}" \
-  "$JULIA_BIN" "--project=$REPO_ROOT" "$HARNESS" "${HARNESS_ARGS[@]}" \
+  "$JULIA_BIN" "-O$JULIA_OPT_LEVEL" "--project=$REPO_ROOT" \
+  "$HARNESS" "${HARNESS_ARGS[@]}" \
   > "$RUN_DIR/application.log" 2> "$RUN_DIR/ncu.log"
 STATUS=$?
 set -e

@@ -13,6 +13,7 @@ DIMENSION=10
 SEEDS="2026,2027,2028"
 DELTAS="0,0.0001,0.001,0.01"
 DRY_RUN=0
+JULIA_OPT_LEVEL=1
 
 while (($#)); do
   case "$1" in
@@ -25,14 +26,21 @@ while (($#)); do
     --cone-dimension) DIMENSION="$2"; shift 2 ;;
     --seeds) SEEDS="$2"; shift 2 ;;
     --deltas) DELTAS="$2"; shift 2 ;;
+    --julia-opt-level) JULIA_OPT_LEVEL="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help|-h)
-      printf '%s\n' 'Usage: profile_soc_parametric_ncu.sh --run-dir PATH [--gpu N --seeds LIST --deltas LIST --dry-run]'
+      printf '%s\n' \
+        'Usage: profile_soc_parametric_ncu.sh --run-dir PATH [options]' \
+        '  --gpu N --cuda-home PATH --julia PATH --julia-depot PATH' \
+        '  --cone-count N --cone-dimension N --seeds LIST --deltas LIST' \
+        '  --julia-opt-level 0|1|2|3 --dry-run'
       exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
 [[ -n "$RUN_DIR" ]] || { printf '%s\n' '--run-dir is required' >&2; exit 2; }
+[[ "$JULIA_OPT_LEVEL" =~ ^[0-3]$ ]] ||
+  { printf 'Invalid Julia optimization level: %s\n' "$JULIA_OPT_LEVEL" >&2; exit 2; }
 NCU="$CUDA_ROOT/bin/ncu"
 [[ -x "$NCU" ]] || { printf 'ncu not found: %s\n' "$NCU" >&2; exit 1; }
 IFS=, read -r -a SEED_ARRAY <<< "$SEEDS"
@@ -50,11 +58,13 @@ for delta in "${DELTA_ARRAY[@]}"; do
       cmd=(env CUDA_VISIBLE_DEVICES="$GPU" PATH="$CUDA_ROOT/bin:$PATH"
         CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT"
         JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SKIP_GPU_PRECOMPILE=1
-        "$NCU" --kernel-name "regex:${kernel}" --launch-count 1
+        JULIA_CONDAPKG_BACKEND=Null
+        "$NCU" --kernel-name "regex:^${kernel}$"
+        --launch-skip 5 --launch-count 1
         --section SpeedOfLight --section Occupancy --section SchedulerStats
         --section WarpStateStats --section SourceCounters
         --export "$stem"
-        "$JULIA_BIN" "--project=$REPO_ROOT"
+        "$JULIA_BIN" "-O$JULIA_OPT_LEVEL" "--project=$REPO_ROOT"
         "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
         --experiment parametric --mode profile-one --delta "$delta"
         --layout grouped --strategy "$strategy" --seed "$seed"

@@ -13,12 +13,14 @@ DIMENSION=10
 SEEDS="2026,2027,2028"
 EXPERIMENTS="iteration,branch"
 DRY_RUN=0
+JULIA_OPT_LEVEL=1
 
 usage() {
   printf '%s\n' \
     'Usage: profile_soc_divergence_2x2_ncu.sh --run-dir PATH [options]' \
     '  --gpu N --cuda-home PATH --julia PATH --julia-depot PATH' \
-    '  --cone-count N --cone-dimension N --seeds LIST --experiments LIST --dry-run'
+    '  --cone-count N --cone-dimension N --seeds LIST --experiments LIST' \
+    '  --julia-opt-level 0|1|2|3 --dry-run'
 }
 while (($#)); do
   case "$1" in
@@ -31,12 +33,15 @@ while (($#)); do
     --cone-dimension) DIMENSION="$2"; shift 2 ;;
     --seeds) SEEDS="$2"; shift 2 ;;
     --experiments) EXPERIMENTS="$2"; shift 2 ;;
+    --julia-opt-level) JULIA_OPT_LEVEL="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
 [[ -n "$RUN_DIR" ]] || { usage >&2; exit 2; }
+[[ "$JULIA_OPT_LEVEL" =~ ^[0-3]$ ]] ||
+  { printf 'Invalid Julia optimization level: %s\n' "$JULIA_OPT_LEVEL" >&2; exit 2; }
 RUN_DIR="$(cd -- "$RUN_DIR" 2>/dev/null && pwd || printf '%s' "$RUN_DIR")"
 NCU="$CUDA_ROOT/bin/ncu"
 [[ -x "$NCU" ]] || { printf 'ncu not found: %s\n' "$NCU" >&2; exit 1; }
@@ -64,12 +69,13 @@ for experiment in "${EXP_ARRAY[@]}"; do
         cmd=(env CUDA_VISIBLE_DEVICES="$GPU" PATH="$CUDA_ROOT/bin:$PATH"
           CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT"
           JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SKIP_GPU_PRECOMPILE=1
-          JULIA_CONDAPKG_OFFLINE=true
-          "$NCU" --kernel-name "regex:${kernel}" --launch-count 1
+          JULIA_CONDAPKG_BACKEND=Null
+          "$NCU" --kernel-name "regex:^${kernel}$"
+          --launch-skip 5 --launch-count 1
           --section SpeedOfLight --section Occupancy --section SchedulerStats
           --section WarpStateStats --section SourceCounters
           --export "$out"
-          "$JULIA_BIN" "--project=$REPO_ROOT"
+          "$JULIA_BIN" "-O$JULIA_OPT_LEVEL" "--project=$REPO_ROOT"
           "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
           --experiment "$experiment" --mode profile-one --layout "$layout"
           --strategy "$strategy" --seed "$seed" --cone-count "$COUNT"

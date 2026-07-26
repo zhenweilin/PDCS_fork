@@ -43,6 +43,7 @@ const OUTPUT_DIR = abspath(opt("output-dir",
 const CASE_CACHE = opt("case-cache", "")
 const DRY_RUN = flag("dry-run")
 const SAVE_LARGE_INTERMEDIATES = flag("save-large-intermediates")
+const WAIT_FOR_START = flag("wait-for-start")
 const ABS_TOL = 1e-12
 const REL_TOL = 1e-12
 
@@ -495,14 +496,37 @@ function one_or_duration!(grouped, interleaved)
         end
         println("PROFILE_COMPLETE experiment=$EXPERIMENT layout=$layout strategy=$strategy launches=1")
     else
+        println("READY monotonic_ns=$(time_ns()) experiment=$EXPERIMENT layout=$layout strategy=$strategy")
+        flush(stdout)
+        if WAIT_FOR_START
+            command=strip(readline(stdin))
+            command=="START" || error("expected START on stdin, received: $command")
+        end
+        first_projection_ns=time_ns()
+        println("FIRST_PROJECTION_START monotonic_ns=$first_projection_ns")
+        flush(stdout)
         launches=0; restore_ns=0; projection_ms=0.0; started=time()
         while time()-started < DURATION
             t=time_ns(); restore!(b); CUDA.synchronize(); restore_ns += time_ns()-t
             projection_ms += event_time_without_restore!(strategy,b)
             launches += 1
         end
+        last_projection_ns=time_ns()
+        wall_seconds=time()-started
         @printf("UTILIZATION_COMPLETE experiment=%s layout=%s strategy=%s launches=%d elapsed_seconds=%.6f restore_seconds=%.6f projection_seconds=%.6f\n",
-          EXPERIMENT,layout,strategy,launches,time()-started,restore_ns/1e9,projection_ms/1e3)
+          EXPERIMENT,layout,strategy,launches,wall_seconds,restore_ns/1e9,projection_ms/1e3)
+        println("LAST_PROJECTION_STOP monotonic_ns=$last_projection_ns")
+        println("DONE monotonic_ns=$(time_ns())")
+        write_rows(joinpath(OUTPUT_DIR,
+          "duration_$(EXPERIMENT)_$(layout)_$(strategy)_seed$(SEED)_ledger.csv"),
+          ("experiment","layout","strategy","seed","launches","wall_seconds",
+           "restore_seconds","projection_seconds","unexplained_seconds",
+           "first_projection_monotonic_ns","last_projection_monotonic_ns"),
+          [(EXPERIMENT,layout,strategy,SEED,launches,wall_seconds,
+            restore_ns/1e9,projection_ms/1e3,
+            max(0.0,wall_seconds-restore_ns/1e9-projection_ms/1e3),
+            first_projection_ns,last_projection_ns)])
+        flush(stdout)
     end
 end
 
