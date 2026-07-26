@@ -491,6 +491,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
     PDCS_PROFILE_BISECTION();
     count++;
     if (count > MAX_ITER){
+      PDCS_PROFILE_MAX_ITER();
       break;
     }
     *xi = (*xiRight + *xiLeft) / 2;
@@ -502,6 +503,15 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
       *xiLeft = *xi;
     }
   }
+#ifdef PDCS_PROFILE_ROOT_SEARCH
+  *xi = (*xiRight + *xiLeft) / 2;
+  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+      D_scaled_squared_part, temp_part, len);
+  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
+  PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
+      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+#endif
 }
 
 __device__ void soc_decreasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double abs_tol, double rel_tol) {
@@ -553,6 +563,7 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
     PDCS_PROFILE_BISECTION();
     count++;
     if (count > MAX_ITER){
+      PDCS_PROFILE_MAX_ITER();
       break;
     }
     *xi = (*xiRight + *xiLeft) / 2;
@@ -564,6 +575,15 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
       *xiLeft = *xi;
     }
   }
+#ifdef PDCS_PROFILE_ROOT_SEARCH
+  *xi = (*xiRight + *xiLeft) / 2;
+  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+      D_scaled_squared_part, temp_part, len);
+  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
+  PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
+      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+#endif
 }
 
 __device__ void increasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double abs_tol, double rel_tol) {
@@ -663,6 +683,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     }
     // newton_soc_rootsearch(&xiLeft, &xiRight, &xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len);
     soc_proj_decreasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, abs_tol, rel_tol);
+    PDCS_PROFILE_RESIDUAL(oracleVal);
     soc_proj_diagonal_recover(sol, n, &xi, &minVal, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, temp_part, D_scaled_mul_x_part, D_scaled_squared_part, &len);
     return;
   }
@@ -687,6 +708,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       xiRight *= 2;
     }
     soc_proj_increasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, abs_tol, rel_tol);
+    PDCS_PROFILE_RESIDUAL(oracleVal);
     t_warm_start[0] = xi;
     soc_proj_diagonal_recover(sol, n, &xi, &minVal, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, temp_part, D_scaled_mul_x_part, D_scaled_squared_part, &len);
     return;

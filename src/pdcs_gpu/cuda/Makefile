@@ -29,6 +29,7 @@
 CUDA_HOME ?= /usr/local/cuda
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 ARCH ?= sm_90
+LINEINFO ?=
 CFLAGS = -Xcompiler -fPIC
 PTXFLAGS = -ptx
 SHAREDFLAGS = -shared
@@ -61,19 +62,19 @@ $(OUTPUT_DIR):
 
 # Rule for moderate_block_proj.ptx
 $(PTX_TARGET1): $(SRC1) | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC1) -o $(PTX_TARGET1)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC1) -o $(PTX_TARGET1)
 
 # Rule for massive_block_proj.ptx
 $(PTX_TARGET2): $(SRC2) | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
 
 # Rule for sufficient_block_proj.ptx
 $(PTX_TARGET3): $(SRC4) | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC4) -o $(PTX_TARGET3)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC4) -o $(PTX_TARGET3)
 
 # Rule for utils.ptx
 $(PTX_TARGET4): $(SRC5) | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC5) -o $(PTX_TARGET4)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC5) -o $(PTX_TARGET4)
 
 # Rule for libfew_block_proj.so
 $(SO_TARGET): $(SRC3) | $(OUTPUT_DIR)
@@ -97,10 +98,10 @@ help:
 	@echo "Do not use *_profile.ptx for publication runtime measurements."
 
 rebuild-gpu: | $(OUTPUT_DIR)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC1) -o $(PTX_TARGET1)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC4) -o $(PTX_TARGET3)
-	$(NVCC) -arch=$(ARCH) -O3 $(PTXFLAGS) $(SRC5) -o $(PTX_TARGET4)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC1) -o $(PTX_TARGET1)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC2) -o $(PTX_TARGET2)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC4) -o $(PTX_TARGET3)
+	$(NVCC) -arch=$(ARCH) -O3 $(LINEINFO) $(PTXFLAGS) $(SRC5) -o $(PTX_TARGET4)
 	$(NVCC) -arch=$(ARCH) -O3 $(CFLAGS) $(SHAREDFLAGS) $(RPATHFLAGS) $(SRC3) -o $(SO_TARGET) -lcublas
 
 rebuild-few: | $(OUTPUT_DIR)

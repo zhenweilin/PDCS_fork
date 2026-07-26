@@ -592,6 +592,7 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
     *xi = (*xiRight + *xiLeft) / 2;
     count++;
     if (count > MAX_ITER){
+      PDCS_PROFILE_MAX_ITER();
       break;
     }
     *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, lane_idx);
@@ -602,6 +603,15 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
       *xiLeft = *xi;
     }
   }
+#ifdef PDCS_PROFILE_ROOT_SEARCH
+  *xi = (*xiRight + *xiLeft) / 2;
+  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+      D_scaled_squared_part, temp_part, len, lane_idx);
+  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
+  PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
+      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+#endif
 }
 
 __device__ void soc_proj_increasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
@@ -653,6 +663,7 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
     *xi = (*xiRight + *xiLeft) / 2;
     count++;
     if (count > MAX_ITER){
+      PDCS_PROFILE_MAX_ITER();
       break;
     }
     *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, lane_idx);
@@ -663,6 +674,15 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
       *xiLeft = *xi;
     }
   }
+#ifdef PDCS_PROFILE_ROOT_SEARCH
+  *xi = (*xiRight + *xiLeft) / 2;
+  *oracleVal = oracle_soc_f_sqrt(xi, sol, D_scaled_mul_x_part,
+      D_scaled_squared_part, temp_part, len, lane_idx);
+  PDCS_PROFILE_RESIDUAL(*oracleVal);
+  PDCS_PROFILE_BRACKET(*xiLeft, *xiRight);
+  PDCS_PROFILE_TERMINATION(count > MAX_ITER ? 3 :
+      (fabs(*oracleVal) <= abs_tol ? 1 : 2));
+#endif
 }
 
 
@@ -727,6 +747,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       decreasing_binary_soc_proj_init(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
     }
     soc_proj_decreasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
+    PDCS_PROFILE_RESIDUAL(oracleVal);
     xi = (xiRight + xiLeft) / 2;
     soc_proj_diagonal_recover(sol, n, &xi, D_scaled_squared, t_warm_start, &minVal, lane_idx);
     // __syncwarp();
@@ -752,6 +773,7 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       xiRight *= 2;
     }
     soc_proj_increasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
+    PDCS_PROFILE_RESIDUAL(oracleVal);
     xi = (xiRight + xiLeft) / 2;
     soc_proj_diagonal_recover(sol, n, &xi, D_scaled_squared, t_warm_start, &minVal, lane_idx);
     // __syncwarp();

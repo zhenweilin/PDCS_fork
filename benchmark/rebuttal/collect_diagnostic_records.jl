@@ -63,12 +63,16 @@ for i in indices
     push!(rows,(kind,strategy,count,dimension,seed,i,r.branch_code,
       r.interval_expansion_iterations,r.newton_attempts,r.newton_accepts,
       r.bisection_iterations,r.oracle_evaluations,r.warm_start_attempted,
-      r.warm_start_accepted,r.max_iter_reached,r.final_residual,
+      r.warm_start_accepted,r.max_iter_reached,r.termination_reason,
+      r.output_finite,r.final_residual,r.final_bracket_left,
+      r.final_bracket_right,r.normalized_bracket_width,
       instrumentation_error))
 end
 write_csv(output,("kind","strategy","cone_count","cone_dimension","seed","cone",
  "branch_code","interval_expansion_iterations","newton_attempts","newton_accepts",
  "bisection_iterations","oracle_evaluations","warm_start_attempted",
- "warm_start_accepted","max_iter_reached","final_residual",
+ "warm_start_accepted","max_iter_reached","termination_reason","output_finite",
+ "final_residual","final_bracket_left","final_bracket_right",
+ "normalized_bracket_width",
  "instrumentation_max_error"),rows)
 @info "Diagnostic records written" output rows=length(rows) instrumentation_error

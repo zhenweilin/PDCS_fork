@@ -14,10 +14,15 @@ struct RootProfileRecord
     warm_start_attempted::Int32
     warm_start_accepted::Int32
     max_iter_reached::Int32
+    termination_reason::Int32
+    output_finite::Int32
     reserved::Int32
     final_residual::Float64
+    final_bracket_left::Float64
+    final_bracket_right::Float64
+    normalized_bracket_width::Float64
 end
-sizeof(RootProfileRecord)==48 || error("RootProfileRecord ABI mismatch")
+sizeof(RootProfileRecord)==80 || error("RootProfileRecord ABI mismatch")
 
 const MODULES=Dict{Symbol,CuModule}()
 const FUNCTIONS=Dict{Tuple{Symbol,String},CuFunction}()

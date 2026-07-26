@@ -13,11 +13,16 @@ struct RootProfileRecord {
   int32_t warm_start_attempted;
   int32_t warm_start_accepted;
   int32_t max_iter_reached;
+  int32_t termination_reason; // 1 residual, 2 bracket width, 3 cap, -1 unknown
+  int32_t output_finite;
   int32_t reserved;
   double final_residual;
+  double final_bracket_left;
+  double final_bracket_right;
+  double normalized_bracket_width;
 };
 
-static_assert(sizeof(RootProfileRecord) == 48, "RootProfileRecord ABI changed");
+static_assert(sizeof(RootProfileRecord) == 80, "RootProfileRecord ABI changed");
 
 __device__ RootProfileRecord* pdcs_root_profile_records = nullptr;
 __device__ long pdcs_root_profile_count = 0;
@@ -50,7 +55,7 @@ __device__ inline bool pdcs_root_profile_leader() {
   long _pdcs_i = pdcs_root_profile_index(); \
   if (pdcs_root_profile_records && pdcs_root_profile_leader() && \
       _pdcs_i >= 0 && _pdcs_i < pdcs_root_profile_count) \
-    atomicAdd(&pdcs_root_profile_records[_pdcs_i].field, (int)(amount)); \
+    pdcs_root_profile_records[_pdcs_i].field += (int)(amount); \
 } while (0)
 #define PDCS_PROFILE_BISECTION() PDCS_PROFILE_ADD(bisection_iterations, 1)
 #define PDCS_PROFILE_EXPANSION() PDCS_PROFILE_ADD(interval_expansion_iterations, 1)
@@ -68,6 +73,30 @@ __device__ inline bool pdcs_root_profile_leader() {
   if (pdcs_root_profile_records && pdcs_root_profile_leader() && \
       _pdcs_i >= 0 && _pdcs_i < pdcs_root_profile_count) \
     pdcs_root_profile_records[_pdcs_i].final_residual = (double)(value); \
+} while (0)
+#define PDCS_PROFILE_TERMINATION(code) do { \
+  long _pdcs_i = pdcs_root_profile_index(); \
+  if (pdcs_root_profile_records && pdcs_root_profile_leader() && \
+      _pdcs_i >= 0 && _pdcs_i < pdcs_root_profile_count) \
+    pdcs_root_profile_records[_pdcs_i].termination_reason = (int32_t)(code); \
+} while (0)
+#define PDCS_PROFILE_BRACKET(left, right) do { \
+  long _pdcs_i = pdcs_root_profile_index(); \
+  if (pdcs_root_profile_records && pdcs_root_profile_leader() && \
+      _pdcs_i >= 0 && _pdcs_i < pdcs_root_profile_count) { \
+    double _pdcs_l = (double)(left); \
+    double _pdcs_r = (double)(right); \
+    pdcs_root_profile_records[_pdcs_i].final_bracket_left = _pdcs_l; \
+    pdcs_root_profile_records[_pdcs_i].final_bracket_right = _pdcs_r; \
+    pdcs_root_profile_records[_pdcs_i].normalized_bracket_width = \
+      (_pdcs_r-_pdcs_l)/(1.0+_pdcs_r+_pdcs_l); \
+  } \
+} while (0)
+#define PDCS_PROFILE_OUTPUT_FINITE(value) do { \
+  long _pdcs_i = pdcs_root_profile_index(); \
+  if (pdcs_root_profile_records && pdcs_root_profile_leader() && \
+      _pdcs_i >= 0 && _pdcs_i < pdcs_root_profile_count) \
+    pdcs_root_profile_records[_pdcs_i].output_finite = (int32_t)(value); \
 } while (0)
 #define PDCS_PROFILE_BRANCH(code) do { \
   long _pdcs_i = pdcs_root_profile_index(); \
@@ -99,8 +128,13 @@ __device__ inline RootProfileRecord pdcs_empty_root_record() {
   r.warm_start_attempted = 0;
   r.warm_start_accepted = 0;
   r.max_iter_reached = 0;
+  r.termination_reason = -1;
+  r.output_finite = -1;
   r.reserved = 0;
   r.final_residual = 0.0/0.0;
+  r.final_bracket_left = 0.0/0.0;
+  r.final_bracket_right = 0.0/0.0;
+  r.normalized_bracket_width = 0.0/0.0;
   return r;
 }
 
