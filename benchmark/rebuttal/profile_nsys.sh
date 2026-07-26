@@ -132,7 +132,7 @@ NSYS_ARGS=(profile --trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none
   --cuda-memory-usage=true --force-overwrite=false --show-output=true
   --wait=all --output "$RUN_DIR/trace")
 if [[ "$GPU_METRICS" != off ]]; then
-  NSYS_ARGS+=(--gpu-metrics-devices=cuda-visible
+  NSYS_ARGS+=(--gpu-metrics-device="$GPU"
     --gpu-metrics-frequency "$GPU_METRICS_FREQUENCY")
 fi
 

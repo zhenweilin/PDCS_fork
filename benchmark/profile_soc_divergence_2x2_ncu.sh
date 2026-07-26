@@ -64,11 +64,11 @@ for experiment in "${EXP_ARRAY[@]}"; do
         cmd=(env CUDA_VISIBLE_DEVICES="$GPU" PATH="$CUDA_ROOT/bin:$PATH"
           CUDA_HOME="$CUDA_ROOT" CUDA_PATH="$CUDA_ROOT"
           JULIA_DEPOT_PATH="$JULIA_DEPOT" PDCS_SKIP_GPU_PRECOMPILE=1
-          "$NCU" --target-processes all --kernel-name "regex:^${kernel}$"
-          --nvtx --nvtx-include "PDCS_PROJECTION/" --launch-count 1
+          JULIA_CONDAPKG_OFFLINE=true
+          "$NCU" --kernel-name "regex:${kernel}" --launch-count 1
           --section SpeedOfLight --section Occupancy --section SchedulerStats
           --section WarpStateStats --section SourceCounters
-          --force-overwrite=false --export "$out"
+          --export "$out"
           "$JULIA_BIN" "--project=$REPO_ROOT"
           "$REPO_ROOT/benchmark/rescaled_soc_divergence_2x2.jl"
           --experiment "$experiment" --mode profile-one --layout "$layout"

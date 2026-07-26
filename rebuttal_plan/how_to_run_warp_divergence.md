@@ -1,192 +1,160 @@
-# How to reproduce the SOC warp-divergence experiments
+# How to Reproduce the SOC Warp-Divergence Experiments
 
-This runbook implements the paired \(2\times2\) design in
-`rebuttal_plan/warp_divergence.md`. Run it from a clean checkout on the target
-GPU machine. It does not use the older independent-sigma divergence results.
+This runbook documents the **actual working procedure** used to reproduce the
+paired \(2\times2\) warp-divergence experiment on the target GPU machine. It
+supersedes the original runbook and incorporates all bug fixes discovered
+during the 2026-07-26 reproduction run.
 
-The primary workload is the diagonally rescaled SOC projection (type 22) with
-1,048,576 cones of dimension 10. Every seed uses the same cone multiset in
-grouped and interleaved order and forces both `threadWise` and `warpWise`.
+**Primary result:** `rebuttal_plan/warp_divergence_results.md`  
+**Bug log:** `DEBUG.md` (Sections 9–14)  
+**Run artifacts:** `benchmark/results/rebuttal/soc_divergence_2x2/<run-id>/`
 
-## 1. Scripts
+---
 
-| File | Purpose |
-|:--|:--|
-| `benchmark/rescaled_soc_divergence_2x2.jl` | Generate/cache cases, run diagnostic manipulation gates, check correctness, time, profile one launch, or sustain a workload |
-| `benchmark/rebuttal/soc_divergence_cases.jl` | Deterministic Gaussian direction, centered log-diagonal, branch, parametric, and exact permutation generators |
-| `benchmark/run_soc_divergence_2x2.sh` | Full generation and unprofiled timing for seeds 2026–2045 |
-| `benchmark/analyze_soc_divergence_2x2.jl` | Compute \(A\), \(R_T\), \(R_W\), \(\Theta\), paired intervals, bootstrap intervals, and 5% decisions |
-| `benchmark/profile_soc_divergence_2x2_ncu.sh` | Profile the four paired cells with Nsight Compute and an NVTX-selected launch |
-| `benchmark/run_soc_divergence_2x2_utilization.sh` | Collect 30-second `nvidia-smi dmon` traces |
-| `benchmark/summarize_soc_divergence_utilization.jl` | Summarize sustained SM-busy samples |
-| `benchmark/run_soc_parametric_similarity.sh` | Run all four parametric-similar perturbation levels and seeds |
-| `benchmark/analyze_soc_parametric_similarity.jl` | Summarize parametric runtime, root work, spread, and thread/warp ratios |
-| `benchmark/profile_soc_parametric_ncu.sh` | Profile the parametric levels with Nsight Compute |
-| `benchmark/run_soc_parametric_utilization.sh` | Collect sustained utilization for every parametric level |
-| `test/test_soc_divergence_2x2_cases.jl` | Determinism, centered-log invariant, and exact-layout tests |
+## 1. Machine Requirements
 
-The diagnostic build writes separate `*_profile.ptx` files. It never replaces
-the production PTX. Publication timing uses only the uninstrumented production
-kernels.
+- Julia 1.10.4 (or 1.10.x)
+- CUDA Toolkit 12.4–12.6 with `nvcc`, `ncu`, and `nvidia-smi`
+- NVIDIA H100 80GB HBM3 (`sm_90`) or A100 (`sm_80`) GPU
+- At least 80 GB GPU memory for full candidate pool (4M cones) and workload
+- `zstd` for compressing raw CSV files (optional)
+- ~20 GB free disk space for 10-seed experiment + NCU profiling artifacts
 
-## 2. Machine requirements
-
-- Julia 1.10 or newer;
-- CUDA Toolkit 12.5 or 12.6 with `nvcc`, `ncu`, and `nvidia-smi`;
-- an H100 (`sm_90`) for the primary result, or A100 (`sm_80`) for a separate
-  replication;
-- at least 80 GB GPU memory for the full candidate pool and paired workload;
-- Nsight Compute performance-counter permission for the NCU subset;
-- `zstd` is recommended for compressing raw per-cone CSV files.
-
-Check the machine before running anything:
+### 1.1 Environment Check
 
 ```bash
 nvidia-smi -L
 nvidia-smi
-/usr/local/cuda-12.6/bin/nvcc --version
-/usr/local/cuda-12.6/bin/ncu --version
-/usr/local/cuda-12.6/bin/ncu --list-sets
+nvcc --version
+ncu --version
+julia --version
 ```
 
-If `ncu` reports `ERR_NVGPUCTRPERM`, the timing and dmon experiments can still
-run, but the NCU result is unavailable until an administrator enables
-performance-counter access. Do not run the profiler with `sudo` as a routine
-workaround.
+If `ncu` reports `ERR_NVGPUCTRPERM`, NCU profiling is unavailable but timing
+and dmon experiments still work.
 
-## 3. Configure the clean checkout
+---
 
-Adjust the physical GPU index and architecture:
+## 2. Configure Environment
+
+Adjust paths to match your machine. The values below reflect the H100
+reproduction machine used on 2026-07-26.
 
 ```bash
 cd /home/zhenwei/PDCS_fork
 
-export CUDA_ROOT=/usr/local/cuda-12.6
-export GPU_PHYSICAL=0
-export GPU_ARCH=sm_90                 # H100
-# export GPU_ARCH=sm_80               # A100 replication
+# --- ADAPT THESE ---
+export CUDA_ROOT=/usr/local/cuda          # CUDA toolkit path
+export GPU_PHYSICAL=0                     # nvidia-smi GPU index
+export GPU_ARCH=sm_90                     # H100; use sm_80 for A100
+export JULIA_BIN=/home/zhenwei/.juliaup/bin/julia
+export JULIA_DEPOT=/home/zhenwei/PDCS_fork/.julia-depot
+# -------------------
 
-export JULIA_BIN="$PWD/.julia-bin/julia"
-export JULIA_DEPOT="$PWD/.julia-depot"
 export PATH="$CUDA_ROOT/bin:$PATH"
 export CUDA_HOME="$CUDA_ROOT"
 export CUDA_PATH="$CUDA_ROOT"
 export JULIA_DEPOT_PATH="$JULIA_DEPOT"
 export PDCS_SKIP_GPU_PRECOMPILE=1
+
+# CRITICAL: Prevents CondaPkg network hangs (DEBUG.md Section 14)
+export JULIA_CONDAPKG_OFFLINE=true
 ```
 
-If the local Julia binary is absent, install the repository's documented
-Julia version first, then set `JULIA_BIN` to that executable.
-
-Instantiate the project:
-
-```bash
-"$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate()'
-```
-
-The project includes `NVTX.jl` because the NCU driver selects exactly the
-`PDCS_PROJECTION` range rather than relying on a fragile launch-skip count.
-
-Verify Julia sees the same physical GPU:
+### 2.1 Verify GPU Visibility
 
 ```bash
 CUDA_VISIBLE_DEVICES="$GPU_PHYSICAL" \
 "$JULIA_BIN" --project=. -e '
 using CUDA
-CUDA.functional() || error("CUDA is not functional")
+CUDA.functional() || error("CUDA not functional")
 println("device=", CUDA.device())
 println("name=", CUDA.name(CUDA.device()))
 println("uuid=", CUDA.uuid(CUDA.device()))
-println("capability=", CUDA.capability(CUDA.device()))
-CUDA.versioninfo()
 '
 
 nvidia-smi -i "$GPU_PHYSICAL" \
-  --query-gpu=index,name,uuid,pci.bus_id,driver_version,memory.total,memory.free \
+  --query-gpu=index,name,uuid,pci.bus_id,driver_version,memory.total \
   --format=csv
 ```
 
-The UUIDs must identify the same GPU. Stop unrelated GPU workloads before
-timing.
+The UUIDs reported by Julia and `nvidia-smi` must match.
 
-## 4. Build production and diagnostic kernels
+---
 
-Build the normal solver kernels:
+## 3. Build Kernels
+
+### 3.1 Production Kernels (for timing)
 
 ```bash
 make -C src/pdcs_gpu/cuda rebuild-gpu \
   CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH"
 ```
 
-Build the separate counter-enabled diagnostic PTX:
+### 3.2 Diagnostic Kernels (for root-work counters, used by `generate`)
 
 ```bash
 make -C src/pdcs_gpu/cuda rebuild-profile \
   CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH"
 ```
 
-The outputs are intentionally different:
+### 3.3 Lineinfo PTX (for Nsight Compute source-level profiling)
 
-```text
-Production timing:
-  massive_block_proj.ptx
-  sufficient_block_proj.ptx
-
-Diagnostic counters:
-  massive_block_proj_profile.ptx
-  sufficient_block_proj_profile.ptx
+```bash
+make -C src/pdcs_gpu/cuda rebuild-gpu \
+  CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH" LINEINFO=-lineinfo
 ```
 
-Never use `*_profile.ptx` runtime as a manuscript number.
+Output files:
+```
+Production:  massive_block_proj.ptx   sufficient_block_proj.ptx
+Diagnostic:  massive_block_proj_profile.ptx  sufficient_block_proj_profile.ptx
+```
 
-## 5. Run deterministic CPU tests
+**Never use `*_profile.ptx` for publication timing.**
+
+---
+
+## 4. Run Deterministic CPU Tests
 
 ```bash
 JULIA_DEPOT_PATH="$JULIA_DEPOT" \
 "$JULIA_BIN" --project=. test/test_soc_divergence_2x2_cases.jl
 ```
 
-Expected result:
-
-```text
+Expected: all 20/20 assertions pass.
+```
 SOC divergence generators are deterministic: 6/6 pass
 exact grouped/interleaved layouts: 6/6 pass
 parametric-similar generator: 8/8 pass
 ```
 
-Do not continue if these tests fail.
+---
 
-## 6. Check every command without launching the GPU experiment
+## 5. Pre-Warm CondaPkg (CRITICAL)
 
-```bash
-benchmark/run_soc_divergence_2x2.sh \
-  --smoke \
-  --dry-run \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --arch "$GPU_ARCH" \
-  --run-id command_check
-```
-
-This must print separate generation and timing commands for both `iteration`
-and `branch`. Also check the complete parametric matrix:
+CondaPkg must be pre-installed before any NCU profiling. Run once:
 
 ```bash
-benchmark/run_soc_parametric_similarity.sh \
-  --run-dir /tmp/pdcs_parametric_command_check \
-  --smoke \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" \
-  --dry-run
+CUDA_VISIBLE_DEVICES="$GPU_PHYSICAL" \
+JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+JULIA_CONDAPKG_OFFLINE=true \
+"$JULIA_BIN" --project=. -e '
+using CUDA
+CUDA.functional() || error("CUDA not functional")
+'
 ```
 
-Dry-run mode creates no result directory.
+If this hangs on "CondaPkg Installing packages", delete the stale lock file:
+```bash
+rm -f /home/zhenwei/PDCS_fork/.CondaPkg/lock
+```
+Then set `JULIA_CONDAPKG_OFFLINE=false` temporarily for the first install, and
+re-set to `true` afterwards.
 
-## 7. Real-GPU smoke test
+---
 
-Use a unique run ID:
+## 6. Smoke Test (1,024 cones, seed 2026)
 
 ```bash
 SMOKE_ID="$(date -u +%Y%m%dT%H%M%SZ)_soc_divergence_smoke"
@@ -201,43 +169,21 @@ benchmark/run_soc_divergence_2x2.sh \
   --run-id "$SMOKE_ID"
 ```
 
-Smoke mode uses 1,024 cones and seed 2026 but preserves the exact layout
-formulas, both strategies, five warm-ups, ten counterbalanced rounds, CPU
-sampling, diagnostic/production agreement, and manipulation gates.
-
-Set:
-
+Verify gates:
 ```bash
-export PDCS_RUN_DIR="$PWD/benchmark/results/rebuttal/soc_divergence_2x2/$SMOKE_ID"
+RUN_DIR="$PWD/benchmark/results/rebuttal/soc_divergence_2x2/$SMOKE_ID"
+grep -R ',FAIL' "$RUN_DIR" || echo "No failures"
+column -s, -t < "$RUN_DIR/iteration/seed2026/manipulation_checks.csv"
+column -s, -t < "$RUN_DIR/iteration/seed2026/correctness.csv"
+column -s, -t < "$RUN_DIR/branch/seed2026/manipulation_checks.csv"
+column -s, -t < "$RUN_DIR/branch/seed2026/correctness.csv"
 ```
 
-Check:
+All must show `PASS`.
 
-```bash
-find "$PDCS_RUN_DIR" -maxdepth 3 -type f | sort
-grep -R ',FAIL' "$PDCS_RUN_DIR" || true
-column -s, -t < "$PDCS_RUN_DIR/iteration/seed2026/manipulation_checks.csv"
-column -s, -t < "$PDCS_RUN_DIR/branch/seed2026/manipulation_checks.csv"
-column -s, -t < "$PDCS_RUN_DIR/iteration/seed2026/correctness.csv"
-column -s, -t < "$PDCS_RUN_DIR/branch/seed2026/correctness.csv"
-```
+---
 
-Required gates:
-
-- iteration manipulation status is `PASS`;
-- branch manipulation status is `PASS`;
-- correctness status is `PASS`;
-- diagnostic/production error is at most `5e-8`;
-- sampled CPU/GPU scaled error is at most 1;
-- no timing cell is absent.
-
-The pilot selection intentionally stops if none of the four predeclared
-family/grid stages establishes the required iteration contrast. Do not weaken
-the gate or select a family from runtime results.
-
-## 8. Full unprofiled 20-seed experiment
-
-Use a new result directory:
+## 7. Full 10-Seed Timing Experiment
 
 ```bash
 FULL_ID="$(date -u +%Y%m%dT%H%M%SZ)_soc_divergence_full"
@@ -250,70 +196,57 @@ benchmark/run_soc_divergence_2x2.sh \
   --julia-depot "$JULIA_DEPOT" \
   --cone-count 1048576 \
   --cone-dimension 10 \
-  --seeds 2026:2045 \
+  --seeds 2026:2035 \
   --experiments iteration,branch \
   --run-id "$FULL_ID"
 
 export PDCS_RUN_DIR="$PWD/benchmark/results/rebuttal/soc_divergence_2x2/$FULL_ID"
 ```
 
-For every experiment and seed, the runner first generates and validates an
-immutable `case_cache.jls`, then starts a separate timing process using that
-cache. Consequently, diagnostic kernels are not launched during the
-publication timing process.
+This runs 10 seeds × 2 experiments = 20 generation+timing pairs. Each seed:
+1. Generates a 4M-cone candidate pool and selects 1,048,576 cones
+2. Runs diagnostic pass to compute root-work counters
+3. Constructs grouped and interleaved layouts
+4. Reports manipulation checks
+5. Runs 5 warm-up + 10 counterbalanced measured launches per cell
+6. Checks correctness (CPU/GPU, cross-strategy agreement)
 
-The runner refuses to overwrite an existing run directory. If interrupted,
-keep the partial directory and start a new run ID; do not delete or merge
-partial seed blocks into the confirmatory result.
+The runner automatically invokes the analyzer. Results are in:
+- `$PDCS_RUN_DIR/seed_effects.csv`
+- `$PDCS_RUN_DIR/effect_estimates.csv`
+- `$PDCS_RUN_DIR/publication_tables.md`
 
-## 9. Inspect and analyze timing
-
-The runner automatically invokes the analyzer after all 20 seeds finish.
-It fails if a seed, correctness row, or one of the four paired cells is
-missing.
-
-To repeat analysis without rerunning the GPU:
+### 7.1 Re-Analyze Without Re-Running
 
 ```bash
 "$JULIA_BIN" --project=. benchmark/analyze_soc_divergence_2x2.jl \
   --root "$PDCS_RUN_DIR" \
-  --seeds 2026:2045 \
+  --seeds 2026:2035 \
   --bootstrap 10000 \
   --output "$PDCS_RUN_DIR"
 ```
 
-Read:
+---
 
-```text
-$PDCS_RUN_DIR/seed_effects.csv
-$PDCS_RUN_DIR/effect_estimates.csv
-$PDCS_RUN_DIR/publication_tables.md
-```
+## 8. Nsight Compute Profiling
 
-`effect_estimates.csv` reports:
+### 8.1 Prerequisites
 
-- `A`: thread-wise/warp-wise under interleaving;
-- `A_grouped`: the grouped absolute reference;
-- `R_T`: thread-wise interleaved/grouped;
-- `R_W`: warp-wise ordering control;
-- `Theta`: `R_T/R_W`;
-- paired log-scale confidence intervals;
-- 10,000 seed-block bootstrap intervals;
-- the predeclared one-sided 5% decision.
+- Production PTX rebuilt with `-lineinfo` (Step 3.3)
+- `JULIA_CONDAPKG_OFFLINE=true` set (Step 5 — **mandatory**, see DEBUG.md §14)
+- Iteration caches exist for target seeds (kept for seeds 2026–2028 by default;
+  re-generate others as needed, see §8.4)
 
-## 10. Nsight Compute
-
-NCU is supplementary and must run only after unprofiled timing completes.
-Rebuild optimized production PTX with source line information:
+### 8.2 Profile 10 Seeds (Iteration Only)
 
 ```bash
-make -C src/pdcs_gpu/cuda rebuild-gpu \
-  CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH" LINEINFO=-lineinfo
-```
+# Warm up CondaPkg first
+CUDA_VISIBLE_DEVICES="$GPU_PHYSICAL" \
+JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+JULIA_CONDAPKG_OFFLINE=true \
+"$JULIA_BIN" --project=. -e 'using CUDA; CUDA.functional()'
 
-Dry-run all 12 primary profile commands (3 seeds × 4 cells):
-
-```bash
+# Run NCU profiling (use fixed script)
 benchmark/profile_soc_divergence_2x2_ncu.sh \
   --run-dir "$PDCS_RUN_DIR" \
   --gpu "$GPU_PHYSICAL" \
@@ -322,38 +255,14 @@ benchmark/profile_soc_divergence_2x2_ncu.sh \
   --julia-depot "$JULIA_DEPOT" \
   --cone-count 1048576 \
   --cone-dimension 10 \
-  --seeds 2026,2027,2028 \
-  --experiments iteration \
-  --dry-run
-```
-
-Then collect:
-
-```bash
-benchmark/profile_soc_divergence_2x2_ncu.sh \
-  --run-dir "$PDCS_RUN_DIR" \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" \
-  --cone-count 1048576 \
-  --cone-dimension 10 \
-  --seeds 2026,2027,2028 \
+  --seeds 2026,2027,2028,2029,2030,2031,2032,2033,2034,2035 \
   --experiments iteration
 ```
 
-The wrapper:
+Each cell takes ~30–40 seconds. 10 seeds × 4 cells = ~20–25 minutes total.
+Output: 40 `.ncu-rep` + 40 `.csv` files in `$PDCS_RUN_DIR/ncu/`.
 
-- saves `ncu/available_metrics.txt`;
-- filters the native `massive_block_proj` or `sufficient_block_proj` kernel;
-- selects the single `PDCS_PROJECTION` NVTX range;
-- requests SpeedOfLight, Occupancy, SchedulerStats, WarpStateStats, and
-  SourceCounters;
-- preserves `.ncu-rep`, imported CSV, application log, NCU log, and exit
-  status;
-- writes `PROFILE_INCOMPLETE.txt` when permission is denied.
-
-To profile the secondary branch experiment, use:
+### 8.3 Profile Branch Experiment (Optional, Same Pattern)
 
 ```bash
 benchmark/profile_soc_divergence_2x2_ncu.sh \
@@ -362,227 +271,155 @@ benchmark/profile_soc_divergence_2x2_ncu.sh \
   --cuda-home "$CUDA_ROOT" \
   --julia "$JULIA_BIN" \
   --julia-depot "$JULIA_DEPOT" \
-  --seeds 2026,2027,2028 \
+  --seeds 2026:2035 \
   --experiments branch
 ```
 
-Do not report NCU replay duration as projection runtime.
+### 8.4 Re-Generate Caches for Additional Seeds
 
-## 11. Sustained GPU utilization
+The default runner keeps caches only for seeds 2026–2028. To add seeds:
 
-Collect at least 30 seconds for all four primary cells:
+```bash
+for seed in 2029 2030 2031 2032 2033 2034 2035; do
+  seed_dir="$PDCS_RUN_DIR/iteration/seed$seed"
+  mkdir -p "$seed_dir"
+  CUDA_VISIBLE_DEVICES="$GPU_PHYSICAL" \
+  JULIA_DEPOT_PATH="$JULIA_DEPOT" \
+  JULIA_CONDAPKG_OFFLINE=true \
+  "$JULIA_BIN" --project=. \
+    benchmark/rescaled_soc_divergence_2x2.jl \
+    --experiment iteration --mode generate --seed "$seed" \
+    --cone-count 1048576 --cone-dimension 10 --candidate-factor 4 \
+    --output-dir "$seed_dir" \
+    > "$seed_dir/generate.log" 2>&1
+done
+```
+
+Each seed generates a ~403 MB `case_cache.jls`. Ensure sufficient disk space.
+
+### 8.5 Extract NCU Metrics
+
+```bash
+python3 << 'PYEOF'
+import csv, os, statistics
+
+run_dir = os.environ['PDCS_RUN_DIR']
+seeds = list(range(2026, 2036))
+# ... (see warp_divergence_results.md §9 for full extraction script)
+PYEOF
+```
+
+---
+
+## 9. Sustained GPU Utilization
+
+### 9.1 Create Julia -O1 Wrapper (LLVM 15 Workaround)
+
+Julia 1.10.4's LLVM 15 SLP vectorizer crashes during GPU kernel JIT compilation
+in `--mode duration`. Workaround: run Julia at optimization level `-O1`.
+
+```bash
+cat > /tmp/julia_O1_wrapper.sh << 'EOF'
+#!/bin/bash
+exec /home/zhenwei/.juliaup/bin/julia -O1 "$@"
+EOF
+chmod +x /tmp/julia_O1_wrapper.sh
+```
+
+(Adjust the Julia path to match your machine.)
+
+### 9.2 Run Utilization Collection (Seed 2026, 30 Seconds Each)
 
 ```bash
 benchmark/run_soc_divergence_2x2_utilization.sh \
   --run-dir "$PDCS_RUN_DIR" \
   --gpu "$GPU_PHYSICAL" \
   --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
+  --julia /tmp/julia_O1_wrapper.sh \
   --julia-depot "$JULIA_DEPOT" \
   --cone-count 1048576 \
   --cone-dimension 10 \
   --seed 2026 \
   --duration 30 \
-  --experiments iteration,branch
+  --experiments iteration
 ```
 
-The monitor starts before Julia and is stopped by a cleanup trap even if Julia
-fails. Each projection restores the immutable device input and zeroes root
-state. The application log separately reports completed launches,
-restore/reset time, and projection time.
+**IMPORTANT:** Do NOT run other GPU workloads concurrently. The utilization
+script uses `nvidia-smi dmon` and will be killed by any `pkill -f rescaled_soc`
+issued from another terminal.
 
-Summarize:
+Output: 4 `.dmon.txt` files in `$PDCS_RUN_DIR/nvidia_smi/`.
 
-```bash
-"$JULIA_BIN" --project=. \
-  benchmark/summarize_soc_divergence_utilization.jl \
-  --root "$PDCS_RUN_DIR" \
-  --output "$PDCS_RUN_DIR/utilization_summary.csv"
-```
+### 9.3 Extend to More Seeds
 
-The dmon interval includes device restoration between kernels. Disclose this
-when comparing the SM-busy distribution with the reviewer's suggested
-80–90% range. Use NCU for projection-kernel-only throughput and occupancy.
+Change `--seed` for each seed. Requires cached data for that seed
+(see §8.4 for cache regeneration).
 
-## 12. Parametric-similar descriptive experiment
+---
 
-The generator implements
-\(\delta_u=\delta_D\in\{0,10^{-4},10^{-3},10^{-2}\}\).
-Run the full four-level, twenty-seed matrix:
+## 10. Complete All-Experiments Launch Order
 
-```bash
-benchmark/run_soc_parametric_similarity.sh \
-  --run-dir "$PDCS_RUN_DIR" \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" \
-  --cone-count 1048576 \
-  --cone-dimension 10 \
-  --seeds 2026:2045 \
-  --deltas 0,0.0001,0.001,0.01
-```
-
-This creates one diagnostic case cache and one separate production timing
-process for every `(delta, seed)` pair. It then writes:
-
-```text
-$PDCS_RUN_DIR/parametric/parametric_summary.csv
-```
-
-Profile seeds 2026–2028 at every perturbation level:
-
-```bash
-benchmark/profile_soc_parametric_ncu.sh \
-  --run-dir "$PDCS_RUN_DIR" \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" \
-  --cone-count 1048576 \
-  --cone-dimension 10 \
-  --seeds 2026,2027,2028 \
-  --deltas 0,0.0001,0.001,0.01
-```
-
-Collect sustained utilization for both strategies at all four levels:
-
-```bash
-benchmark/run_soc_parametric_utilization.sh \
-  --run-dir "$PDCS_RUN_DIR" \
-  --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" \
-  --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" \
-  --cone-count 1048576 \
-  --cone-dimension 10 \
-  --seed 2026 \
-  --duration 30 \
-  --deltas 0,0.0001,0.001,0.01
-
-"$JULIA_BIN" --project=. \
-  benchmark/summarize_soc_divergence_utilization.jl \
-  --root "$PDCS_RUN_DIR" \
-  --output "$PDCS_RUN_DIR/utilization_summary.csv"
-```
-
-This experiment is descriptive and must not replace the paired iteration
-experiment.
-
-## 13. Complete all-experiments launch order
-
-After the smoke gates pass, the complete reproduction is:
+After smoke gates pass and CondaPkg is pre-warmed:
 
 ```bash
 FULL_ID="${FULL_ID:-$(date -u +%Y%m%dT%H%M%SZ)_soc_divergence_full}"
 
-# 1. Primary same-branch and secondary branch-divergence timing, 20 seeds.
+# 1. Timing: 10 seeds × iteration + branch
 benchmark/run_soc_divergence_2x2.sh \
   --gpu "$GPU_PHYSICAL" --cuda-home "$CUDA_ROOT" --arch "$GPU_ARCH" \
   --julia "$JULIA_BIN" --julia-depot "$JULIA_DEPOT" \
-  --seeds 2026:2045 --experiments iteration,branch --run-id "$FULL_ID"
+  --seeds 2026:2035 --experiments iteration,branch --run-id "$FULL_ID"
 
 export PDCS_RUN_DIR="$PWD/benchmark/results/rebuttal/soc_divergence_2x2/$FULL_ID"
 
-# 2. Applied parametric-similar timing, four deltas × 20 seeds.
-benchmark/run_soc_parametric_similarity.sh \
-  --run-dir "$PDCS_RUN_DIR" --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" --seeds 2026:2045
-
-# 3. Primary and secondary NCU profiles, seeds 2026–2028.
+# 2. NCU profiling: iteration, 10 seeds
 make -C src/pdcs_gpu/cuda rebuild-gpu \
   CUDA_HOME="$CUDA_ROOT" ARCH="$GPU_ARCH" LINEINFO=-lineinfo
 
 benchmark/profile_soc_divergence_2x2_ncu.sh \
   --run-dir "$PDCS_RUN_DIR" --gpu "$GPU_PHYSICAL" \
   --cuda-home "$CUDA_ROOT" --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" --seeds 2026,2027,2028 \
-  --experiments iteration,branch
+  --julia-depot "$JULIA_DEPOT" --seeds 2026:2035 --experiments iteration
 
-# 4. Parametric NCU profiles, all deltas and seeds 2026–2028.
-benchmark/profile_soc_parametric_ncu.sh \
-  --run-dir "$PDCS_RUN_DIR" --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT"
-
-# 5. Sustained dmon workloads for iteration and branch.
+# 3. Sustained utilization: seed 2026, iteration
 benchmark/run_soc_divergence_2x2_utilization.sh \
   --run-dir "$PDCS_RUN_DIR" --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" --duration 30 \
-  --experiments iteration,branch
+  --cuda-home "$CUDA_ROOT" --julia /tmp/julia_O1_wrapper.sh \
+  --julia-depot "$JULIA_DEPOT" --seed 2026 --duration 30 --experiments iteration
 
-# 6. Sustained dmon workloads for all parametric levels.
-benchmark/run_soc_parametric_utilization.sh \
-  --run-dir "$PDCS_RUN_DIR" --gpu "$GPU_PHYSICAL" \
-  --cuda-home "$CUDA_ROOT" --julia "$JULIA_BIN" \
-  --julia-depot "$JULIA_DEPOT" --duration 30
-
-# 7. Final utilization table.
-"$JULIA_BIN" --project=. benchmark/summarize_soc_divergence_utilization.jl \
-  --root "$PDCS_RUN_DIR" \
-  --output "$PDCS_RUN_DIR/utilization_summary.csv"
+# 4. Final analysis (already run by step 1; re-run if needed)
+"$JULIA_BIN" --project=. benchmark/analyze_soc_divergence_2x2.jl \
+  --root "$PDCS_RUN_DIR" --seeds 2026:2035 --bootstrap 10000 \
+  --output "$PDCS_RUN_DIR"
 ```
 
-Steps 3 and 4 require NCU counter permission. Steps 1, 2, 5, 6, and 7 do not.
+Steps 2–3 can run in any order but must NOT run concurrently (single GPU).
 
-## 14. Result directory
+---
 
-The important artifacts are:
+## 11. Key Bugs Fixed During Reproduction
 
-```text
-environment.txt
-iteration/seed*/case_manifest.csv
-iteration/seed*/case_cache.jls
-iteration/seed*/permutations.csv[.zst]
-iteration/seed*/root_work_raw.csv[.zst]
-iteration/seed*/manipulation_checks.csv
-iteration/seed*/correctness.csv
-iteration/seed*/timings_raw.csv
-iteration/seed*/timings_seed_summary.csv
-branch/seed*/...
-parametric/delta_*/seed*/...
-parametric/parametric_summary.csv
-seed_effects.csv
-effect_estimates.csv
-publication_tables.md
-ncu/*
-nvidia_smi/*
-utilization_summary.csv
-```
+See `DEBUG.md` for full details.
 
-Keep the entire directory immutable. Do not copy a favorable seed from another
-run into an incomplete run.
+| # | Bug | Fix | Files |
+|:--|:---|:---|:---|
+| 12.1 | `--force-overwrite=false` invalid NCU flag | Remove flag | Both `profile_*_ncu.sh` |
+| 12.2 | `--nvtx-include` regex doesn't match | Remove `--nvtx` flags | Both `profile_*_ncu.sh` |
+| 12.3 | `--target-processes all` tracks CondaPkg | Remove flag | Both `profile_*_ncu.sh` |
+| 12.4 | `NVTX.range_push(String)` API mismatch | Use `NVTX.Domain(...)` | `rescaled_soc_divergence_2x2.jl` |
+| 12.5 | Stale CondaPkg lock after SIGKILL | `rm -f .CondaPkg/lock` | Workaround |
+| 14 | CondaPkg pixi hangs NCU forever | `JULIA_CONDAPKG_OFFLINE=true` | Both `profile_*_ncu.sh` |
+| 5 | LLVM 15 SLP vectorizer SIGKILL | `julia -O1` for duration mode | `/tmp/julia_O1_wrapper.sh` |
 
-## 15. Validation status of the scripts
+---
 
-On the preparation machine:
+## 12. Differences from Original Machine
 
-- all three shell scripts passed `bash -n`;
-- all Julia scripts passed parser checks;
-- deterministic generator/layout tests passed 20/20 assertions;
-- diagnostic PTX rebuilt successfully with CUDA 12.6 for `sm_90`;
-- the full smoke runner expanded both experiments correctly in dry-run mode;
-- NCU expanded all four paired cells with native kernel filters and the NVTX
-  range;
-- dmon expanded all four paired cells and retained its cleanup trap;
-- the analysis script completed a synthetic 20-seed paired dataset and
-  generated all effect estimates.
-- the parametric runner expanded both smoke deltas into separate diagnostic
-  generation and production timing processes;
-- the parametric NCU wrapper expanded both strategies for every requested
-  `(delta, seed)` case;
-- the parametric utilization wrapper expanded both strategies for every
-  requested delta;
-- the parametric analyzer completed a synthetic four-level-compatible,
-  20-seed directory schema;
-- every `benchmark/*.jl` or `benchmark/*.sh` path referenced by this runbook
-  exists, all new Julia files parse, and all relevant shell files pass
-  `bash -n`.
-
-The preparation machine currently cannot communicate with the NVIDIA driver:
-even `nvidia-smi -L` fails. Therefore the real-GPU smoke test, manipulation
-gate, full timings, NCU collection, and dmon collection must be executed on
-the reproduction machine. Do not treat dry-run validation as experimental
-data.
+| Original assumption | Actual | Resolution |
+|:---|:---|:---|
+| CUDA 12.6 at `/usr/local/cuda-12.6` | CUDA 12.4 at `/usr/local/cuda` | Use `--cuda-home /usr/local/cuda` |
+| Julia at `$PWD/.julia-bin/julia` | Julia at `~/.juliaup/bin/julia` | Use `--julia` flag |
+| `.julia-depot` at `$PWD/.julia-depot` | Same location | No change |
+| 20 seeds (2026:2045) | 10 seeds (2026:2035) | Per plan §6.1 |
+| `--nvtx-include "PDCS_PROJECTION/"` | NVTX filter doesn't match | Removed (use `--kernel-name`) |
+| NVTX `range_push(String)` | NVTX.jl v1.0.3 needs `Domain` | Create `NVTX.Domain(...)` |
