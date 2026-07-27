@@ -6,8 +6,10 @@ using SHA
 using Statistics
 
 export ConeSet, initial_grid, expanded_grid, generate_candidates,
-       generate_branch_case, generate_parametric_case, select_quartiles,
-       paired_layouts, permutation_hash, multiset_hash, validate_pair
+       generate_branch_case, generate_parametric_case,
+       generate_parametric_family, ParametricFamily, select_quartiles,
+       paired_layouts, permutation_hash, multiset_hash, validate_pair,
+       williams_indices
 
 struct ConeSet
     x::Matrix{Float64}          # dimension × cones
@@ -16,6 +18,27 @@ struct ConeSet
     boundary_ratio::Vector{Float64}
     log_sigma::Vector{Float64}
     construction_class::Vector{Int8}
+end
+
+function williams_indices(n::Integer,row::Integer)
+    n>0 && iseven(n) || error("Williams design requires a positive even size")
+    base=Vector{Int}(undef,n)
+    base[1]=1
+    for position in 2:n
+        base[position]=iseven(position) ? position÷2+1 :
+                       n-(position-3)÷2
+    end
+    shift=mod(row,n)
+    [mod1(value+shift,n) for value in base]
+end
+
+struct ParametricFamily
+    cases::Dict{Float64,ConeSet}
+    ustar::Vector{Float64}
+    ellstar::Vector{Float64}
+    direction_perturbations::Matrix{Float64}
+    diagonal_perturbations::Matrix{Float64}
+    rejection_counts::Dict{Float64,Int}
 end
 
 initial_grid() = (
@@ -132,36 +155,72 @@ function generate_branch_case(count::Integer, dimension::Integer, seed::Integer)
     ConeSet(x, diagonal, Int64.(1:count), fill(NaN, count), fill(1.0, count), classes)
 end
 
-function generate_parametric_case(count::Integer, dimension::Integer, seed::Integer,
-                                  delta::Real)
-    delta in (0.0, 1e-4, 1e-3, 1e-2) ||
-        error("delta must be one of 0, 1e-4, 1e-3, 1e-2")
+function generate_parametric_family(count::Integer, dimension::Integer,
+                                    seed::Integer;
+                                    deltas=(0.0, 1e-4, 1e-3, 1e-2))
+    requested=Float64.(collect(deltas))
+    all(d -> d in (0.0,1e-4,1e-3,1e-2),requested) ||
+        error("deltas must be selected from 0, 1e-4, 1e-3, 1e-2")
+    length(unique(requested))==length(requested) || error("duplicate delta")
+    count>0 || error("count must be positive")
+    dimension>=3 || error("dimension must be at least three")
     q = dimension - 1
     ustar = unit_direction(seed, 0, q; tag=21)
-    dstar = centered_diagonal(seed, 0, q, 1.0; tag=22)
-    ellstar = log.(dstar)
-    x = Matrix{Float64}(undef, dimension, count)
-    diagonal = Matrix{Float64}(undef, dimension, count)
+    ellstar = normal_vector(seed,0,22,q)
+    ellstar .-= mean(ellstar)
+    all(v -> 1e-3 <= exp(v) <= 1e3,ellstar) ||
+        error("base diagonal is outside [1e-3,1e3] for seed $seed")
+    xi = Matrix{Float64}(undef,q,count)
+    zeta = Matrix{Float64}(undef,q,count)
+    rejection_counts=Dict(d=>0 for d in requested)
     for i in 1:count
-        xi = unit_direction(seed, i, q; tag=23)
-        u = ustar .+ delta * norm(ustar) .* xi
-        u ./= norm(u)
-        d = nothing
+        xi[:,i] .= unit_direction(seed,i,q;tag=23)
         attempt=0
-        while d === nothing
-            ell = ellstar .+ delta .* normal_vector(seed,i,24,q,attempt)
-            ell .-= sum(ell) / q
-            candidate = exp.(ell)
-            all(v -> 1e-3 <= v <= 1e3, candidate) && (d = candidate)
+        while true
+            raw=normal_vector(seed,i,24,q,attempt)
+            raw .-= mean(raw)
+            rms=sqrt(sum(abs2,raw)/q)
+            if rms>0
+                candidate=raw./rms
+                valid=true
+                for delta in requested
+                    ell=ellstar .+ delta.*candidate
+                    ell .-= mean(ell)
+                    if !all(v -> 1e-3 <= exp(v) <= 1e3,ell)
+                        rejection_counts[delta]+=1
+                        valid=false
+                    end
+                end
+                valid && (zeta[:,i].=candidate; break)
+            end
             attempt += 1
         end
-        x[1, i] = 0.20norm(d .* u)
-        x[2:end, i] .= u
-        diagonal[1, i] = 1.0
-        diagonal[2:end, i] .= d
     end
-    ConeSet(x, diagonal, Int64.(1:count), fill(0.20, count),
-            fill(Float64(delta), count), fill(Int8(3), count))
+    cases=Dict{Float64,ConeSet}()
+    for delta in requested
+        x=Matrix{Float64}(undef,dimension,count)
+        diagonal=Matrix{Float64}(undef,dimension,count)
+        for i in 1:count
+            u=ustar .+ delta.*@view(xi[:,i])
+            u ./= norm(u)
+            ell=ellstar .+ delta.*@view(zeta[:,i])
+            ell .-= mean(ell)
+            d=exp.(ell)
+            x[1,i]=0.20norm(d.*u)
+            x[2:end,i].=u
+            diagonal[1,i]=1.0
+            diagonal[2:end,i].=d
+        end
+        cases[delta]=ConeSet(x,diagonal,Int64.(1:count),fill(0.20,count),
+            fill(delta,count),fill(Int8(3),count))
+    end
+    ParametricFamily(cases,ustar,ellstar,xi,zeta,rejection_counts)
+end
+
+function generate_parametric_case(count::Integer, dimension::Integer, seed::Integer,
+                                  delta::Real)
+    d=Float64(delta)
+    generate_parametric_family(count,dimension,seed;deltas=(d,)).cases[d]
 end
 
 function select_quartiles(case::ConeSet, work::AbstractVector{<:Integer},
