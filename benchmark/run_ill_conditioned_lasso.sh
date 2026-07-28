@@ -9,7 +9,7 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)_ill_conditioned_lasso"
 OUTPUT_ROOT="$REPO_ROOT/benchmark/results/rebuttal/ill_conditioned_lasso"
 JULIA_BIN="${PDCS_JULIA:-$REPO_ROOT/.julia-bin/julia}"
 JULIA_DEPOT="${JULIA_DEPOT_PATH:-$REPO_ROOT/.julia-depot}"
-SOLVERS="pdcs_cpu,pdcs_gpu,scs,cuclarabel,mosek"
+SOLVERS="pdcs_cpu,pdcs_gpu,scs,clarabel,mosek"
 SEEDS=""
 PANEL=fixed_lambda
 TOLS="1e-3,1e-6"
@@ -63,15 +63,15 @@ case "$PROFILE" in
     M=20000; N=100000; S=200; D=20; LIMIT=7200
     (( SEEDS_SET )) || SEEDS=2026,2027
     # The pilot is already too large for a routine reference solve.  Use
-    # PDCS/SCS/CuClarabel only unless a user deliberately overrides --solvers.
-    (( SOLVERS_SET )) || SOLVERS=pdcs_cpu,pdcs_gpu,scs,cuclarabel
+    # PDCS/SCS/Clarabel only unless a user deliberately overrides --solvers.
+    (( SOLVERS_SET )) || SOLVERS=pdcs_cpu,pdcs_gpu,scs,clarabel
     ;;
   medium)
     M=50000; N=500000; S=500; D=20; LIMIT=7200
     (( SEEDS_SET )) || SEEDS=2026,2027,2028,2029,2030,2031,2032,2033,2034,2035
     # MOSEK is deliberately omitted for the large benchmark.  A user can
     # override this only explicitly, e.g. --solvers pdcs_cpu,mosek.
-    (( SOLVERS_SET )) || SOLVERS=pdcs_cpu,pdcs_gpu,scs,cuclarabel
+    (( SOLVERS_SET )) || SOLVERS=pdcs_cpu,pdcs_gpu,scs,clarabel
     ;;
   *)
     usage >&2
