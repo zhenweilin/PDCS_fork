@@ -295,6 +295,7 @@ end
 # and keep ownership in this module rather than in individual solver calls.
 const _gridWise_cublas_handle = Ref{Union{Nothing,CUBLASHandle}}(nothing)
 const _gridWise_cublas_handle_lock = SpinLock()
+const _gridWise_cublas_atexit_registered = Ref(false)
 
 """
     create_cublas_handle() -> CUBLASHandle
@@ -310,25 +311,23 @@ function create_cublas_handle()
     # Ensure CUDA context exists (required before creating cuBLAS handle)
     CUDA.zeros(Float32, 1)
 
-    # Allocate storage for the handle pointer
-    h = Ref{cublasHandle_t}(C_NULL)
-
-    # Create the handle through the same shared object that executes
-    # `few_block_proj`. CUDA.jl may use a different major cuBLAS version, and
-    # handles must not be passed between cuBLAS ABIs.
-    create_ptr = Libdl.dlsym(_kernlib_ref[], :create_cublas_handle_inner)
-    ccall(create_ptr, Cvoid, (Ref{cublasHandle_t},), h)
-    h[] != C_NULL || error("cublasCreate_v2 returned NULL handle")
-
-    return CUBLASHandle(h[])
+    # Create it through CUDA.jl, so it belongs to the current CUDA context
+    # and uses exactly the same cuBLAS runtime as the CuArray arguments.
+    h = CUDA.CUBLAS.cublasCreate()
+    h != C_NULL || error("cublasCreate_v2 returned NULL handle")
+    # Keep the handle on CUDA's legacy default stream. The shared grid-wise
+    # library launches CUDA C++ kernels and Thrust operations on that stream.
+    # Binding this handle to CUDA.jl's task stream would make the C++ kernels
+    # and cuBLAS reductions race each other.
+    return CUBLASHandle(h)
 end
 
 """
     get_gridWise_cublas_handle() -> CUBLASHandle
 
 Return the process-local cuBLAS handle used by `gridWise_block_proj`, creating
-it on first use. The handle is created and consumed through the same native
-library, so it remains valid when CUDA.jl uses a different cuBLAS ABI.
+it only on first use. It is subsequently reused by every projection in every
+iteration of the solve.
 """
 function get_gridWise_cublas_handle()
     current = _gridWise_cublas_handle[]
@@ -359,11 +358,38 @@ function destroy_cublas_handle(ch::CUBLASHandle)
     # Early return if handle is already null
     ch.handle == C_NULL && return nothing
 
-    # Destroy it through the library that created it (see above).
-    destroy_ptr = Libdl.dlsym(_kernlib_ref[], :destroy_cublas_handle_inner)
-    ccall(destroy_ptr, Cvoid, (cublasHandle_t,), ch.handle)
+    # Destroy through CUDA.jl's cuBLAS wrapper, matching the Julia-side
+    # creation above.
+    CUDA.CUBLAS.cublasDestroy_v2(ch.handle)
     # Mark handle as destroyed
     ch.handle = C_NULL
+    return nothing
+end
+
+"""
+    release_gridWise_cublas_handle!()
+
+Release the cached grid-wise cuBLAS handle. Normal solver calls should not use
+this between projections: the handle is intentionally reused for the whole
+optimization. It is available for explicit teardown after the final solve.
+"""
+function release_gridWise_cublas_handle!()
+    lock(_gridWise_cublas_handle_lock)
+    try
+        current = _gridWise_cublas_handle[]
+        current === nothing || destroy_cublas_handle(current)
+        _gridWise_cublas_handle[] = nothing
+    finally
+        unlock(_gridWise_cublas_handle_lock)
+    end
+    return nothing
+end
+
+"""Register one Julia-side cleanup callback for the cached grid-wise handle."""
+function register_gridWise_cublas_cleanup!()
+    _gridWise_cublas_atexit_registered[] && return nothing
+    _gridWise_cublas_atexit_registered[] = true
+    atexit(release_gridWise_cublas_handle!)
     return nothing
 end
 
@@ -407,11 +433,17 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
     # Get function pointer (must be initialized elsewhere, e.g., in __init__)
     fptr = few_block_proj_ptr[]
     fptr != C_NULL || error("few_block_proj not initialized. Did __init__() run?")
+    # This persistent Julia-owned handle is created only on the first
+    # grid-wise projection and reused throughout the optimization.
     gridWise_handle = get_gridWise_cublas_handle()
+    # CUDA.jl kernels may have been queued on a task-local stream. Complete
+    # them before entering libfew_block_proj.so, whose C++ launches and
+    # default-stream cuBLAS handle are ordered with each other.
+    CUDA.synchronize()
     
     # Call C function from shared library using @ccall macro
     # The function signature matches the C function in libfew_block_proj.so
-    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # cuBLAS handle
+    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # Julia-owned cuBLAS handle
                              vec::CuPtr{Cdouble},   # Vector to project
                              bl::CuPtr{Cdouble},    # Lower bounds
                              bu::CuPtr{Cdouble},    # Upper bounds

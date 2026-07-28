@@ -236,10 +236,12 @@ __global__ void binary_search_case0(double* __restrict__ xiLeft_gpu, double* __r
 }
 
 __global__ void binary_search_case1(double* __restrict__ xiLeft_gpu, double* __restrict__ xiRight_gpu, double* __restrict__ oracleVal_gpu, double *t_warm_start_gpu, bool* __restrict__ d_auxiliary_flag, bool* __restrict__ d_return_flag, double abs_tol, double rel_tol) {
+  // For t < 0, f(xi) is increasing on (1/2, +inf): a negative value
+  // means the root is to the right of the current midpoint.
   if (*d_auxiliary_flag){
-    *xiRight_gpu = *t_warm_start_gpu;
-  }else{
     *xiLeft_gpu = *t_warm_start_gpu;
+  }else{
+    *xiRight_gpu = *t_warm_start_gpu;
   }
   if ((xiRight_gpu[0] - xiLeft_gpu[0]) / (1 + xiRight_gpu[0] + xiLeft_gpu[0]) <= rel_tol || fabs(oracleVal_gpu[0]) <= abs_tol){
     *d_return_flag = true;
@@ -269,7 +271,6 @@ __global__ void recover_sol_case3(double* __restrict__ sol_gpu, double* __restri
   }
 }
 
-
 extern "C" void soc_proj_diagonal(cublasHandle_t handle,
                                  double* sol_gpu,
                                  long* len_gpu,
@@ -287,105 +288,113 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
                                  bool* d_auxiliary_flag,
                                  double abs_tol,
                                  double rel_tol) {
+  // This is deliberately a cuBLAS implementation: Dnrm2 performs the
+  // large-vector reductions while small kernels only evaluate/recover the
+  // scalar root.  The temporary root bounds must not alias D_scaled[0] or
+  // D_scaled_squared[0], which are persistent solver scaling data.
   cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
-  double scale_factor_inv = minVal_inv;
+  const double scale_factor_inv = minVal_inv;
   cublasDscal_v2(handle, *n_cpu, &scale_factor_inv, sol_gpu, 1);
   cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
-  double *x2end = sol_gpu + 1;
-  double *D_scaled_part = D_scaled_gpu + 1;
-  double *temp_part = temp_gpu + 1;
-  double *D_scaled_mul_x_part = D_scaled_mul_x_gpu + 1;
-  double *D_scaled_squared_part = D_scaled_squared_gpu + 1;
-  bool h_return_flag = false;
-  bool h_auxiliary_flag = false;
-  double *xiRight_gpu = D_scaled_gpu;
-  double *xiLeft_gpu = D_scaled_squared_gpu;
-  double *oracleVal_gpu = temp_gpu;
 
-  thrust::device_ptr<double> x2end_thrust = thrust::device_pointer_cast(x2end);
-  thrust::device_ptr<double> temp_thrust = thrust::device_pointer_cast(temp_part);
-  thrust::device_ptr<double> D_scaled_part_thrust = thrust::device_pointer_cast(D_scaled_part);
-  thrust::device_ptr<double> D_scaled_mul_x_part_thrust = thrust::device_pointer_cast(D_scaled_mul_x_part);
-  thrust::device_ptr<double> D_scaled_squared_part_thrust = thrust::device_pointer_cast(D_scaled_squared_part);
+  double* x_tail = sol_gpu + 1;
+  double* d_tail = D_scaled_gpu + 1;
+  double* d_squared_tail = D_scaled_squared_gpu + 1;
+  double* d_times_x_tail = D_scaled_mul_x_gpu + 1;
+  double* work_tail = temp_gpu + 1;
+  double* oracle = temp_gpu;
+  bool host_flag = false;
 
-  thrust::transform(x2end_thrust, x2end_thrust + *len_cpu, D_scaled_part_thrust, temp_thrust, thrust::divides<double>());
-  // vvrscl<<<nBlock, nThread>>>(len_gpu, x2end, D_scaled_part, temp_part);
-  cublasDnrm2_v2(handle, *len_cpu, temp_part, 1, oracleVal_gpu);
+  thrust::device_ptr<double> x_thrust = thrust::device_pointer_cast(x_tail);
+  thrust::device_ptr<double> d_thrust = thrust::device_pointer_cast(d_tail);
+  thrust::device_ptr<double> d_times_x_thrust = thrust::device_pointer_cast(d_times_x_tail);
+  thrust::device_ptr<double> work_thrust = thrust::device_pointer_cast(work_tail);
 
-  soc_cone_dual<<<nBlock, nThread>>>(sol_gpu, n_gpu, oracleVal_gpu, d_return_flag);
-  cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-  if (h_return_flag){
-    // printf("soc_cone_dual return\n");
-    return;
-  }
-  // // // D_scaled_mul_x_part = D_scaled_part .* x2end
-  // vvscal<<<nBlock, nThread>>>(len_gpu, D_scaled_part, x2end, D_scaled_mul_x_part);
-  thrust::transform(D_scaled_part_thrust, D_scaled_part_thrust + *len_cpu, x2end_thrust, D_scaled_mul_x_part_thrust, thrust::multiplies<double>());
-  cublasDnrm2_v2(handle, *len_cpu, D_scaled_mul_x_part, 1, temp_gpu);
-  soc_cone_heuristic<<<1, 1>>>(sol_gpu, temp_gpu, d_return_flag);
-  cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-  if (h_return_flag){
-    double scale_factor = minVal;
+  // Test the polar cone with ||x ./ D||.
+  thrust::transform(x_thrust, x_thrust + *len_cpu, d_thrust, work_thrust,
+                    thrust::divides<double>());
+  cublasDnrm2_v2(handle, *len_cpu, work_tail, 1, oracle);
+  cudaMemset(d_return_flag, 0, sizeof(bool));
+  soc_cone_dual<<<nBlock, nThread>>>(sol_gpu, n_gpu, oracle, d_return_flag);
+  cudaMemcpy(&host_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+  if (host_flag) return;
+
+  // Test feasibility with ||D .* x||.
+  thrust::transform(d_thrust, d_thrust + *len_cpu, x_thrust,
+                    d_times_x_thrust, thrust::multiplies<double>());
+  cublasDnrm2_v2(handle, *len_cpu, d_times_x_tail, 1, oracle);
+  cudaMemset(d_return_flag, 0, sizeof(bool));
+  soc_cone_heuristic<<<1, 1>>>(sol_gpu, oracle, d_return_flag);
+  cudaMemcpy(&host_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+  if (host_flag) {
+    const double scale_factor = minVal;
     cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
     cublasDscal_v2(handle, *n_cpu, &scale_factor, sol_gpu, 1);
+    cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
     return;
   }
+
   double sol0;
   cudaMemcpy(&sol0, sol_gpu, sizeof(double), cudaMemcpyDeviceToHost);
+  double *xi_left, *xi_right;
+  cudaMalloc(&xi_left, sizeof(double));
+  cudaMalloc(&xi_right, sizeof(double));
+
   if (sol0 >= rel_tol) {
-    check_t_range_case0<<<1, 1>>>(t_warm_start_gpu, xiLeft_gpu, xiRight_gpu, oracleVal_gpu, d_auxiliary_flag);
-    cudaMemcpy(&h_auxiliary_flag, d_auxiliary_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    if (h_auxiliary_flag){
-      oracle_soc_f_sqrt_case0(handle, t_warm_start_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, oracleVal_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-      if (h_return_flag){
-        recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu, D_scaled_squared_gpu, n_gpu);
-        return;
-      }
-      binary_search_case0<<<1, 1>>>(xiLeft_gpu, xiRight_gpu, oracleVal_gpu, t_warm_start_gpu, d_auxiliary_flag, d_return_flag, abs_tol, rel_tol);
+    const double left = 0.0, right = 0.5;
+    cudaMemcpy(xi_left, &left, sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(xi_right, &right, sizeof(double), cudaMemcpyHostToDevice);
+    for (int iter = 0; iter < 256; ++iter) {
+      average_xi<<<1, 1>>>(xi_left, xi_right, t_warm_start_gpu);
+      cudaMemset(d_return_flag, 0, sizeof(bool));
+      oracle_soc_f_sqrt_case0(handle, t_warm_start_gpu, sol_gpu,
+          d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
+          nThread, nBlock, oracle, d_return_flag, d_auxiliary_flag,
+          abs_tol, rel_tol);
+      binary_search_case0<<<1, 1>>>(xi_left, xi_right, oracle,
+          t_warm_start_gpu, d_auxiliary_flag, d_return_flag, abs_tol, rel_tol);
+      cudaMemcpy(&host_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+      if (host_flag) break;
     }
-    cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    while (!h_return_flag) {
-      average_xi<<<1, 1>>>(xiLeft_gpu, xiRight_gpu, t_warm_start_gpu);
-      oracle_soc_f_sqrt_case0(handle, t_warm_start_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, oracleVal_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-      binary_search_case0<<<1, 1>>>(xiLeft_gpu, xiRight_gpu, oracleVal_gpu, t_warm_start_gpu, d_auxiliary_flag, d_return_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+    recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu,
+                                              D_scaled_squared_gpu, n_gpu);
+  } else if (sol0 <= -rel_tol) {
+    double left = 0.5, right = 1.0;
+    cudaMemcpy(xi_left, &left, sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(xi_right, &right, sizeof(double), cudaMemcpyHostToDevice);
+    // Expand the upper bound until f(right) is nonnegative.
+    for (int grow = 0; grow < 256; ++grow) {
+      cudaMemset(d_return_flag, 0, sizeof(bool));
+      oracle_soc_f_sqrt_case1(handle, xi_right, sol_gpu, d_times_x_tail,
+          d_squared_tail, work_tail, len_cpu, len_gpu, nThread, nBlock,
+          oracle, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
+      bool negative = false;
+      cudaMemcpy(&negative, d_auxiliary_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+      if (!negative) break;
+      enlarge_xi_right<<<1, 1>>>(xi_left, xi_right);
     }
-    recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu, D_scaled_squared_gpu, n_gpu);
-    return;
-  }
-  else if (sol0 <= -rel_tol) {
-    initialize_case1<<<1, 1>>>(xiRight_gpu, xiLeft_gpu, oracleVal_gpu);
-    oracle_soc_f_sqrt_case1(handle, xiRight_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, temp_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-    cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    if (h_return_flag){
-      return;
+    for (int iter = 0; iter < 256; ++iter) {
+      average_xi<<<1, 1>>>(xi_left, xi_right, t_warm_start_gpu);
+      cudaMemset(d_return_flag, 0, sizeof(bool));
+      oracle_soc_f_sqrt_case1(handle, t_warm_start_gpu, sol_gpu,
+          d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
+          nThread, nBlock, oracle, d_return_flag, d_auxiliary_flag,
+          abs_tol, rel_tol);
+      binary_search_case1<<<1, 1>>>(xi_left, xi_right, oracle,
+          t_warm_start_gpu, d_auxiliary_flag, d_return_flag, abs_tol, rel_tol);
+      cudaMemcpy(&host_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+      if (host_flag) break;
     }
-    cudaMemcpy(&h_auxiliary_flag, d_auxiliary_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    while (h_auxiliary_flag) {
-      enlarge_xi_right<<<1, 1>>>(xiLeft_gpu, xiRight_gpu);
-      oracle_soc_f_sqrt_case1(handle, xiRight_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, temp_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_auxiliary_flag, d_auxiliary_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    }
-    average_xi<<<1, 1>>>(xiLeft_gpu, xiRight_gpu, t_warm_start_gpu);
-    oracle_soc_f_sqrt_case1(handle, t_warm_start_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, temp_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-    cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    while (!h_return_flag) {
-      average_xi<<<1, 1>>>(xiLeft_gpu, xiRight_gpu, t_warm_start_gpu);
-      oracle_soc_f_sqrt_case1(handle, t_warm_start_gpu, sol_gpu, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread, nBlock, temp_gpu, d_return_flag, d_auxiliary_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-      binary_search_case1<<<1, 1>>>(xiRight_gpu, xiLeft_gpu, oracleVal_gpu, t_warm_start_gpu, d_auxiliary_flag, d_return_flag, abs_tol, rel_tol);
-      cudaMemcpy(&h_return_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-    }
-    recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu, D_scaled_squared_gpu, n_gpu);
-    return;
-  }
-  else {
-    recover_sol_case3<<<nBlock, nThread>>>(sol_gpu, temp_gpu, D_scaled_gpu, n_gpu, t_warm_start_gpu, D_scaled_squared_gpu);
+    recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu,
+                                              D_scaled_squared_gpu, n_gpu);
+  } else {
+    recover_sol_case3<<<nBlock, nThread>>>(sol_gpu, temp_gpu, D_scaled_gpu,
+                                            n_gpu, t_warm_start_gpu,
+                                            D_scaled_squared_gpu);
     cublasDnrm2_v2(handle, *len_cpu, temp_gpu + 1, 1, sol_gpu);
-    return;
   }
+  cudaFree(xi_left);
+  cudaFree(xi_right);
 }
 
 
@@ -535,20 +544,4 @@ extern "C" void few_block_proj(cublasHandle_t handle,
       exponent_proj_diagonal_kernel<<<1, 1>>>(sol, sub_temp, &t_warm_start[i], abs_tol, rel_tol);
     }
   }
-}
-
-void check_status(cublasStatus_t status){
-  if (status != CUBLAS_STATUS_SUCCESS){
-    printf("cuBLAS error with status code: %d\n", status);
-  }
-}
-
-extern "C" void create_cublas_handle_inner(cublasHandle_t* handle){
-  cublasStatus_t status = cublasCreate(handle);
-  check_status(status);
-}
-
-extern "C" void destroy_cublas_handle_inner(cublasHandle_t handle){
-  cublasStatus_t status = cublasDestroy(handle);
-  check_status(status);
 }

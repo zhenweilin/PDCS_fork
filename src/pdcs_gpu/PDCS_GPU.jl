@@ -59,6 +59,7 @@ function __init__()
     few_block_proj_ptr[] = Libdl.dlsym(_kernlib_ref[], :few_block_proj)
 
     few_block_proj_ptr[] != C_NULL || error("Cannot find symbol `few_block_proj` in $libpath")
+    register_gridWise_cublas_cleanup!()
 end
 
 
