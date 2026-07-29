@@ -328,7 +328,9 @@ function MOI.supports_constraint(
             MOI.Zeros,
             MOI.Nonnegatives,
             MOI.SecondOrderCone,
-            MOI.RotatedSecondOrderCone,
+            # RSOC is not a native capability yet. Do not advertise it here:
+            # MOI may otherwise bridge an ordinary SOC into the incomplete
+            # RSOC execution path.
             MOI.ExponentialCone,
             MOI.DualExponentialCone,
             # MOI.PowerCone{Float64},
