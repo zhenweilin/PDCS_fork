@@ -412,6 +412,10 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_aggressive::Bool = true,
     use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
+    use_restart::Bool = use_adaptive_restart,
+    use_adaptive_step::Bool = true,
+    use_reflection::Bool = use_aggressive,
+    use_halpern::Bool = true,
     primal_sol::CuArray{rpdhg_float} = CuArray(zeros(n)),
     dual_sol::CuArray{rpdhg_float} = CuArray(zeros(m)),
     warm_start::Bool = false,
@@ -470,6 +474,11 @@ dGType<:Union{
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
+        @info ("use_restart: $use_restart")
+        @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("use_reflection: $use_reflection")
+        @info ("use_halpern: $use_halpern")
+        @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
         @info ("duality_gap_restart_freq: $duality_gap_restart_freq")
         @info ("use_kkt_restart: $use_kkt_restart")
@@ -902,6 +911,12 @@ dGType<:Union{
                                 sigma = 0.0,
                                 tau = 0.0,
                                 theta = 0.5,
+                                use_restart = use_restart,
+                                use_adaptive_step = use_adaptive_step,
+                                use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                use_reflection = use_reflection,
+                                use_halpern = use_halpern,
+                                use_resolving = use_resolving,
                                 verbose = verbose,
                                 use_kkt_restart = use_kkt_restart,
                                 kkt_restart_freq = kkt_restart_freq,
@@ -973,8 +988,12 @@ dGType<:Union{
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y
             )
+        elseif rescaling_method == :none
+            if verbose > 0
+                @info "Diagonal rescaling disabled; using identity scaling vectors."
+            end
         else
-            throw(ArgumentError("The rescaling method is not defined, two choices: :ruiz, :pock_chambolle, :ruiz_pock_chambolle"))
+            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, or :ruiz_pock_chambolle"))
         end
         scale_preconditioner!(
             Dr_product = solver.data.diagonal_scale.Dr_product.x,
@@ -1052,9 +1071,14 @@ dGType<:Union{
     # main loop, all data and variables are put in ``solver`` and ``sol`` two structs
 
     if method == :halpern 
-        @info ("Start halpern method, which is not test yet")
+        throw(ArgumentError("method=:halpern is an untested legacy path; use the orthogonal use_halpern option with method=:average"))
     elseif method == :average
-        if !use_preconditioner && !use_adaptive_restart && !use_adaptive_step_size_weight
+        if use_preconditioner
+            if verbose > 0
+                @info "Start unified diagonal GPU loop for the ablation-compatible production path."
+            end
+            main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_aggressive!
+        elseif !use_preconditioner && !use_adaptive_restart && !use_adaptive_step_size_weight
             if verbose > 0
                 @info ("Start average method without preconditioner, adaptive restart and adaptive step size weight")
             end
@@ -1237,6 +1261,10 @@ function rpdhg_gpu_solve(;
     use_aggressive::Bool = true,
     use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
+    use_restart::Bool = use_adaptive_restart,
+    use_adaptive_step::Bool = true,
+    use_reflection::Bool = use_aggressive,
+    use_halpern::Bool = true,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
     warm_start::Bool = false,
@@ -1289,6 +1317,11 @@ function rpdhg_gpu_solve(;
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
+        @info ("use_restart: $use_restart")
+        @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("use_reflection: $use_reflection")
+        @info ("use_halpern: $use_halpern")
+        @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
         @info ("duality_gap_restart_freq: $duality_gap_restart_freq")
         @info ("use_kkt_restart: $use_kkt_restart")
@@ -1720,6 +1753,12 @@ function rpdhg_gpu_solve(;
                                 sigma = 0.0,
                                 tau = 0.0,
                                 theta = 0.5,
+                                use_restart = use_restart,
+                                use_adaptive_step = use_adaptive_step,
+                                use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                use_reflection = use_reflection,
+                                use_halpern = use_halpern,
+                                use_resolving = use_resolving,
                                 verbose = verbose,
                                 use_kkt_restart = use_kkt_restart,
                                 kkt_restart_freq = kkt_restart_freq,
@@ -1791,8 +1830,12 @@ function rpdhg_gpu_solve(;
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y
             )
+        elseif rescaling_method == :none
+            if verbose > 0
+                @info "Diagonal rescaling disabled; using identity scaling vectors."
+            end
         else
-            throw(ArgumentError("The rescaling method is not defined, two choices: :ruiz, :pock_chambolle, :ruiz_pock_chambolle"))
+            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, or :ruiz_pock_chambolle"))
         end
         # println("scale_preconditioner")
         scale_preconditioner!(
@@ -1876,9 +1919,14 @@ function rpdhg_gpu_solve(;
     # main loop, all data and variables are put in ``solver`` and ``sol`` two structs
 
     if method == :halpern 
-        @info ("Start halpern method, which is not test yet")
+        throw(ArgumentError("method=:halpern is an untested legacy path; use the orthogonal use_halpern option with method=:average"))
     elseif method == :average
-        if !use_preconditioner && !use_adaptive_restart && !use_adaptive_step_size_weight
+        if use_preconditioner
+            if verbose > 0
+                @info "Start unified diagonal GPU loop for the ablation-compatible production path."
+            end
+            main_loop! = pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_resolving_aggressive!
+        elseif !use_preconditioner && !use_adaptive_restart && !use_adaptive_step_size_weight
             if verbose > 0
                 @info ("Start average method without preconditioner, adaptive restart and adaptive step size weight")
             end
@@ -1974,6 +2022,10 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
             use_aggressive = solver.use_aggressive,
             use_resolving = solver.use_resolving,
+            use_restart = solver.use_restart,
+            use_adaptive_step = solver.use_adaptive_step,
+            use_reflection = solver.use_reflection,
+            use_halpern = solver.use_halpern,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
             warm_start = solver.warm_start,
@@ -1986,7 +2038,11 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             kkt_restart_freq = solver.kkt_restart_freq,
             use_duality_gap_restart = solver.use_duality_gap_restart,
             duality_gap_restart_freq = solver.duality_gap_restart_freq,
-            verbose = solver.verbose
+            check_terminate_freq = solver.check_terminate_freq,
+            print_freq = solver.print_freq,
+            verbose = solver.verbose,
+            time_limit = solver.time_limit,
+            method = solver.method
         )
     else
         rpdhg_gpu_solve(
@@ -2015,6 +2071,10 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
             use_aggressive = solver.use_aggressive,
             use_resolving = solver.use_resolving,
+            use_restart = solver.use_restart,
+            use_adaptive_step = solver.use_adaptive_step,
+            use_reflection = solver.use_reflection,
+            use_halpern = solver.use_halpern,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
             warm_start = solver.warm_start,
@@ -2027,7 +2087,11 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             kkt_restart_freq = solver.kkt_restart_freq,
             use_duality_gap_restart = solver.use_duality_gap_restart,
             duality_gap_restart_freq = solver.duality_gap_restart_freq,
-            verbose = solver.verbose
+            check_terminate_freq = solver.check_terminate_freq,
+            print_freq = solver.print_freq,
+            verbose = solver.verbose,
+            time_limit = solver.time_limit,
+            method = solver.method
         )
     end
 

@@ -348,7 +348,59 @@ function exit_condition_check_diagonal!(; sol::Solution, solver::rpdhgSolver, du
         pObj_seq = sol.info.convergeInfo[1].primal_objective,
         dObj_seq = sol.info.convergeInfo[1].dual_objective)
     sol.info.time = time() - sol.info.start_time
-    check_termination_criteria(info = sol.info, params = sol.params)
+    termination_result = check_termination_criteria(
+        info = sol.info,
+        params = sol.params,
+    )
+
+    # `check_termination_criteria` accepts either the current sequence or its
+    # running mean.  The old MOI path always exported the current sequence,
+    # even when convergenceInfo[2] (the mean) triggered termination.  Select
+    # the actual terminating candidate and then recompute its residuals/slack
+    # so the returned vectors and reported metrics describe the same point.
+    current_info = sol.info.convergeInfo[1]
+    mean_info = sol.info.convergeInfo[2]
+    current_error = max(
+        current_info.l_inf_rel_primal_res,
+        current_info.l_inf_rel_dual_res,
+        current_info.rel_gap,
+    )
+    mean_error = max(
+        mean_info.l_inf_rel_primal_res,
+        mean_info.l_inf_rel_dual_res,
+        mean_info.rel_gap,
+    )
+    use_mean = if termination_result == :optimal
+        mean_info.status == :optimal &&
+            (current_info.status != :optimal || mean_error < current_error)
+    elseif termination_result == :time_limit || termination_result == :max_iter
+        mean_error < current_error
+    else
+        false
+    end
+    if use_mean
+        sol.x.primal_sol.x .= sol.x.primal_sol_mean.x
+        sol.y.dual_sol.y .= sol.y.dual_sol_mean.y
+        sol.x.recovered_primal.primal_sol.x .=
+            sol.x.recovered_primal.primal_sol_mean.x
+        sol.y.recovered_dual.dual_sol.y .=
+            sol.y.recovered_dual.dual_sol_mean.y
+    end
+    if termination_result == :optimal ||
+       termination_result == :time_limit ||
+       termination_result == :max_iter
+        converge_info_calculation_diagonal!(
+            solver = solver,
+            primal_sol = sol.x.recovered_primal.primal_sol,
+            dual_sol = sol.y.recovered_dual.dual_sol,
+            slack = sol.y.slack,
+            dual_sol_temp = dual_sol_temp,
+            converge_info = sol.info.convergeInfo[1],
+        )
+        sol.info.pObj = sol.info.convergeInfo[1].primal_objective
+        sol.info.dObj = sol.info.convergeInfo[1].dual_objective
+    end
+    return termination_result
 end
 
 function restart_threshold_calculation_diagonal!(; sol::Solution, solver::rpdhgSolver, primal_sol_0::primalVector, dual_sol_0::dualVector, dual_sol_temp::solVecDual, primal_sol_0_lag::CuArray, dual_sol_0_lag::CuArray, restart_duality_gap_flag::Bool)
@@ -663,8 +715,9 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
     dual_sol_temp::solVecDual,
     primal_sol_change::primalVector,
     dual_sol_change::dualVector,
-    random_check::Bool)
-    eta = max(eta, 1e-6)
+    random_check::Bool,
+    use_adaptive_step::Bool = true)
+    eta = use_adaptive_step ? max(eta, 1e-6) : max(eta, 1e-30)
     x.primal_sol_lag.x .= x.primal_sol.x
     y.dual_sol_lag.y .= y.dual_sol.y
 
@@ -673,7 +726,9 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
     dual_sol_diff = dual_sol_temp.dual_sol_lag
 
     sol = solver.sol
-    decay_step_size_ratio = min(0.9 + 0.1 * log10(sol.info.max_kkt_error * 10.0^5), 1.0)
+    decay_step_size_ratio = use_adaptive_step ?
+        min(0.9 + 0.1 * log10(sol.info.max_kkt_error * 10.0^5), 1.0) :
+        1.0
     # println("decay_step_size_ratio: ", decay_step_size_ratio)
     # decay_step_size_ratio = 1.0
     count = 0
@@ -703,17 +758,21 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
         dual_update(y.dual_sol.y, y.dual_sol_lag.y, dual_sol_diff.y, solver.data.coeff.d_h, dual_step_size, solver.data.m)
         global time_iterative += time() - time_start
         y.proj_diagonal!(y.dual_sol, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
-        ## calculate eta_bar and eta_prime
-        time_start = time()
-        # dual_sol_diff.y .= y.dual_sol.y - y.dual_sol_lag.y
-        # primal_sol_diff.x .= x.primal_sol.x .- x.primal_sol_lag.x
-        calculate_diff(y.dual_sol.y, y.dual_sol_lag.y, dual_sol_diff.y, solver.data.m, x.primal_sol.x, x.primal_sol_lag.x, primal_sol_diff.x, solver.data.n)
-        eta_bar_numerator = omega_norm_square(x = primal_sol_diff.x, y = dual_sol_diff.y, omega = sol.info.omega)
-        solver.adjointMV!(solver.data.coeff, dual_sol_diff, primal_sol_temp.x)
-        eta_bar_denominator = 2 * abs(dot(primal_sol_diff.x, primal_sol_temp.x))
-        eta_bar = eta_bar_numerator / (eta_bar_denominator + positive_zero)
-        eta_prime = min((1 - (info.iter_stepsize+1)^(-0.3)) * eta_bar, (1+(info.iter_stepsize+1)^(-0.6)) * eta)
-        global time_iterative += time() - time_start
+        eta_bar = eta
+        eta_prime = eta
+        if use_adaptive_step
+            ## calculate eta_bar and eta_prime
+            time_start = time()
+            # dual_sol_diff.y .= y.dual_sol.y - y.dual_sol_lag.y
+            # primal_sol_diff.x .= x.primal_sol.x .- x.primal_sol_lag.x
+            calculate_diff(y.dual_sol.y, y.dual_sol_lag.y, dual_sol_diff.y, solver.data.m, x.primal_sol.x, x.primal_sol_lag.x, primal_sol_diff.x, solver.data.n)
+            eta_bar_numerator = omega_norm_square(x = primal_sol_diff.x, y = dual_sol_diff.y, omega = sol.info.omega)
+            solver.adjointMV!(solver.data.coeff, dual_sol_diff, primal_sol_temp.x)
+            eta_bar_denominator = 2 * abs(dot(primal_sol_diff.x, primal_sol_temp.x))
+            eta_bar = eta_bar_numerator / (eta_bar_denominator + positive_zero)
+            eta_prime = min((1 - (info.iter_stepsize+1)^(-0.3)) * eta_bar, (1+(info.iter_stepsize+1)^(-0.6)) * eta)
+            global time_iterative += time() - time_start
+        end
         flag_random_check = (random_check && Int(ceil(sol.info.time)) % 3179 == 0)
         if sol.info.iter %  sol.params.check_terminate_freq == 0 || (sol.params.verbose > 0 && sol.info.iter % sol.params.print_freq == 0) || flag_random_check
             exit_condition_check_diagonal!(; sol = sol, solver = solver, dual_sol_temp = dual_sol_temp)
@@ -749,6 +808,9 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
                 return eta, eta_prime, false
             end
         end # end if print_freq
+        if !use_adaptive_step
+            return eta, eta, false
+        end
         if eta <= eta_bar
             return eta, eta_prime, false
         end
@@ -780,7 +842,19 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
     primal_sol_diff = deepCopyPrimalVector(sol.x.primal_sol)
     dual_sol_diff = deepCopyDualVector(sol.y.dual_sol)
     GInf = norm(solver.data.coeff.d_G, Inf)
-    eta_prime = 1 / GInf
+    if sol.params.use_adaptive_step
+        eta_prime = 1 / GInf
+    else
+        solver.data.GlambdaMax, solver.data.GlambdaMax_flag = power_method!(
+            solver.data.coeffTrans,
+            solver.data.coeff,
+            solver.AtAMV!,
+            dual_sol_change,
+        )
+        norm_G = max(solver.data.GlambdaMax, 1e-30)
+        eta_prime = (solver.data.GlambdaMax_flag == 0 ? 0.9 : 0.8) / norm_G
+        @info "Fixed step enabled: eta=$(eta_prime), estimated_norm_G=$(norm_G), power_method_flag=$(solver.data.GlambdaMax_flag)"
+    end
     random_check = false
     for outer_iter = 1 : sol.params.max_outer_iter
         update_best_sol!(sol = sol)
@@ -796,22 +870,25 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
         dual_sol_0.y .= sol.y.dual_sol_mean.y
         sol.x.primal_sol.x .= sol.x.primal_sol_mean.x
         sol.y.dual_sol.y .= sol.y.dual_sol_mean.y
-        time_start = time()
-        if sol.params.use_kkt_restart
-            restart_threshold_calculation_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, primal_sol_0_lag = primal_sol_0_lag, dual_sol_0_lag = dual_sol_0_lag, restart_duality_gap_flag = false)
-        else
-            if sol.info.restart_duality_gap_flag
-                restart_threshold_calculation_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, primal_sol_0_lag = primal_sol_0_lag, dual_sol_0_lag = dual_sol_0_lag, restart_duality_gap_flag = true)
-            else
+        if sol.params.use_restart
+            time_start = time()
+            if sol.params.use_kkt_restart
                 restart_threshold_calculation_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, primal_sol_0_lag = primal_sol_0_lag, dual_sol_0_lag = dual_sol_0_lag, restart_duality_gap_flag = false)
+            else
+                if sol.info.restart_duality_gap_flag
+                    restart_threshold_calculation_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, primal_sol_0_lag = primal_sol_0_lag, dual_sol_0_lag = dual_sol_0_lag, restart_duality_gap_flag = true)
+                else
+                    restart_threshold_calculation_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, primal_sol_0_lag = primal_sol_0_lag, dual_sol_0_lag = dual_sol_0_lag, restart_duality_gap_flag = false)
+                end
             end
+            global time_restart_check += time() - time_start
         end
-        global time_restart_check += time() - time_start
         flag_one = (outer_iter > 10 && sol.info.max_kkt_error > 1e+5)
         flag_two = (outer_iter > 80 && ((sol.info.convergeInfo[1].l_2_rel_primal_res / sol.info.convergeInfo[1].l_2_rel_dual_res) > 1e+10 || sol.info.convergeInfo[1].l_2_rel_primal_res / sol.info.convergeInfo[1].l_2_rel_dual_res < 1e-10))
         flag_three = (outer_iter > 10 && sol.params.tau < 1e-6 && sol.params.sigma < 1e-6)
         flag_four = (sol.info.iter > 1000000 && (sol.info.convergeInfo[1].rel_gap > 0.98 && sol.info.convergeInfo[1].l_2_rel_primal_res > 1.0 && sol.info.convergeInfo[1].l_2_rel_dual_res > 1.0))
-        if  flag_one || flag_two || flag_three || flag_four
+        if sol.params.use_restart && sol.params.use_resolving &&
+           (flag_one || flag_two || flag_three || flag_four)
             if flag_one
                 @info ("resolving pessimistic step adaptive restart resolving... since flag_one")
             elseif flag_two
@@ -846,7 +923,8 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                     solver = solver, x = sol.x, y = sol.y, eta = eta_prime, 
                     omega = sol.info.omega, info = sol.info, slack = sol.y.slack, 
                     dual_sol_temp = dual_sol_temp, primal_sol_change = primal_sol_change, 
-                    dual_sol_change = dual_sol_change, random_check = random_check
+                    dual_sol_change = dual_sol_change, random_check = random_check,
+                    use_adaptive_step = sol.params.use_adaptive_step
                 )
             if sol.info.exit_status != :continue
                 return
@@ -857,14 +935,35 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
             # # average update
             # sol.x.primal_sol_mean.x .= (sol.x.primal_sol_mean.x * eta_cum .+ sol.x.primal_sol.x * eta) / (eta_cum + eta)
             # sol.y.dual_sol_mean.y .= (sol.y.dual_sol_mean.y * eta_cum .+ sol.y.dual_sol.y * eta) / (eta_cum + eta)
-            reflection_update(sol.x.primal_sol.x, sol.x.primal_sol_lag.x, sol.x.primal_sol_mean.x, sol.y.dual_sol.y, sol.y.dual_sol_lag.y, sol.y.dual_sol_mean.y, extra_coeff, solver.data.n, solver.data.m, inner_iter, eta_cum, eta)
+            reflection_update(
+                sol.x.primal_sol.x,
+                sol.x.primal_sol_lag.x,
+                sol.x.primal_sol_mean.x,
+                primal_sol_0.x,
+                sol.y.dual_sol.y,
+                sol.y.dual_sol_lag.y,
+                sol.y.dual_sol_mean.y,
+                dual_sol_0.y,
+                extra_coeff,
+                solver.data.n,
+                solver.data.m,
+                inner_iter,
+                eta_cum,
+                eta,
+                sol.params.use_reflection,
+                sol.params.use_halpern,
+            )
             eta_cum += eta
-            if (inner_iter >= sol.info.iter * sol.params.beta_artificial && sol.info.iter > 10000) || (force_restart && inner_iter > 100)
+            if sol.params.use_restart &&
+               ((inner_iter >= sol.info.iter * sol.params.beta_artificial && sol.info.iter > 10000) ||
+                (force_restart && inner_iter > 100))
                 @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter) or force_restart")
                 sol.info.restart_used = sol.info.restart_used + 1
                 break
             end # end if inner_iter
-            if (sol.info.iter %  sol.params.kkt_restart_freq == 0) && sol.params.use_kkt_restart
+            if sol.params.use_restart &&
+               (sol.info.iter % sol.params.kkt_restart_freq == 0) &&
+               sol.params.use_kkt_restart
                 if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false)
                     break
                 end
@@ -872,7 +971,9 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                     break
                 end # end if outer_iter
             end # end if check restart
-            if (sol.info.iter %  sol.params.duality_gap_restart_freq == 0) && sol.params.use_duality_gap_restart
+            if sol.params.use_restart &&
+               (sol.info.iter % sol.params.duality_gap_restart_freq == 0) &&
+               sol.params.use_duality_gap_restart
                 if sol.info.restart_duality_gap_flag
                     if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = true)
                         break
@@ -890,7 +991,9 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
         end # end inner_iter loop
         primal_sol_diff.x .-= sol.x.primal_sol.x
         dual_sol_diff.y .-= sol.y.dual_sol.y
-        sol.info.omega = dynamic_primal_weight_update(theta = sol.params.theta, x_diff = primal_sol_diff.x, y_diff = dual_sol_diff.y, omega = sol.info.omega, restart_times = sol.info.restart_used, solver = solver)
+        if sol.params.use_adaptive_step_size_weight
+            sol.info.omega = dynamic_primal_weight_update(theta = sol.params.theta, x_diff = primal_sol_diff.x, y_diff = dual_sol_diff.y, omega = sol.info.omega, restart_times = sol.info.restart_used, solver = solver)
+        end
     end # end outer_iter loop
     sol.info.exit_status = :max_iter
 end

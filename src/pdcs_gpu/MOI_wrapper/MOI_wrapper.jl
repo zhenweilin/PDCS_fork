@@ -200,8 +200,48 @@ mutable struct MOISolution
     solve_time_sec::Float64
     iterations::Int
     objective_constant::Float64
-    function MOISolution(;primal = Float64[], dual = Float64[], slack = Float64[], exit_code = 0, exit_status = :unknown, objective_value = NaN, dual_objective_value = NaN, solve_time_sec = NaN, iterations = 0, objective_constant = 0.0)
-        new(primal, dual, slack, exit_code, exit_status, objective_value, dual_objective_value, solve_time_sec, iterations, objective_constant)
+    l_inf_rel_primal_res::Float64
+    l_inf_rel_dual_res::Float64
+    l_2_rel_primal_res::Float64
+    l_2_rel_dual_res::Float64
+    relative_gap::Float64
+    restart_count::Int
+    function MOISolution(;
+        primal = Float64[],
+        dual = Float64[],
+        slack = Float64[],
+        exit_code = 0,
+        exit_status = :unknown,
+        objective_value = NaN,
+        dual_objective_value = NaN,
+        solve_time_sec = NaN,
+        iterations = 0,
+        objective_constant = 0.0,
+        l_inf_rel_primal_res = NaN,
+        l_inf_rel_dual_res = NaN,
+        l_2_rel_primal_res = NaN,
+        l_2_rel_dual_res = NaN,
+        relative_gap = NaN,
+        restart_count = 0,
+    )
+        new(
+            primal,
+            dual,
+            slack,
+            exit_code,
+            exit_status,
+            objective_value,
+            dual_objective_value,
+            solve_time_sec,
+            iterations,
+            objective_constant,
+            l_inf_rel_primal_res,
+            l_inf_rel_dual_res,
+            l_2_rel_primal_res,
+            l_2_rel_dual_res,
+            relative_gap,
+            restart_count,
+        )
     end
 end
 
@@ -244,7 +284,24 @@ function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
 end
 
 function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
-    return optimizer.options[Symbol(param.name)]
+    name = Symbol(param.name)
+    if name == :result_metrics
+        return (
+            exit_code = optimizer.sol.exit_code,
+            exit_status = optimizer.sol.exit_status,
+            solve_time_sec = optimizer.sol.solve_time_sec,
+            iterations = optimizer.sol.iterations,
+            l_inf_rel_primal_res = optimizer.sol.l_inf_rel_primal_res,
+            l_inf_rel_dual_res = optimizer.sol.l_inf_rel_dual_res,
+            l_2_rel_primal_res = optimizer.sol.l_2_rel_primal_res,
+            l_2_rel_dual_res = optimizer.sol.l_2_rel_dual_res,
+            relative_gap = optimizer.sol.relative_gap,
+            restart_count = optimizer.sol.restart_count,
+            objective_value = optimizer.sol.objective_value,
+            dual_objective_value = optimizer.sol.dual_objective_value,
+        )
+    end
+    return optimizer.options[name]
 end
 
 ###
@@ -542,6 +599,18 @@ function MOI.optimize!(
             println("use_adaptive_restart is not set, using default value: true.")
         end
     end
+    if !haskey(options, :use_restart)
+        options[:use_restart] = options[:use_adaptive_restart]
+        if options[:verbose] > 0
+            println("use_restart is not set, using use_adaptive_restart=$(options[:use_restart]) for compatibility.")
+        end
+    end
+    if !haskey(options, :use_adaptive_step)
+        options[:use_adaptive_step] = true
+        if options[:verbose] > 0
+            println("use_adaptive_step is not set, using default value: true.")
+        end
+    end
     if !haskey(options, :use_adaptive_step_size_weight)
         options[:use_adaptive_step_size_weight] = true
         if options[:verbose] > 0
@@ -560,10 +629,28 @@ function MOI.optimize!(
             println("print_freq is not set, using default value: 5000.")
         end
     end
+    if !haskey(options, :check_terminate_freq)
+        options[:check_terminate_freq] = 2000
+        if options[:verbose] > 0
+            println("check_terminate_freq is not set, using default value: 2000.")
+        end
+    end
     if !haskey(options, :use_aggressive)
         options[:use_aggressive] = true
         if options[:verbose] > 0
             println("use_aggressive is not set, using default value: true.")
+        end
+    end
+    if !haskey(options, :use_reflection)
+        options[:use_reflection] = options[:use_aggressive]
+        if options[:verbose] > 0
+            println("use_reflection is not set, using use_aggressive=$(options[:use_reflection]) for compatibility.")
+        end
+    end
+    if !haskey(options, :use_halpern)
+        options[:use_halpern] = true
+        if options[:verbose] > 0
+            println("use_halpern is not set, using default value: true.")
         end
     end
     if !haskey(options, :kkt_restart_freq)
@@ -623,6 +710,7 @@ function MOI.optimize!(
             exp_x = 0,
             dual_exp_x = 0,
             print_freq = options[:print_freq],
+            check_terminate_freq = options[:check_terminate_freq],
             use_preconditioner = true,
             rescaling_method = options[:rescaling_method],
             method = :average,
@@ -631,6 +719,10 @@ function MOI.optimize!(
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
             use_aggressive = options[:use_aggressive],
+            use_restart = options[:use_restart],
+            use_adaptive_step = options[:use_adaptive_step],
+            use_reflection = options[:use_reflection],
+            use_halpern = options[:use_halpern],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],
@@ -651,6 +743,12 @@ function MOI.optimize!(
             solve_time_sec = sol_res.info.time,
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
+            l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,
+            l_inf_rel_dual_res = sol_res.info.convergeInfo[1].l_inf_rel_dual_res,
+            l_2_rel_primal_res = sol_res.info.convergeInfo[1].l_2_rel_primal_res,
+            l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
+            relative_gap = sol_res.info.convergeInfo[1].rel_gap,
+            restart_count = sol_res.info.restart_used,
         )
     else
         sol_res = PDCS_GPU.rpdhg_gpu_solve(
@@ -673,13 +771,19 @@ function MOI.optimize!(
             exp_x = 0,
             dual_exp_x = 0,
             print_freq = options[:print_freq],
-            use_preconditioner = false,
+            check_terminate_freq = options[:check_terminate_freq],
+            use_preconditioner = true,
+            rescaling_method = :none,
             method = :average,
             time_limit = options[:time_limit_secs],
             use_adaptive_restart = options[:use_adaptive_restart],
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
             use_aggressive = options[:use_aggressive],
+            use_restart = options[:use_restart],
+            use_adaptive_step = options[:use_adaptive_step],
+            use_reflection = options[:use_reflection],
+            use_halpern = options[:use_halpern],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],
@@ -690,8 +794,8 @@ function MOI.optimize!(
             use_duality_gap_restart = options[:use_duality_gap_restart],
         )
         dest.sol = MOISolution(
-            primal = sol_res.x.primal_sol.x,
-            dual = sol_res.y.dual_sol.y,
+            primal = sol_res.x.recovered_primal.primal_sol.x,
+            dual = sol_res.y.recovered_dual.dual_sol.y,
             slack = sol_res.y.slack.primal_sol.x,
             exit_code = sol_res.info.exit_code,
             exit_status = sol_res.info.exit_status,
@@ -700,6 +804,12 @@ function MOI.optimize!(
             solve_time_sec = sol_res.info.time,
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
+            l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,
+            l_inf_rel_dual_res = sol_res.info.convergeInfo[1].l_inf_rel_dual_res,
+            l_2_rel_primal_res = sol_res.info.convergeInfo[1].l_2_rel_primal_res,
+            l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
+            relative_gap = sol_res.info.convergeInfo[1].rel_gap,
+            restart_count = sol_res.info.restart_used,
         )
     end
     return index_map, false
@@ -717,7 +827,7 @@ function MOI.get(optimizer::Optimizer, ::MOI.SolveTimeSec)
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.RawStatusString)
-    return optimizer.sol.raw_status
+    return string(optimizer.sol.exit_status)
 end
 
 """
