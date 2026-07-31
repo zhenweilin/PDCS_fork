@@ -326,9 +326,11 @@ python3 benchmark/ablation/plot_progressive_ablation.py \
   --dpi 300
 ```
 
-### 13.2 One-at-a-time 单项移除式消融
+### 13.2 当前核心组件 one-at-a-time 消融
 
-这组图使用 `Full` 与每次单独关闭一个组件的结果：
+这组图完全关闭 Halpern，并比较 `Full` 与分别关闭 scaling、adaptive
+\(\eta\)、adaptive \(\omega\)、restart 和 reflection 的六个配置。必须先按
+`rebuttal_plan/ablation_study.md` 生成组合结果目录，然后运行：
 
 ```bash
 cd /home/zhenwei/PDCS_fork
@@ -337,7 +339,7 @@ python3 benchmark/ablation/plot_one_at_a_time_ablation.py
 ```
 
 默认读取
-`benchmark/results/rebuttal/ablation/ablation_600s_20260728_r2`
+`benchmark/results/rebuttal/ablation/one_at_a_time_core_600s_20260731`
 中的 `summary_overall.csv` 和 `paired_effects.csv`，生成三张独立图：
 
 ```text
@@ -345,9 +347,6 @@ rebuttal_plan/figures/one_at_a_time_ablation_solved.{tex,pdf,png}
 rebuttal_plan/figures/one_at_a_time_ablation_sgm.{tex,pdf,png}
 rebuttal_plan/figures/one_at_a_time_ablation_paired_effects.{tex,pdf,png}
 ```
-
-其中 `No restart` 没有与 `Full` 共同求解成功的实例，因此配对图不绘制虚假的
-runtime/iteration ratio，而是在对应位置明确标注 `0 jointly solved`。
 
 在另一台机器或不同单项消融结果目录上运行：
 
@@ -359,7 +358,29 @@ python3 benchmark/ablation/plot_one_at_a_time_ablation.py \
   --dpi 300
 ```
 
-### 13.3 只生成可编辑 TeX
+旧目录 `ablation_600s_20260728_r2` 使用废弃的 inline-Halpern 主序列，不得再
+用于生成上述论文图。
+
+### 13.3 Halpern restart candidate 独立消融
+
+Halpern 不进入第 13.2 节的核心 one-at-a-time。当前 candidate-only 设计由独立
+的开/关实验绘制：
+
+```bash
+python3 benchmark/ablation/plot_halpern_candidate_ablation.py
+```
+
+默认读取
+`benchmark/results/rebuttal/halpern_candidate/halpern_candidate_600s_gpu5_20260730`
+并生成：
+
+```text
+rebuttal_plan/figures/halpern_candidate_ablation_solved.{tex,pdf,png}
+rebuttal_plan/figures/halpern_candidate_ablation_sgm.{tex,pdf,png}
+rebuttal_plan/figures/halpern_candidate_ablation_paired_effects.{tex,pdf,png}
+```
+
+### 13.4 只生成可编辑 TeX
 
 如果机器暂时没有 LaTeX，可以分别加入 `--tex-only`，只生成 PGFPlots 源：
 
@@ -370,5 +391,9 @@ python3 benchmark/ablation/plot_progressive_ablation.py \
 
 python3 benchmark/ablation/plot_one_at_a_time_ablation.py \
   --run-dir /ABSOLUTE/PATH/TO/ONE_AT_A_TIME_FORMAL_RUN \
+  --tex-only
+
+python3 benchmark/ablation/plot_halpern_candidate_ablation.py \
+  --run-dir /ABSOLUTE/PATH/TO/HALPERN_CANDIDATE_RUN \
   --tex-only
 ```

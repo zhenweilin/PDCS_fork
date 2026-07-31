@@ -6,19 +6,19 @@
 \begin{document}
 \begin{tikzpicture}
 \begin{axis}[
-  width=15.7cm,
+  width=9.2cm,
   height=7.1cm,
   % no title
   title style={font=\small},
   xmin=0.45,
-  xmax=5.55,
-  ymin=0.2,
-  ymax=3.6,
-  xtick={1,2,3,4,5},
-  xticklabels={No scaling,Fixed $\eta$,Fixed $\omega$,No restart,No reflection},
+  xmax=1.55,
+  ymin=0.75,
+  ymax=1.12,
+  xtick={1},
+  xticklabels={Halpern candidate},
   xticklabel style={rotate=20,anchor=east,font=\small},
-  ytick={0.5,1,1.5,2,2.5,3,3.5},
-  ylabel={Ablated / Full ratio},
+  ytick={0.8,0.9,1,1.1},
+  ylabel={Disabled / enabled ratio},
   tick label style={font=\small},
   label style={font=\small},
   legend style={
@@ -34,9 +34,9 @@
   tick style={gray!65},
 ]
 \addplot[black!65,dashed,line width=0.8pt,forget plot]
-  coordinates {(0.45,1) (5.55,1)};
+  coordinates {(0.45,1) (1.55,1)};
 \node[anchor=south east,font=\scriptsize,text=black!65]
-  at (axis cs:5.52,1.01) {no change};
+  at (axis cs:1.52,1.01) {no change};
 
 \addplot+[
   only marks,
@@ -50,11 +50,7 @@
   error bar style={line width=0.85pt},
   error mark options={rotate=90,mark size=3pt,line width=0.85pt},
 ] coordinates {
-  (0.92,1.8779948) += (0,0.677842) -= (0,0.45627364)
-  (1.92,0.78885785) += (0,0.17248588) -= (0,0.11786747)
-  (2.92,2.2461189) += (0,0.91521003) -= (0,0.62871952)
-  (3.92,2.409411) += (0,0.9707409) -= (0,0.67290991)
-  (4.92,1.103572) += (0,0.15108319) -= (0,0.11322304)
+  (0.94,0.95220307) += (0,0.12178083) -= (0,0.10841743)
 };
 \addlegendentry{Wall time (95\% bootstrap CI)}
 
@@ -65,14 +61,10 @@
   color=pdcsorange,
   mark options={fill=pdcsorange},
 ] coordinates {
-  (1.08,2.6959689)
-  (2.08,1.2431207)
-  (3.08,2.759679)
-  (4.08,2.8493643)
-  (5.08,1.1134862)
+  (1.06,0.99892883)
 };
 \addlegendentry{Iterations}
-
+\node[anchor=south east,font=\scriptsize,text=black!70] at (axis cs:1.50,0.77) {56 jointly solved};
 \end{axis}
 \end{tikzpicture}
 \end{document}

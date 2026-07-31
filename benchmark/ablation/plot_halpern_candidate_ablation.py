@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Create separate figures for the current core one-at-a-time ablation.
+"""Create separate figures for the current Halpern-candidate ablation.
 
-Halpern is disabled in all six configurations.  The full and fixed-eta records
-come from the completed progressive batch; the other four configurations are
-strict one-at-a-time removals from the same core solver.
+Both configurations use the same reflected main sequence and differ only in
+whether the auxiliary Halpern point is available as a restart candidate.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 from typing import Dict, List
 
@@ -24,38 +22,16 @@ from plot_progressive_ablation import (
 
 
 CONFIGURATIONS = [
-    "full",
-    "no_scaling",
-    "no_adaptive_step",
-    "no_adaptive_primal_weight",
-    "no_restart",
-    "no_reflection",
+    "without_halpern_candidate",
+    "with_halpern_candidate",
 ]
 
 CONFIGURATION_LABELS = [
-    "Full",
-    "No scaling",
-    r"Fixed $\eta$",
-    r"Fixed $\omega$",
-    "No restart",
-    "No reflection",
+    "Candidate disabled",
+    "Candidate enabled",
 ]
 
-ABLATIONS = [
-    "no_scaling",
-    "no_adaptive_step",
-    "no_adaptive_primal_weight",
-    "no_restart",
-    "no_reflection",
-]
-
-ABLATION_LABELS = [
-    "No scaling",
-    r"Fixed $\eta$",
-    r"Fixed $\omega$",
-    "No restart",
-    "No reflection",
-]
+PLOT_TITLE = "Halpern restart candidate"
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,12 +41,12 @@ def parse_args() -> argparse.Namespace:
         / "benchmark"
         / "results"
         / "rebuttal"
-        / "ablation"
-        / "one_at_a_time_core_600s_20260731"
+        / "halpern_candidate"
+        / "halpern_candidate_600s_gpu5_20260730"
     )
     parser = argparse.ArgumentParser(
         description=(
-            "Plot the completed one-at-a-time cuPDCS ablation. "
+            "Plot the completed candidate-only Halpern ablation. "
             "Writes separate editable TeX, PDF, and PNG figures."
         )
     )
@@ -88,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--prefix",
-        default="one_at_a_time_ablation",
+        default="halpern_candidate_ablation",
         help="output filename prefix",
     )
     parser.add_argument(
@@ -115,9 +91,10 @@ def validate_inputs(
         raise ValueError(
             f"unexpected configurations; missing={missing}, extra={extra}"
         )
-    if set(effects) != set(ABLATIONS):
-        missing = sorted(set(ABLATIONS) - set(effects))
-        extra = sorted(set(effects) - set(ABLATIONS))
+    expected_effect = {"without_halpern_candidate"}
+    if set(effects) != expected_effect:
+        missing = sorted(expected_effect - set(effects))
+        extra = sorted(set(effects) - expected_effect)
         raise ValueError(
             f"unexpected paired effects; missing={missing}, extra={extra}"
         )
@@ -128,6 +105,13 @@ def validate_inputs(
             raise ValueError(
                 f"{configuration} is incomplete: {completed}/{expected}"
             )
+    jointly_solved = int(
+        effects["without_halpern_candidate"]["jointly_solved"]
+    )
+    if jointly_solved != 56:
+        raise ValueError(
+            f"expected 56 jointly solved instances, found {jointly_solved}"
+        )
 
 
 def solved_tex(overall: Dict[str, Dict[str, str]]) -> str:
@@ -142,7 +126,7 @@ def solved_tex(overall: Dict[str, Dict[str, str]]) -> str:
         yticks=[0, 10, 20, 30, 40, 50, 60],
         color="0,114,178",
         precision=0,
-        title="Core one-at-a-time (Halpern candidate disabled)",
+        title=PLOT_TITLE,
     )
 
 
@@ -154,58 +138,33 @@ def sgm_tex(overall: Dict[str, Dict[str, str]]) -> str:
             for configuration in CONFIGURATIONS
         ],
         ylabel="SGM(10) wall time (s)",
-        ymax=75,
-        yticks=[0, 10, 20, 30, 40, 50, 60, 70],
+        ymax=31,
+        yticks=[0, 5, 10, 15, 20, 25, 30],
         color="213,94,0",
         precision=1,
-        title="Core one-at-a-time (Halpern candidate disabled)",
+        title=PLOT_TITLE,
     )
 
 
 def effects_tex(effects: Dict[str, Dict[str, str]]) -> str:
-    runtime_points = []
-    iteration_points = []
-    annotations = []
-    for index, configuration in enumerate(ABLATIONS, start=1):
-        row = effects[configuration]
-        jointly_solved = int(row["jointly_solved"])
-        runtime_text = row.get("runtime_ratio_geomean", "")
-        iteration_text = row.get("iteration_ratio_geomean", "")
-        try:
-            runtime = float(runtime_text)
-            iteration = float(iteration_text)
-        except ValueError as error:
-            raise ValueError(
-                f"invalid paired ratio for {configuration}: {row}"
-            ) from error
-
-        if not math.isfinite(runtime) or not math.isfinite(iteration):
-            if jointly_solved != 0:
-                raise ValueError(
-                    f"{configuration} has non-finite ratios despite "
-                    f"{jointly_solved} jointly solved instances"
-                )
-            annotations.append(
-                rf"\node[anchor=north,font=\scriptsize,text=black!70] "
-                rf"at (axis cs:{index},0.31) "
-                rf"{{0 jointly solved}};"
-            )
-            continue
-
-        lower = finite_float(row, "runtime_ratio_ci95_lower")
-        upper = finite_float(row, "runtime_ratio_ci95_upper")
-        runtime_points.append((index - 0.08, runtime, lower, upper))
-        iteration_points.append((index + 0.08, iteration))
-
+    row = effects["without_halpern_candidate"]
+    runtime = finite_float(row, "runtime_ratio_geomean")
+    lower = finite_float(row, "runtime_ratio_ci95_lower")
+    upper = finite_float(row, "runtime_ratio_ci95_upper")
+    iteration = finite_float(row, "iteration_ratio_geomean")
     return ratio_tex(
-        ABLATION_LABELS,
-        runtime_points,
-        iteration_points,
-        ylabel="Ablated / Full ratio",
-        ymin=0.2,
-        ymax=3.6,
-        yticks=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
-        annotations="\n".join(annotations),
+        ["Halpern candidate"],
+        [(0.94, runtime, lower, upper)],
+        [(1.06, iteration)],
+        ylabel="Disabled / enabled ratio",
+        ymin=0.75,
+        ymax=1.12,
+        yticks=[0.8, 0.9, 1.0, 1.1],
+        annotations=(
+            r"\node[anchor=south east,font=\scriptsize,text=black!70] "
+            r"at (axis cs:1.50,0.77) {56 jointly solved};"
+        ),
+        width="9.2cm",
     )
 
 

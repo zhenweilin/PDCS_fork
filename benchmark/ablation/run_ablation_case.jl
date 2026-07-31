@@ -21,6 +21,7 @@ const CONFIGURATIONS = Set([
     "full",
     "no_scaling",
     "no_adaptive_step",
+    "no_adaptive_primal_weight",
     "no_restart",
     "no_reflection",
     "no_halpern",
@@ -138,10 +139,11 @@ function flags(configuration)
     return (
         use_scaling = configuration != "no_scaling",
         use_adaptive_step = configuration != "no_adaptive_step",
-        use_adaptive_step_size_weight = true,
+        use_adaptive_step_size_weight =
+            configuration != "no_adaptive_primal_weight",
         use_restart = configuration != "no_restart",
         use_reflection = configuration != "no_reflection",
-        use_halpern = configuration != "no_halpern",
+        use_halpern = false,
     )
 end
 

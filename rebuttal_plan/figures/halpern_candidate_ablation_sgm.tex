@@ -7,19 +7,19 @@
 \begin{axis}[
   width=9.2cm,
   height=6.35cm,
-  title={Core one-at-a-time (Halpern candidate disabled)},
+  title={Halpern restart candidate},
   title style={font=\small},
   xmin=0.45,
-  xmax=6.55,
-  xtick={1,2,3,4,5,6},
-  xticklabels={Full,No scaling,Fixed $\eta$,Fixed $\omega$,No restart,No reflection},
+  xmax=2.55,
+  xtick={1,2},
+  xticklabels={Candidate disabled,Candidate enabled},
   xticklabel style={rotate=27,anchor=east,font=\small},
   tick label style={font=\small},
   label style={font=\small},
   ylabel={SGM(10) wall time (s)},
   ymin=0,
-  ymax=75,
-  ytick={0,10,20,30,40,50,60,70},
+  ymax=31,
+  ytick={0,5,10,15,20,25,30},
   ymajorgrids=true,
   grid style={gray!22},
   axis line style={gray!65},
@@ -38,7 +38,7 @@
       {\pgfplotspointmeta}
   },
   every node near coord/.append style={font=\scriptsize},
-] coordinates {(1,24.224281) (2,56.606236) (3,22.40793) (4,59.920699) (5,63.3505) (6,27.351275)};
+] coordinates {(1,25.633011) (2,26.024457)};
 \end{axis}
 \end{tikzpicture}
 \end{document}

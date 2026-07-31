@@ -15,6 +15,7 @@ IDLE_MEMORY_LIMIT_MIB="2048"
 IDLE_UTILIZATION_LIMIT="10"
 CONFIGS="pdhg,pdhg_restart,pdhg_restart_scaling,pdhg_restart_scaling_reflection,pdhg_restart_scaling_reflection_adaptive_primal_weight,pdhg_restart_scaling_reflection_adaptive"
 CONFIG_COUNT="6"
+EXPERIMENT="progressive_cumulative_ablation"
 
 usage() {
     printf '%s\n' \
@@ -27,6 +28,8 @@ usage() {
         "  --time-limit SECONDS       default: 600" \
         "  --tolerance VALUE          default: 1e-6" \
         "  --order-seed INTEGER       default: 20260730" \
+        "  --experiment NAME          metadata label" \
+        "  --configs NAME[,NAME...]   configuration order" \
         "  --resume true|false        default: true" \
         "" \
         "With --gpus auto, every GPU satisfying memory.used < 2048 MiB and" \
@@ -43,11 +46,21 @@ while [[ $# -gt 0 ]]; do
         --time-limit) TIME_LIMIT="$2"; shift 2 ;;
         --tolerance) TOLERANCE="$2"; shift 2 ;;
         --order-seed) ORDER_SEED="$2"; shift 2 ;;
+        --experiment) EXPERIMENT="$2"; shift 2 ;;
+        --configs) CONFIGS="$2"; shift 2 ;;
         --resume) RESUME="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+CONFIG_COUNT="$(
+    awk -F, '{print NF}' <<< "${CONFIGS}"
+)"
+if (( CONFIG_COUNT < 2 )); then
+    printf -- '--configs must contain at least two names\n' >&2
+    exit 2
+fi
 
 if [[ "${RESUME}" != "true" && "${RESUME}" != "false" ]]; then
     printf -- '--resume must be true or false\n' >&2
@@ -140,19 +153,22 @@ if [[ ! -f "${RUN_ORDER}" ]]; then
         --manifest "${MANIFEST}" \
         --output "${RUN_ORDER}" \
         --order-seed "${ORDER_SEED}" \
+        --configs "${CONFIGS}" \
         --expected-count 63
 fi
 
 run_order_rows="$(awk 'END {print NR - 1}' "${RUN_ORDER}")"
-if [[ "${run_order_rows}" != "378" ]]; then
-    printf 'Expected 378 run-order rows, found %s\n' "${run_order_rows}" >&2
+expected_run_order_rows=$((63 * CONFIG_COUNT))
+if [[ "${run_order_rows}" != "${expected_run_order_rows}" ]]; then
+    printf 'Expected %s run-order rows, found %s\n' \
+        "${expected_run_order_rows}" "${run_order_rows}" >&2
     exit 2
 fi
 
 if [[ ! -f "${OUTPUT_DIR}/environment.txt" ]]; then
     {
         printf 'run_id=%s\n' "${RUN_ID}"
-        printf 'experiment=progressive_cumulative_ablation\n'
+        printf 'experiment=%s\n' "${EXPERIMENT}"
         printf 'started_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'root_dir=%s\n' "${ROOT_DIR}"
         printf 'input_dir=%s\n' "${INPUT_DIR}"
@@ -192,7 +208,9 @@ analyze_results() {
         --bootstrap-seed "${ORDER_SEED}" \
         --report "${OUTPUT_DIR}/report.md" \
         >> "${OUTPUT_DIR}/analysis.log" 2>&1 || true
-    if [[ -f "${OUTPUT_DIR}/raw_results.csv" ]]; then
+    if [[ "${EXPERIMENT}" == "progressive_cumulative_ablation" ]] &&
+        [[ -f "${OUTPUT_DIR}/raw_results.csv" ]]
+    then
         python3 \
             "${ROOT_DIR}/benchmark/progressive_ablation/analyze_progressive_ablation.py" \
             --run-dir "${OUTPUT_DIR}" \
@@ -379,7 +397,7 @@ trap - EXIT INT TERM
     printf 'last_session_worker_wait_failures=%s\n' "${worker_wait_failures}"
 } >> "${OUTPUT_DIR}/environment.txt"
 
-printf 'PROGRESSIVE_ABLATION_COMPLETE run_dir=%s gpus=%s driver_failures=%s\n' \
+printf 'ABLATION_BATCH_COMPLETE run_dir=%s gpus=%s driver_failures=%s\n' \
     "${OUTPUT_DIR}" "${GPU_LIST}" "${driver_failures}"
 
 if (( driver_failures != 0 || worker_wait_failures != 0 )); then

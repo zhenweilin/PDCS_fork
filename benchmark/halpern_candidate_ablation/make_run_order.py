@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a randomized within-instance order for cumulative PDHG ablations."""
+"""Create the paired Halpern restart-candidate ablation order."""
 
 from __future__ import annotations
 
@@ -9,14 +9,7 @@ import random
 from pathlib import Path
 
 
-CONFIGS = (
-    "pdhg",
-    "pdhg_restart",
-    "pdhg_restart_scaling",
-    "pdhg_restart_scaling_reflection",
-    "pdhg_restart_scaling_reflection_adaptive_primal_weight",
-    "pdhg_restart_scaling_reflection_adaptive",
-)
+CONFIGS = ("with_halpern_candidate", "without_halpern_candidate")
 
 
 def main() -> None:
@@ -25,17 +18,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--order-seed", type=int, default=20260730)
     parser.add_argument("--expected-count", type=int, default=63)
-    parser.add_argument(
-        "--configs",
-        default=",".join(CONFIGS),
-        help="comma-separated configuration names",
-    )
     args = parser.parse_args()
-    configs = tuple(
-        item.strip() for item in args.configs.split(",") if item.strip()
-    )
-    if len(configs) < 2 or len(set(configs)) != len(configs):
-        raise SystemExit("--configs must contain at least two unique names")
 
     with args.manifest.open(newline="", encoding="utf-8") as stream:
         manifest = list(csv.DictReader(stream))
@@ -48,7 +31,7 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     task_index = 0
     for instance in manifest:
-        configurations = list(configs)
+        configurations = list(CONFIGS)
         rng.shuffle(configurations)
         for within_instance_order, configuration in enumerate(
             configurations, start=1
@@ -71,7 +54,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     print(
-        "RUN_ORDER_COMPLETE "
+        f"HALPERN_CANDIDATE_RUN_ORDER_COMPLETE "
         f"instances={len(manifest)} tasks={len(rows)}"
     )
 

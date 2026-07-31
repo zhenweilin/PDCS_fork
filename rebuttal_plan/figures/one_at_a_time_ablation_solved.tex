@@ -7,10 +7,12 @@
 \begin{axis}[
   width=9.2cm,
   height=6.35cm,
+  title={Core one-at-a-time (Halpern candidate disabled)},
+  title style={font=\small},
   xmin=0.45,
   xmax=6.55,
   xtick={1,2,3,4,5,6},
-  xticklabels={Full,No scaling,Fixed $\eta$,No restart,No reflection,No Halpern},
+  xticklabels={Full,No scaling,Fixed $\eta$,Fixed $\omega$,No restart,No reflection},
   xticklabel style={rotate=27,anchor=east,font=\small},
   tick label style={font=\small},
   label style={font=\small},
@@ -36,7 +38,7 @@
       {\pgfplotspointmeta}
   },
   every node near coord/.append style={font=\scriptsize},
-] coordinates {(1,53) (2,43) (3,53) (4,0) (5,53) (6,56)};
+] coordinates {(1,56) (2,44) (3,55) (4,47) (5,45) (6,55)};
 \end{axis}
 \end{tikzpicture}
 \end{document}

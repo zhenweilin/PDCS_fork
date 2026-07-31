@@ -61,6 +61,8 @@ BAR_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
 \begin{axis}[
   width=9.2cm,
   height=6.35cm,
+  __TITLE_OPTION__
+  title style={font=\small},
   xmin=0.45,
   xmax=__XMAX__,
   xtick={__XTICKS__},
@@ -104,8 +106,10 @@ EFFECTS_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
 \begin{document}
 \begin{tikzpicture}
 \begin{axis}[
-  width=15.7cm,
+  width=__WIDTH__,
   height=7.1cm,
+  __TITLE_OPTION__
+  title style={font=\small},
   xmin=0.45,
   xmax=__XMAX__,
   ymin=__YMIN__,
@@ -279,6 +283,7 @@ def bar_tex(
     yticks: List[float],
     color: str,
     precision: int,
+    title: str = "",
 ) -> str:
     if len(labels) != len(values) or not labels:
         raise ValueError("bar labels and values must have the same nonzero length")
@@ -287,8 +292,10 @@ def bar_tex(
         for index, value in enumerate(values, start=1)
     )
     xticks = ",".join(str(index) for index in range(1, len(labels) + 1))
+    title_option = f"title={{{title}}}," if title else "% no title"
     return (
         BAR_TEMPLATE.replace("__COLOR__", color)
+        .replace("__TITLE_OPTION__", title_option)
         .replace("__XMAX__", f"{len(labels) + 0.55:.2f}")
         .replace("__XTICKS__", xticks)
         .replace("__LABELS__", ",".join(labels))
@@ -310,6 +317,8 @@ def ratio_tex(
     ymax: float,
     yticks: List[float],
     annotations: str = "",
+    title: str = "",
+    width: str = "15.7cm",
 ) -> str:
     if not labels:
         raise ValueError("ratio plot needs at least one x-axis label")
@@ -330,8 +339,11 @@ def ratio_tex(
         iteration_coordinates.append(f"  ({x_value:.2f},{iteration:.8g})")
     xticks = ",".join(str(index) for index in range(1, len(labels) + 1))
     xmax = len(labels) + 0.55
+    title_option = f"title={{{title}}}," if title else "% no title"
     return (
-        EFFECTS_TEMPLATE.replace("__XMAX__", f"{xmax:.2f}")
+        EFFECTS_TEMPLATE.replace("__WIDTH__", width)
+        .replace("__TITLE_OPTION__", title_option)
+        .replace("__XMAX__", f"{xmax:.2f}")
         .replace("__YMIN__", f"{ymin:.8g}")
         .replace("__YMAX__", f"{ymax:.8g}")
         .replace("__XTICKS__", xticks)
@@ -379,6 +391,7 @@ def solved_tex(overall: Dict[str, Dict[str, str]]) -> str:
         yticks=[0, 10, 20, 30, 40, 50, 60],
         color="0,114,178",
         precision=0,
+        title="Core components (Halpern candidate disabled)",
     )
 
 
@@ -394,6 +407,7 @@ def sgm_tex(overall: Dict[str, Dict[str, str]]) -> str:
         yticks=[0, 20, 40, 60, 80, 100],
         color="213,94,0",
         precision=1,
+        title="Core components (Halpern candidate disabled)",
     )
 
 
