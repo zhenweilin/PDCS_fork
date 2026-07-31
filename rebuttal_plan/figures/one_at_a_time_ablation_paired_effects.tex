@@ -11,12 +11,12 @@
   xmin=0.45,
   xmax=5.55,
   ymin=0.2,
-  ymax=1.58,
+  ymax=2.05,
   xtick={1,2,3,4,5},
-  xticklabels={Restart,Scaling,Reflection,Adapt. $\omega$,Adapt. $\eta$},
+  xticklabels={No scaling,Fixed $\eta$,No restart,No reflection,No Halpern},
   xticklabel style={rotate=20,anchor=east,font=\small},
-  ytick={0.25,0.5,0.75,1,1.25,1.5},
-  ylabel={Ratio after / before adding component},
+  ytick={0.25,0.5,0.75,1,1.25,1.5,1.75,2},
+  ylabel={Ablated / Full ratio},
   tick label style={font=\small},
   label style={font=\small},
   legend style={
@@ -48,11 +48,10 @@
   error bar style={line width=0.85pt},
   error mark options={rotate=90,mark size=3pt,line width=0.85pt},
 ] coordinates {
-  (0.92,0.92808637) += (0,0.111536) -= (0,0.1165205)
-  (1.92,0.76044791) += (0,0.41657771) -= (0,0.25400279)
-  (2.92,0.7074408) += (0,0.14096769) -= (0,0.1481974)
-  (3.92,0.41249405) += (0,0.15904165) -= (0,0.12209599)
-  (4.92,1.2676555) += (0,0.21949741) -= (0,0.22385677)
+  (0.92,1.481153) += (0,0.43853345) -= (0,0.33961945)
+  (1.92,0.78922451) += (0,0.12092087) -= (0,0.092124726)
+  (3.92,1.1744282) += (0,0.12037819) -= (0,0.10414664)
+  (4.92,0.63967685) += (0,0.10906446) -= (0,0.078898969)
 };
 \addlegendentry{Wall time (95\% bootstrap CI)}
 
@@ -63,14 +62,13 @@
   color=pdcsorange,
   mark options={fill=pdcsorange},
 ] coordinates {
-  (1.08,0.85175944)
-  (2.08,0.54213503)
-  (3.08,0.68067875)
-  (4.08,0.32903419)
-  (5.08,0.80442711)
+  (1.08,1.7596463)
+  (2.08,1.290544)
+  (4.08,1.2067563)
+  (5.08,0.44944223)
 };
 \addlegendentry{Iterations}
-
+\node[anchor=north,font=\scriptsize,text=black!70] at (axis cs:3,0.31) {0 jointly solved};
 \end{axis}
 \end{tikzpicture}
 \end{document}

@@ -289,7 +289,10 @@ scheduler session。实际实例到 GPU 的映射以该目录中的
 
 绘图脚本只使用 Python 标准库读取 CSV，并调用系统的
 `pdflatex`/PGFPlots 与 Inkscape（或 `pdftoppm`）生成 PDF 和 PNG，不要求安装
-Matplotlib 或 Pandas：
+Matplotlib 或 Pandas。两类消融实验分别绘制，而且每个指标单独成图，不把
+solved-count 和 SGM 组合为双面板。
+
+### 13.1 Progressive 六级递进式消融
 
 ```bash
 cd /home/zhenwei/PDCS_fork
@@ -297,31 +300,75 @@ cd /home/zhenwei/PDCS_fork
 python3 benchmark/ablation/plot_progressive_ablation.py
 ```
 
-默认读取本机已完成的六级正式结果，并生成：
+默认读取
+`benchmark/results/rebuttal/progressive_ablation/progressive_six_stage_600s_all_idle_20260730`
+中的 `summary_overall.csv` 和 `adjacent_effects.csv`，生成三张独立图：
 
 ```text
-rebuttal_plan/figures/progressive_ablation_overall.tex
-rebuttal_plan/figures/progressive_ablation_overall.pdf
-rebuttal_plan/figures/progressive_ablation_overall.png
-rebuttal_plan/figures/progressive_ablation_paired_effects.tex
-rebuttal_plan/figures/progressive_ablation_paired_effects.pdf
-rebuttal_plan/figures/progressive_ablation_paired_effects.png
+rebuttal_plan/figures/progressive_ablation_solved.{tex,pdf,png}
+rebuttal_plan/figures/progressive_ablation_sgm.{tex,pdf,png}
+rebuttal_plan/figures/progressive_ablation_paired_effects.{tex,pdf,png}
 ```
 
-在另一台机器或不同结果目录上运行：
+三张图依次表示：
+
+1. 六个递进阶段的 verified solved 数；
+2. 六个递进阶段的 SGM(10) wall time；
+3. 每加入一个组件后相对于前一阶段的 wall-time 比和 iteration 比。
+
+在另一台机器或不同 progressive 结果目录上运行：
 
 ```bash
 python3 benchmark/ablation/plot_progressive_ablation.py \
-  --run-dir /ABSOLUTE/PATH/TO/FORMAL_RUN \
+  --run-dir /ABSOLUTE/PATH/TO/PROGRESSIVE_FORMAL_RUN \
   --output-dir /ABSOLUTE/PATH/TO/FIGURES \
   --prefix progressive_ablation \
   --dpi 300
 ```
 
-如果机器暂时没有 LaTeX，只生成可编辑 PGFPlots 源文件：
+### 13.2 One-at-a-time 单项移除式消融
+
+这组图使用 `Full` 与每次单独关闭一个组件的结果：
+
+```bash
+cd /home/zhenwei/PDCS_fork
+
+python3 benchmark/ablation/plot_one_at_a_time_ablation.py
+```
+
+默认读取
+`benchmark/results/rebuttal/ablation/ablation_600s_20260728_r2`
+中的 `summary_overall.csv` 和 `paired_effects.csv`，生成三张独立图：
+
+```text
+rebuttal_plan/figures/one_at_a_time_ablation_solved.{tex,pdf,png}
+rebuttal_plan/figures/one_at_a_time_ablation_sgm.{tex,pdf,png}
+rebuttal_plan/figures/one_at_a_time_ablation_paired_effects.{tex,pdf,png}
+```
+
+其中 `No restart` 没有与 `Full` 共同求解成功的实例，因此配对图不绘制虚假的
+runtime/iteration ratio，而是在对应位置明确标注 `0 jointly solved`。
+
+在另一台机器或不同单项消融结果目录上运行：
+
+```bash
+python3 benchmark/ablation/plot_one_at_a_time_ablation.py \
+  --run-dir /ABSOLUTE/PATH/TO/ONE_AT_A_TIME_FORMAL_RUN \
+  --output-dir /ABSOLUTE/PATH/TO/FIGURES \
+  --prefix one_at_a_time_ablation \
+  --dpi 300
+```
+
+### 13.3 只生成可编辑 TeX
+
+如果机器暂时没有 LaTeX，可以分别加入 `--tex-only`，只生成 PGFPlots 源：
 
 ```bash
 python3 benchmark/ablation/plot_progressive_ablation.py \
-  --run-dir "$RUN_DIR" \
+  --run-dir /ABSOLUTE/PATH/TO/PROGRESSIVE_FORMAL_RUN \
+  --tex-only
+
+python3 benchmark/ablation/plot_one_at_a_time_ablation.py \
+  --run-dir /ABSOLUTE/PATH/TO/ONE_AT_A_TIME_FORMAL_RUN \
   --tex-only
 ```

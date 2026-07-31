@@ -52,70 +52,46 @@ COMPONENT_LABELS = [
     r"Adapt. $\eta$",
 ]
 
-OVERALL_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
+BAR_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
 \usepackage{pgfplots}
-\usepgfplotslibrary{groupplots}
 \pgfplotsset{compat=1.17}
-\definecolor{pdcsblue}{RGB}{0,114,178}
-\definecolor{pdcsorange}{RGB}{213,94,0}
+\definecolor{pdcsbar}{RGB}{__COLOR__}
 \begin{document}
 \begin{tikzpicture}
-\begin{groupplot}[
-  group style={group size=2 by 1,horizontal sep=1.45cm},
-  width=8.15cm,
+\begin{axis}[
+  width=9.2cm,
   height=6.35cm,
   xmin=0.45,
-  xmax=6.55,
-  xtick={1,2,3,4,5,6},
-  xticklabels={__STAGE_LABELS__},
+  xmax=__XMAX__,
+  xtick={__XTICKS__},
+  xticklabels={__LABELS__},
   xticklabel style={rotate=27,anchor=east,font=\small},
   tick label style={font=\small},
   label style={font=\small},
-  title style={font=\small},
+  ylabel={__YLABEL__},
+  ymin=0,
+  ymax=__YMAX__,
+  ytick={__YTICKS__},
   ymajorgrids=true,
   grid style={gray!22},
   axis line style={gray!65},
   tick style={gray!65},
   enlarge x limits=false,
 ]
-\nextgroupplot[
-  title={(a) Robustness},
-  ylabel={Verified solves (out of 63)},
-  ymin=0,
-  ymax=66,
-  ytick={0,10,20,30,40,50,60},
-]
 \addplot[
   ybar,
   bar width=10.5pt,
-  fill=pdcsblue!78,
-  draw=pdcsblue,
-  line width=0.45pt,
-  point meta=y,
-  nodes near coords,
-  every node near coord/.append style={font=\scriptsize},
-] coordinates {__SOLVED_COORDS__};
-
-\nextgroupplot[
-  title={(b) Failure-penalized time},
-  ylabel={SGM(10) wall time (s)},
-  ymin=0,
-  ymax=100,
-  ytick={0,20,40,60,80,100},
-]
-\addplot[
-  ybar,
-  bar width=10.5pt,
-  fill=pdcsorange!76,
-  draw=pdcsorange,
+  fill=pdcsbar!78,
+  draw=pdcsbar,
   line width=0.45pt,
   point meta=y,
   nodes near coords={
-    \pgfmathprintnumber[fixed,precision=1]{\pgfplotspointmeta}
+    \pgfmathprintnumber[fixed,precision=__PRECISION__]
+      {\pgfplotspointmeta}
   },
   every node near coord/.append style={font=\scriptsize},
-] coordinates {__SGM_COORDS__};
-\end{groupplot}
+] coordinates {__COORDS__};
+\end{axis}
 \end{tikzpicture}
 \end{document}
 """
@@ -131,14 +107,14 @@ EFFECTS_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
   width=15.7cm,
   height=7.1cm,
   xmin=0.45,
-  xmax=5.55,
-  ymin=0.2,
-  ymax=1.58,
-  xtick={1,2,3,4,5},
+  xmax=__XMAX__,
+  ymin=__YMIN__,
+  ymax=__YMAX__,
+  xtick={__XTICKS__},
   xticklabels={__COMPONENT_LABELS__},
   xticklabel style={rotate=20,anchor=east,font=\small},
-  ytick={0.25,0.5,0.75,1.0,1.25,1.5},
-  ylabel={Ratio after / before adding component},
+  ytick={__YTICKS__},
+  ylabel={__YLABEL__},
   tick label style={font=\small},
   label style={font=\small},
   legend style={
@@ -154,9 +130,9 @@ EFFECTS_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
   tick style={gray!65},
 ]
 \addplot[black!65,dashed,line width=0.8pt,forget plot]
-  coordinates {(0.45,1) (5.55,1)};
+  coordinates {(0.45,1) (__XMAX__,1)};
 \node[anchor=south east,font=\scriptsize,text=black!65]
-  at (axis cs:5.52,1.01) {no change};
+  at (axis cs:__NO_CHANGE_X__,1.01) {no change};
 
 \addplot+[
   only marks,
@@ -184,6 +160,7 @@ __RUNTIME_COORDS__
 __ITERATION_COORDS__
 };
 \addlegendentry{Iterations}
+__ANNOTATIONS__
 \end{axis}
 \end{tikzpicture}
 \end{document}
@@ -293,50 +270,130 @@ def validate_inputs(
             )
 
 
-def overall_tex(overall: Dict[str, Dict[str, str]]) -> str:
-    solved_coords = " ".join(
-        f"({index},{int(overall[configuration]['verified_solved'])})"
-        for index, configuration in enumerate(CONFIGURATIONS, start=1)
+def bar_tex(
+    labels: List[str],
+    values: List[float],
+    *,
+    ylabel: str,
+    ymax: float,
+    yticks: List[float],
+    color: str,
+    precision: int,
+) -> str:
+    if len(labels) != len(values) or not labels:
+        raise ValueError("bar labels and values must have the same nonzero length")
+    coordinates = " ".join(
+        f"({index},{value:.8g})"
+        for index, value in enumerate(values, start=1)
     )
-    sgm_coords = " ".join(
-        f"({index},{finite_float(overall[configuration], 'sgm10_wall_seconds'):.8g})"
-        for index, configuration in enumerate(CONFIGURATIONS, start=1)
-    )
+    xticks = ",".join(str(index) for index in range(1, len(labels) + 1))
     return (
-        OVERALL_TEMPLATE.replace("__STAGE_LABELS__", ",".join(STAGE_LABELS))
-        .replace("__SOLVED_COORDS__", solved_coords)
-        .replace("__SGM_COORDS__", sgm_coords)
+        BAR_TEMPLATE.replace("__COLOR__", color)
+        .replace("__XMAX__", f"{len(labels) + 0.55:.2f}")
+        .replace("__XTICKS__", xticks)
+        .replace("__LABELS__", ",".join(labels))
+        .replace("__YLABEL__", ylabel)
+        .replace("__YMAX__", f"{ymax:.8g}")
+        .replace("__YTICKS__", ",".join(f"{tick:g}" for tick in yticks))
+        .replace("__PRECISION__", str(precision))
+        .replace("__COORDS__", coordinates)
+    )
+
+
+def ratio_tex(
+    labels: List[str],
+    runtime_points: List[tuple[float, float, float, float]],
+    iteration_points: List[tuple[float, float]],
+    *,
+    ylabel: str,
+    ymin: float,
+    ymax: float,
+    yticks: List[float],
+    annotations: str = "",
+) -> str:
+    if not labels:
+        raise ValueError("ratio plot needs at least one x-axis label")
+    runtime_coordinates = []
+    iteration_coordinates = []
+    for x_value, runtime, lower, upper in runtime_points:
+        if not lower <= runtime <= upper:
+            raise ValueError(
+                f"runtime ratio outside CI: "
+                f"{lower} <= {runtime} <= {upper}"
+            )
+        runtime_coordinates.append(
+            f"  ({x_value:.2f},{runtime:.8g}) "
+            f"+= (0,{upper - runtime:.8g}) "
+            f"-= (0,{runtime - lower:.8g})"
+        )
+    for x_value, iteration in iteration_points:
+        iteration_coordinates.append(f"  ({x_value:.2f},{iteration:.8g})")
+    xticks = ",".join(str(index) for index in range(1, len(labels) + 1))
+    xmax = len(labels) + 0.55
+    return (
+        EFFECTS_TEMPLATE.replace("__XMAX__", f"{xmax:.2f}")
+        .replace("__YMIN__", f"{ymin:.8g}")
+        .replace("__YMAX__", f"{ymax:.8g}")
+        .replace("__XTICKS__", xticks)
+        .replace("__COMPONENT_LABELS__", ",".join(labels))
+        .replace("__YTICKS__", ",".join(f"{tick:g}" for tick in yticks))
+        .replace("__YLABEL__", ylabel)
+        .replace("__NO_CHANGE_X__", f"{xmax - 0.03:.2f}")
+        .replace("__RUNTIME_COORDS__", "\n".join(runtime_coordinates))
+        .replace("__ITERATION_COORDS__", "\n".join(iteration_coordinates))
+        .replace("__ANNOTATIONS__", annotations)
     )
 
 
 def effects_tex(effects: Dict[str, Dict[str, str]]) -> str:
-    runtime_coordinates = []
-    iteration_coordinates = []
+    runtime_points = []
+    iteration_points = []
     for index, component in enumerate(COMPONENTS, start=1):
         row = effects[component]
         runtime = finite_float(row, "runtime_ratio_after_over_before")
         lower = finite_float(row, "runtime_ratio_ci95_lower")
         upper = finite_float(row, "runtime_ratio_ci95_upper")
         iteration = finite_float(row, "iteration_ratio_after_over_before")
-        if not lower <= runtime <= upper:
-            raise ValueError(
-                f"runtime ratio outside CI for {component}: "
-                f"{lower} <= {runtime} <= {upper}"
-            )
-        runtime_coordinates.append(
-            f"  ({index - 0.08:.2f},{runtime:.8g}) "
-            f"+= (0,{upper - runtime:.8g}) "
-            f"-= (0,{runtime - lower:.8g})"
-        )
-        iteration_coordinates.append(
-            f"  ({index + 0.08:.2f},{iteration:.8g})"
-        )
-    return (
-        EFFECTS_TEMPLATE.replace(
-            "__COMPONENT_LABELS__", ",".join(COMPONENT_LABELS)
-        )
-        .replace("__RUNTIME_COORDS__", "\n".join(runtime_coordinates))
-        .replace("__ITERATION_COORDS__", "\n".join(iteration_coordinates))
+        runtime_points.append((index - 0.08, runtime, lower, upper))
+        iteration_points.append((index + 0.08, iteration))
+    return ratio_tex(
+        COMPONENT_LABELS,
+        runtime_points,
+        iteration_points,
+        ylabel="Ratio after / before adding component",
+        ymin=0.2,
+        ymax=1.58,
+        yticks=[0.25, 0.5, 0.75, 1.0, 1.25, 1.5],
+    )
+
+
+def solved_tex(overall: Dict[str, Dict[str, str]]) -> str:
+    return bar_tex(
+        STAGE_LABELS,
+        [
+            float(overall[configuration]["verified_solved"])
+            for configuration in CONFIGURATIONS
+        ],
+        ylabel="Verified solves (out of 63)",
+        ymax=66,
+        yticks=[0, 10, 20, 30, 40, 50, 60],
+        color="0,114,178",
+        precision=0,
+    )
+
+
+def sgm_tex(overall: Dict[str, Dict[str, str]]) -> str:
+    return bar_tex(
+        STAGE_LABELS,
+        [
+            finite_float(overall[configuration], "sgm10_wall_seconds")
+            for configuration in CONFIGURATIONS
+        ],
+        ylabel="SGM(10) wall time (s)",
+        ymax=100,
+        yticks=[0, 20, 40, 60, 80, 100],
+        color="213,94,0",
+        precision=1,
     )
 
 
@@ -436,8 +493,12 @@ def main() -> None:
 
     outputs = [
         (
-            output_dir / f"{args.prefix}_overall.tex",
-            overall_tex(overall),
+            output_dir / f"{args.prefix}_solved.tex",
+            solved_tex(overall),
+        ),
+        (
+            output_dir / f"{args.prefix}_sgm.tex",
+            sgm_tex(overall),
         ),
         (
             output_dir / f"{args.prefix}_paired_effects.tex",
