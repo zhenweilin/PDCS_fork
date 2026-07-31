@@ -284,3 +284,44 @@ rebuttal_plan/progressive_ablation_six_stage_results.md
 该批次在 GPU 2、3、4、5、7 启动；GPU 6 后来释放后，按第 8.1 节加入同一
 scheduler session。实际实例到 GPU 的映射以该目录中的
 `gpu_assignments.csv` 为准。
+
+## 13. 重新生成论文图
+
+绘图脚本只使用 Python 标准库读取 CSV，并调用系统的
+`pdflatex`/PGFPlots 与 Inkscape（或 `pdftoppm`）生成 PDF 和 PNG，不要求安装
+Matplotlib 或 Pandas：
+
+```bash
+cd /home/zhenwei/PDCS_fork
+
+python3 benchmark/ablation/plot_progressive_ablation.py
+```
+
+默认读取本机已完成的六级正式结果，并生成：
+
+```text
+rebuttal_plan/figures/progressive_ablation_overall.tex
+rebuttal_plan/figures/progressive_ablation_overall.pdf
+rebuttal_plan/figures/progressive_ablation_overall.png
+rebuttal_plan/figures/progressive_ablation_paired_effects.tex
+rebuttal_plan/figures/progressive_ablation_paired_effects.pdf
+rebuttal_plan/figures/progressive_ablation_paired_effects.png
+```
+
+在另一台机器或不同结果目录上运行：
+
+```bash
+python3 benchmark/ablation/plot_progressive_ablation.py \
+  --run-dir /ABSOLUTE/PATH/TO/FORMAL_RUN \
+  --output-dir /ABSOLUTE/PATH/TO/FIGURES \
+  --prefix progressive_ablation \
+  --dpi 300
+```
+
+如果机器暂时没有 LaTeX，只生成可编辑 PGFPlots 源文件：
+
+```bash
+python3 benchmark/ablation/plot_progressive_ablation.py \
+  --run-dir "$RUN_DIR" \
+  --tex-only
+```
