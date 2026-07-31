@@ -200,8 +200,57 @@ mutable struct MOISolution
     solve_time_sec::Float64
     iterations::Int
     objective_constant::Float64
-    function MOISolution(;primal = Float64[], dual = Float64[], slack = Float64[], exit_code = 0, exit_status = :unknown, objective_value = NaN, dual_objective_value = NaN, solve_time_sec = NaN, iterations = 0, objective_constant = 0.0)
-        new(primal, dual, slack, exit_code, exit_status, objective_value, dual_objective_value, solve_time_sec, iterations, objective_constant)
+    l_inf_rel_primal_res::Float64
+    l_inf_rel_dual_res::Float64
+    l_2_rel_primal_res::Float64
+    l_2_rel_dual_res::Float64
+    relative_gap::Float64
+    restart_count::Int
+    restart_current_count::Int
+    restart_mean_count::Int
+    restart_halpern_count::Int
+    function MOISolution(;
+        primal = Float64[],
+        dual = Float64[],
+        slack = Float64[],
+        exit_code = 0,
+        exit_status = :unknown,
+        objective_value = NaN,
+        dual_objective_value = NaN,
+        solve_time_sec = NaN,
+        iterations = 0,
+        objective_constant = 0.0,
+        l_inf_rel_primal_res = NaN,
+        l_inf_rel_dual_res = NaN,
+        l_2_rel_primal_res = NaN,
+        l_2_rel_dual_res = NaN,
+        relative_gap = NaN,
+        restart_count = 0,
+        restart_current_count = 0,
+        restart_mean_count = 0,
+        restart_halpern_count = 0,
+    )
+        new(
+            primal,
+            dual,
+            slack,
+            exit_code,
+            exit_status,
+            objective_value,
+            dual_objective_value,
+            solve_time_sec,
+            iterations,
+            objective_constant,
+            l_inf_rel_primal_res,
+            l_inf_rel_dual_res,
+            l_2_rel_primal_res,
+            l_2_rel_dual_res,
+            relative_gap,
+            restart_count,
+            restart_current_count,
+            restart_mean_count,
+            restart_halpern_count,
+        )
     end
 end
 
@@ -244,7 +293,27 @@ function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
 end
 
 function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
-    return optimizer.options[Symbol(param.name)]
+    name = Symbol(param.name)
+    if name == :result_metrics
+        return (
+            exit_code = optimizer.sol.exit_code,
+            exit_status = optimizer.sol.exit_status,
+            solve_time_sec = optimizer.sol.solve_time_sec,
+            iterations = optimizer.sol.iterations,
+            l_inf_rel_primal_res = optimizer.sol.l_inf_rel_primal_res,
+            l_inf_rel_dual_res = optimizer.sol.l_inf_rel_dual_res,
+            l_2_rel_primal_res = optimizer.sol.l_2_rel_primal_res,
+            l_2_rel_dual_res = optimizer.sol.l_2_rel_dual_res,
+            relative_gap = optimizer.sol.relative_gap,
+            restart_count = optimizer.sol.restart_count,
+            restart_current_count = optimizer.sol.restart_current_count,
+            restart_mean_count = optimizer.sol.restart_mean_count,
+            restart_halpern_count = optimizer.sol.restart_halpern_count,
+            objective_value = optimizer.sol.objective_value,
+            dual_objective_value = optimizer.sol.dual_objective_value,
+        )
+    end
+    return optimizer.options[name]
 end
 
 ###
@@ -554,6 +623,18 @@ function MOI.optimize!(
             println("print_freq is not set, using default value: 5000")
         end
     end
+    if !haskey(options, :restart_check_freq)
+        options[:restart_check_freq] = 2000
+        if options[:verbose] > 0
+            println("restart_check_freq is not set, using default value: 2000")
+        end
+    end
+    if !haskey(options, :check_terminate_freq)
+        options[:check_terminate_freq] = 2000
+        if options[:verbose] > 0
+            println("check_terminate_freq is not set, using default value: 2000")
+        end
+    end
     if !haskey(options, :use_accelerated)
         options[:use_accelerated] = false
         if options[:verbose] > 0
@@ -566,6 +647,31 @@ function MOI.optimize!(
             println("use_aggressive is not set, using default value: true")
         end
     end
+    if !haskey(options, :use_reflection)
+        options[:use_reflection] = options[:use_aggressive]
+        if options[:verbose] > 0
+            println("use_reflection is not set, using use_aggressive=$(options[:use_reflection]) for compatibility")
+        end
+    end
+    if !haskey(options, :use_halpern)
+        options[:use_halpern] = true
+        if options[:verbose] > 0
+            println("use_halpern is not set, using default value: true")
+        end
+    end
+    if !haskey(options, :halpern_mode)
+        options[:halpern_mode] = :inline
+        if options[:verbose] > 0
+            println("halpern_mode is not set, using default value: :inline")
+        end
+    end
+    if options[:halpern_mode] isa AbstractString
+        options[:halpern_mode] = Symbol(options[:halpern_mode])
+    end
+    options[:halpern_mode] in (:inline, :restart_candidate) ||
+        throw(ArgumentError(
+            "halpern_mode must be :inline or :restart_candidate",
+        ))
     if !haskey(options, :rel_tol)
         options[:rel_tol] = 1e-6
     end
@@ -593,6 +699,8 @@ function MOI.optimize!(
             exp_x = 0,
             dual_exp_x = 0,
             print_freq = options[:print_freq],
+            restart_check_freq = options[:restart_check_freq],
+            check_terminate_freq = options[:check_terminate_freq],
             use_preconditioner = true,
             rescaling_method = options[:rescaling_method],
             method = :average,
@@ -602,6 +710,9 @@ function MOI.optimize!(
             use_resolving = options[:use_resolving],
             use_accelerated = options[:use_accelerated],
             use_aggressive = options[:use_aggressive],
+            use_reflection = options[:use_reflection],
+            use_halpern = options[:use_halpern],
+            halpern_mode = options[:halpern_mode],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],
@@ -617,6 +728,15 @@ function MOI.optimize!(
             solve_time_sec = sol_res.info.time,
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
+            l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,
+            l_inf_rel_dual_res = sol_res.info.convergeInfo[1].l_inf_rel_dual_res,
+            l_2_rel_primal_res = sol_res.info.convergeInfo[1].l_2_rel_primal_res,
+            l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
+            relative_gap = sol_res.info.convergeInfo[1].rel_gap,
+            restart_count = sol_res.info.restart_used,
+            restart_current_count = sol_res.info.restart_trigger_ergodic,
+            restart_mean_count = sol_res.info.restart_trigger_mean,
+            restart_halpern_count = sol_res.info.restart_trigger_halpern,
         )
     else
         sol_res = PDCS_CPU.rpdhg_cpu_solve(
@@ -639,6 +759,8 @@ function MOI.optimize!(
             exp_x = 0,
             dual_exp_x = 0,
             print_freq = options[:print_freq],
+            restart_check_freq = options[:restart_check_freq],
+            check_terminate_freq = options[:check_terminate_freq],
             use_preconditioner = false,
             method = :average,
             time_limit = options[:time_limit_secs],
@@ -647,6 +769,9 @@ function MOI.optimize!(
             use_resolving = options[:use_resolving],
             use_accelerated = options[:use_accelerated],
             use_aggressive = options[:use_aggressive],
+            use_reflection = options[:use_reflection],
+            use_halpern = options[:use_halpern],
+            halpern_mode = options[:halpern_mode],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],
@@ -662,6 +787,15 @@ function MOI.optimize!(
             solve_time_sec = sol_res.info.time,
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
+            l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,
+            l_inf_rel_dual_res = sol_res.info.convergeInfo[1].l_inf_rel_dual_res,
+            l_2_rel_primal_res = sol_res.info.convergeInfo[1].l_2_rel_primal_res,
+            l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
+            relative_gap = sol_res.info.convergeInfo[1].rel_gap,
+            restart_count = sol_res.info.restart_used,
+            restart_current_count = sol_res.info.restart_trigger_ergodic,
+            restart_mean_count = sol_res.info.restart_trigger_mean,
+            restart_halpern_count = sol_res.info.restart_trigger_halpern,
         )
     end
     return index_map, false

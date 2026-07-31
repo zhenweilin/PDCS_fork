@@ -444,7 +444,206 @@ function restart_threshold_calculation_diagonal!(; sol::Solution, solver::rpdhgS
     end
 end
 
-function restart_condition_check_diagonal!(; sol::Solution, solver::rpdhgSolver, primal_sol_0::primalVector, dual_sol_0::dualVector, dual_sol_temp::solVecDual, inner_iter::Int, restart_duality_gap_flag::Bool)
+@inline restart_merit(value::Real) = isfinite(value) ? Float64(value) : Inf
+
+"""
+Return the restart candidate index using the legacy tie policy: the running
+mean wins a tie with the current point, while Halpern must be strictly better.
+
+Indices are current=1, mean=2, and Halpern=3.
+"""
+function restart_candidate_index(
+    current_merit::Real,
+    mean_merit::Real,
+    halpern_merit::Real,
+    use_halpern::Bool,
+)
+    selected = 2
+    best = restart_merit(mean_merit)
+    current = restart_merit(current_merit)
+    if current < best
+        selected = 1
+        best = current
+    end
+    halpern = use_halpern ? restart_merit(halpern_merit) : Inf
+    if halpern < best
+        selected = 3
+    end
+    return selected
+end
+
+"""
+Install the best restart candidate into the running-mean buffers. The next
+restart epoch already initializes both its anchor and main point from these
+buffers, so no additional trajectory mutation is needed here.
+"""
+function install_restart_candidate!(
+    sol::Solution,
+    halpern_primal::Union{primalVector,Nothing},
+    halpern_dual::Union{dualVector,Nothing},
+    merits,
+    use_halpern::Bool;
+    reason::AbstractString,
+)
+    halpern_enabled =
+        use_halpern && halpern_primal !== nothing && halpern_dual !== nothing
+    selected = restart_candidate_index(
+        merits[1],
+        merits[2],
+        merits[3],
+        halpern_enabled,
+    )
+    if selected == 1
+        sol.info.restart_trigger_ergodic += 1
+        sol.x.primal_sol_mean.x .= sol.x.primal_sol.x
+        sol.y.dual_sol_mean.y .= sol.y.dual_sol.y
+        selected_name = "current"
+    elseif selected == 3
+        sol.info.restart_trigger_halpern += 1
+        sol.x.primal_sol_mean.x .= halpern_primal.x
+        sol.y.dual_sol_mean.y .= halpern_dual.y
+        selected_name = "halpern"
+    else
+        sol.info.restart_trigger_mean += 1
+        selected_name = "mean"
+    end
+    @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] halpern_merit=(halpern_enabled ? merits[3] : Inf)
+    return selected
+end
+
+"""
+Evaluate current, running-mean, and optional Halpern candidates with the same
+KKT merit. Existing diagonal scratch vectors hold the recovered Halpern point
+only for the duration of its metric calculation, avoiding another persistent
+pair of GPU vectors.
+"""
+function evaluate_restart_kkt_candidates!(
+    sol::Solution,
+    solver::rpdhgSolver,
+    dual_sol_temp::solVecDual,
+    halpern_primal::Union{primalVector,Nothing},
+    halpern_dual::Union{dualVector,Nothing},
+    halpern_converge_info::Union{PDHGCLPConvergeInfo,Nothing},
+    use_halpern::Bool,
+    evaluate_halpern::Bool = use_halpern,
+)
+    recover_solution!(
+        data = solver.data,
+        Dr_product = solver.data.diagonal_scale.Dr_product.x,
+        Dl_product = solver.data.diagonal_scale.Dl_product.y,
+        sol = sol.x,
+        dual_sol = sol.y,
+    )
+    converge_info_calculation_diagonal!(
+        solver = solver,
+        primal_sol = sol.x.recovered_primal.primal_sol,
+        dual_sol = sol.y.recovered_dual.dual_sol,
+        slack = sol.y.slack,
+        dual_sol_temp = dual_sol_temp,
+        converge_info = sol.info.convergeInfo[1],
+    )
+    converge_info_calculation_diagonal!(
+        solver = solver,
+        primal_sol = sol.x.recovered_primal.primal_sol_mean,
+        dual_sol = sol.y.recovered_dual.dual_sol_mean,
+        slack = sol.y.slack,
+        dual_sol_temp = dual_sol_temp,
+        converge_info = sol.info.convergeInfo[2],
+    )
+    sol.info.kkt_error[1] = kkt_error_diagonal!(
+        omega = sol.info.omega,
+        convergence_info = sol.info.convergeInfo[1],
+    )
+    sol.info.kkt_error[2] = kkt_error_diagonal!(
+        omega = sol.info.omega,
+        convergence_info = sol.info.convergeInfo[2],
+    )
+
+    halpern_enabled =
+        use_halpern &&
+        evaluate_halpern &&
+        halpern_primal !== nothing &&
+        halpern_dual !== nothing &&
+        halpern_converge_info !== nothing
+    if halpern_enabled
+        # Reuse the diagonal scratch vector wrappers as recovered candidate
+        # inputs. converge_info_calculation_diagonal! consumes each input
+        # before reusing the corresponding scratch storage internally.
+        solver.data.diagonal_scale.Dr_temp.x .=
+            halpern_primal.x ./ solver.data.diagonal_scale.Dr_product.x
+        solver.data.diagonal_scale.Dl_temp.y .=
+            halpern_dual.y ./ solver.data.diagonal_scale.Dl_product.y
+        converge_info_calculation_diagonal!(
+            solver = solver,
+            primal_sol = solver.data.diagonal_scale.Dr_temp,
+            dual_sol = solver.data.diagonal_scale.Dl_temp,
+            slack = sol.y.slack,
+            dual_sol_temp = dual_sol_temp,
+            converge_info = halpern_converge_info,
+        )
+        sol.info.kkt_error[3] = kkt_error_diagonal!(
+            omega = sol.info.omega,
+            convergence_info = halpern_converge_info,
+        )
+    else
+        sol.info.kkt_error[3] = Inf
+    end
+    return sol.info.kkt_error
+end
+
+function evaluate_halpern_restart_kkt_candidate!(
+    sol::Solution,
+    solver::rpdhgSolver,
+    dual_sol_temp::solVecDual,
+    halpern_primal::Union{primalVector,Nothing},
+    halpern_dual::Union{dualVector,Nothing},
+    halpern_converge_info::Union{PDHGCLPConvergeInfo,Nothing},
+    use_halpern::Bool,
+)
+    halpern_enabled =
+        use_halpern &&
+        halpern_primal !== nothing &&
+        halpern_dual !== nothing &&
+        halpern_converge_info !== nothing
+    if !halpern_enabled
+        sol.info.kkt_error[3] = Inf
+        return Inf
+    end
+    solver.data.diagonal_scale.Dr_temp.x .=
+        halpern_primal.x ./ solver.data.diagonal_scale.Dr_product.x
+    solver.data.diagonal_scale.Dl_temp.y .=
+        halpern_dual.y ./ solver.data.diagonal_scale.Dl_product.y
+    converge_info_calculation_diagonal!(
+        solver = solver,
+        primal_sol = solver.data.diagonal_scale.Dr_temp,
+        dual_sol = solver.data.diagonal_scale.Dl_temp,
+        slack = sol.y.slack,
+        dual_sol_temp = dual_sol_temp,
+        converge_info = halpern_converge_info,
+    )
+    sol.info.kkt_error[3] = kkt_error_diagonal!(
+        omega = sol.info.omega,
+        convergence_info = halpern_converge_info,
+    )
+    return sol.info.kkt_error[3]
+end
+
+function restart_condition_check_diagonal!(;
+    sol::Solution,
+    solver::rpdhgSolver,
+    primal_sol_0::primalVector,
+    dual_sol_0::dualVector,
+    dual_sol_temp::solVecDual,
+    inner_iter::Int,
+    restart_duality_gap_flag::Bool,
+    halpern_primal::Union{primalVector,Nothing} = nothing,
+    halpern_dual::Union{dualVector,Nothing} = nothing,
+    halpern_converge_info::Union{PDHGCLPConvergeInfo,Nothing} = nothing,
+)
+    use_halpern =
+        sol.params.use_halpern &&
+        halpern_primal !== nothing &&
+        halpern_dual !== nothing
     if restart_duality_gap_flag
         solver.data.diagonal_scale.Dr_temp.x .= sol.x.primal_sol.x .- primal_sol_0.x
         solver.data.diagonal_scale.Dl_temp.y .= sol.y.dual_sol.y .- dual_sol_0.y
@@ -472,78 +671,126 @@ function restart_condition_check_diagonal!(; sol::Solution, solver::rpdhgSolver,
                                                 sigma = sol.params.sigma)
         sol.info.normalized_duality_gap[1] = rhoVal_left
         sol.info.normalized_duality_gap[2] = rhoVal_left_mean
+        sol.info.normalized_duality_gap[3] = Inf
+        merits = sol.info.normalized_duality_gap
         # condition 1
-        if ((rhoVal_left < sol.params.beta_suff * sol.info.normalized_duality_gap_restart_threshold || rhoVal_left_mean < sol.params.beta_suff * sol.info.normalized_duality_gap_restart_threshold))
+        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+           sol.params.beta_suff * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            if ((sol.info.normalized_duality_gap[1] < sol.info.normalized_duality_gap[2]) && sol.info.restart_duality_gap_flag)
-                sol.info.restart_trigger_ergodic = sol.info.restart_trigger_ergodic + 1
-                sol.x.primal_sol_mean.x .= sol.x.primal_sol.x
-                sol.y.dual_sol_mean.y .= sol.y.dual_sol.y
-            else    
-                sol.info.restart_trigger_mean = sol.info.restart_trigger_mean + 1
+            if use_halpern
+                merits[3] = binary_search_duality_gap_diagonal!(
+                    solver = solver,
+                    r = Mnorm_restart_left,
+                    primal = halpern_primal,
+                    dual = halpern_dual,
+                    slack = sol.y.slack,
+                    dual_sol_temp = dual_sol_temp,
+                    tau = sol.params.tau,
+                    sigma = sol.params.sigma,
+                )
             end
+            install_restart_candidate!(
+                sol,
+                halpern_primal,
+                halpern_dual,
+                merits,
+                use_halpern;
+                reason = "duality-gap condition 1",
+            )
             @info "restart due to condition 1"
             return true
         end # end if rhoVal_left
         # condition 2
-        if (rhoVal_left < sol.params.beta_necessary * sol.info.normalized_duality_gap_restart_threshold || rhoVal_left_mean < sol.params.beta_necessary * sol.info.normalized_duality_gap_restart_threshold) 
+        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+           sol.params.beta_necessary * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            if ((sol.info.normalized_duality_gap[1] < sol.info.normalized_duality_gap[2]) && sol.info.restart_duality_gap_flag)
-                sol.info.restart_trigger_ergodic = sol.info.restart_trigger_ergodic + 1
-                sol.x.primal_sol_mean.x .= sol.x.primal_sol.x
-                sol.y.dual_sol_mean.y .= sol.y.dual_sol.y
-            else
-                sol.info.restart_trigger_mean = sol.info.restart_trigger_mean + 1
+            if use_halpern
+                merits[3] = binary_search_duality_gap_diagonal!(
+                    solver = solver,
+                    r = Mnorm_restart_left,
+                    primal = halpern_primal,
+                    dual = halpern_dual,
+                    slack = sol.y.slack,
+                    dual_sol_temp = dual_sol_temp,
+                    tau = sol.params.tau,
+                    sigma = sol.params.sigma,
+                )
             end
+            install_restart_candidate!(
+                sol,
+                halpern_primal,
+                halpern_dual,
+                merits,
+                use_halpern;
+                reason = "duality-gap condition 2",
+            )
             @info "restart due to condition 2"
             return true
         end # end if rhoVal_left
     else
-        recover_solution!(data = solver.data, Dr_product = solver.data.diagonal_scale.Dr_product.x,
-                    Dl_product = solver.data.diagonal_scale.Dl_product.y, sol = sol.x,
-                    dual_sol = sol.y)
-        converge_info_calculation_diagonal!(solver = solver,
-                    primal_sol = sol.x.recovered_primal.primal_sol,
-                    dual_sol = sol.y.recovered_dual.dual_sol,
-                    slack = sol.y.slack,
-                    dual_sol_temp = dual_sol_temp,
-                    converge_info = sol.info.convergeInfo[1])
-        converge_info_calculation_diagonal!(solver = solver,
-                    primal_sol = sol.x.recovered_primal.primal_sol_mean,
-                    dual_sol = sol.y.recovered_dual.dual_sol_mean,
-                    slack = sol.y.slack,
-                    dual_sol_temp = dual_sol_temp,
-                    converge_info = sol.info.convergeInfo[2])
-        kkt_error_ergodic_lag = sol.info.kkt_error[1]
-        kkt_error_mean_lag = sol.info.kkt_error[2]
-        kkt_error_ergodic = kkt_error_diagonal!(omega = sol.info.omega, convergence_info = sol.info.convergeInfo[1])
-        kkt_error_mean = kkt_error_diagonal!(omega = sol.info.omega, convergence_info = sol.info.convergeInfo[2])
-        sol.info.kkt_error[1] = kkt_error_ergodic
-        sol.info.kkt_error[2] = kkt_error_mean
+        kkt_error_lag = copy(sol.info.kkt_error)
+        merits = evaluate_restart_kkt_candidates!(
+            sol,
+            solver,
+            dual_sol_temp,
+            halpern_primal,
+            halpern_dual,
+            halpern_converge_info,
+            use_halpern,
+            false,
+        )
         # condition 1
-        if ((kkt_error_ergodic < sol.params.beta_suff_kkt * sol.info.kkt_error_restart_threshold || kkt_error_mean < sol.params.beta_suff_kkt * sol.info.kkt_error_restart_threshold))
+        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+           sol.params.beta_suff_kkt * sol.info.kkt_error_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            if (sol.info.kkt_error[1] < sol.info.kkt_error[2])
-                sol.info.restart_trigger_ergodic = sol.info.restart_trigger_ergodic + 1
-                sol.x.primal_sol_mean.x .= sol.x.primal_sol.x
-                sol.y.dual_sol_mean.y .= sol.y.dual_sol.y
-            else    
-                sol.info.restart_trigger_mean = sol.info.restart_trigger_mean + 1
-            end
+            evaluate_halpern_restart_kkt_candidate!(
+                sol,
+                solver,
+                dual_sol_temp,
+                halpern_primal,
+                halpern_dual,
+                halpern_converge_info,
+                use_halpern,
+            )
+            install_restart_candidate!(
+                sol,
+                halpern_primal,
+                halpern_dual,
+                merits,
+                use_halpern;
+                reason = "KKT condition 1",
+            )
             @info "restart due to condition 1 kkt"
             return true
         end # end if rhoVal_left
         # condition 2
-        if (kkt_error_ergodic < sol.params.beta_necessary_kkt * sol.info.kkt_error_restart_threshold && kkt_error_ergodic > kkt_error_ergodic_lag) ||
-             (kkt_error_mean < sol.params.beta_necessary_kkt * sol.info.kkt_error_restart_threshold && kkt_error_mean > kkt_error_mean_lag)
+        enabled_indices = use_halpern ? (1, 2, 3) : (1, 2)
+        if any(
+            restart_merit(merits[index]) <
+                sol.params.beta_necessary_kkt *
+                sol.info.kkt_error_restart_threshold &&
+            restart_merit(merits[index]) >
+                restart_merit(kkt_error_lag[index])
+            for index in enabled_indices
+        )
             sol.info.restart_used = sol.info.restart_used + 1
-            if (sol.info.kkt_error[1] < sol.info.kkt_error[2])
-                sol.info.restart_trigger_ergodic = sol.info.restart_trigger_ergodic + 1
-                sol.x.primal_sol_mean.x .= sol.x.primal_sol.x
-                sol.y.dual_sol_mean.y .= sol.y.dual_sol.y
-            else
-                sol.info.restart_trigger_mean = sol.info.restart_trigger_mean + 1
-            end
+            evaluate_halpern_restart_kkt_candidate!(
+                sol,
+                solver,
+                dual_sol_temp,
+                halpern_primal,
+                halpern_dual,
+                halpern_converge_info,
+                use_halpern,
+            )
+            install_restart_candidate!(
+                sol,
+                halpern_primal,
+                halpern_dual,
+                merits,
+                use_halpern;
+                reason = "KKT condition 2",
+            )
             @info "restart due to condition 2 kkt"
             return true
         end # end if rhoVal_left
@@ -552,6 +799,51 @@ function restart_condition_check_diagonal!(; sol::Solution, solver::rpdhgSolver,
     if inner_iter >= sol.info.iter * sol.params.beta_artificial && sol.info.iter > 100000
         @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter)")
         sol.info.restart_used = sol.info.restart_used + 1
+        merits = restart_duality_gap_flag ?
+            sol.info.normalized_duality_gap :
+            sol.info.kkt_error
+        if use_halpern && restart_duality_gap_flag
+            solver.data.diagonal_scale.Dr_temp.x .=
+                sol.x.primal_sol.x .- primal_sol_0.x
+            solver.data.diagonal_scale.Dl_temp.y .=
+                sol.y.dual_sol.y .- dual_sol_0.y
+            radius = Mnorm(
+                solver = solver,
+                x = solver.data.diagonal_scale.Dr_temp.x,
+                y = solver.data.diagonal_scale.Dl_temp.y,
+                tau = sol.params.tau,
+                sigma = sol.params.sigma,
+                AxTemp = dual_sol_temp.dual_sol_mean,
+            )
+            merits[3] = binary_search_duality_gap_diagonal!(
+                solver = solver,
+                r = radius,
+                primal = halpern_primal,
+                dual = halpern_dual,
+                slack = sol.y.slack,
+                dual_sol_temp = dual_sol_temp,
+                tau = sol.params.tau,
+                sigma = sol.params.sigma,
+            )
+        elseif use_halpern
+            evaluate_halpern_restart_kkt_candidate!(
+                sol,
+                solver,
+                dual_sol_temp,
+                halpern_primal,
+                halpern_dual,
+                halpern_converge_info,
+                use_halpern,
+            )
+        end
+        install_restart_candidate!(
+            sol,
+            halpern_primal,
+            halpern_dual,
+            merits,
+            use_halpern;
+            reason = "artificial condition",
+        )
         return true
     end # end if inner_iter
     return false
@@ -838,6 +1130,16 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
     dual_sol_temp = sol.dual_sol_temp
     primal_sol_change = deepCopyPrimalVector(sol.x.primal_sol)
     dual_sol_change = deepCopyDualVector(sol.y.dual_sol)
+    # The disabled path aliases the read-only restart anchors. The CUDA kernel
+    # does not write candidate buffers when use_halpern=false, so the ablation
+    # incurs neither extra candidate storage nor global-memory writes.
+    halpern_primal = sol.params.use_halpern ?
+        deepCopyPrimalVector(sol.x.primal_sol) :
+        primal_sol_0
+    halpern_dual = sol.params.use_halpern ?
+        deepCopyDualVector(sol.y.dual_sol) :
+        dual_sol_0
+    halpern_converge_info = PDHGCLPConvergeInfo()
     sol.info.omega = initialize_primal_weight(solver = solver)
     primal_sol_diff = deepCopyPrimalVector(sol.x.primal_sol)
     dual_sol_diff = deepCopyDualVector(sol.y.dual_sol)
@@ -939,10 +1241,12 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 sol.x.primal_sol.x,
                 sol.x.primal_sol_lag.x,
                 sol.x.primal_sol_mean.x,
+                halpern_primal.x,
                 primal_sol_0.x,
                 sol.y.dual_sol.y,
                 sol.y.dual_sol_lag.y,
                 sol.y.dual_sol_mean.y,
+                halpern_dual.y,
                 dual_sol_0.y,
                 extra_coeff,
                 solver.data.n,
@@ -959,12 +1263,40 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 (force_restart && inner_iter > 100))
                 @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter) or force_restart")
                 sol.info.restart_used = sol.info.restart_used + 1
+                merits = evaluate_restart_kkt_candidates!(
+                    sol,
+                    solver,
+                    dual_sol_temp,
+                    halpern_primal,
+                    halpern_dual,
+                    halpern_converge_info,
+                    sol.params.use_halpern,
+                )
+                install_restart_candidate!(
+                    sol,
+                    halpern_primal,
+                    halpern_dual,
+                    merits,
+                    sol.params.use_halpern;
+                    reason = "force/artificial condition",
+                )
                 break
             end # end if inner_iter
             if sol.params.use_restart &&
                (sol.info.iter % sol.params.kkt_restart_freq == 0) &&
                sol.params.use_kkt_restart
-                if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false)
+                if restart_condition_check_diagonal!(
+                    sol = sol,
+                    solver = solver,
+                    primal_sol_0 = primal_sol_0,
+                    dual_sol_0 = dual_sol_0,
+                    dual_sol_temp = dual_sol_temp,
+                    inner_iter = inner_iter,
+                    restart_duality_gap_flag = false,
+                    halpern_primal = halpern_primal,
+                    halpern_dual = halpern_dual,
+                    halpern_converge_info = halpern_converge_info,
+                )
                     break
                 end
                 if outer_iter == 1
@@ -975,11 +1307,33 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                (sol.info.iter % sol.params.duality_gap_restart_freq == 0) &&
                sol.params.use_duality_gap_restart
                 if sol.info.restart_duality_gap_flag
-                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = true)
+                    if restart_condition_check_diagonal!(
+                        sol = sol,
+                        solver = solver,
+                        primal_sol_0 = primal_sol_0,
+                        dual_sol_0 = dual_sol_0,
+                        dual_sol_temp = dual_sol_temp,
+                        inner_iter = inner_iter,
+                        restart_duality_gap_flag = true,
+                        halpern_primal = halpern_primal,
+                        halpern_dual = halpern_dual,
+                        halpern_converge_info = halpern_converge_info,
+                    )
                         break
                     end
                 else
-                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false)
+                    if restart_condition_check_diagonal!(
+                        sol = sol,
+                        solver = solver,
+                        primal_sol_0 = primal_sol_0,
+                        dual_sol_0 = dual_sol_0,
+                        dual_sol_temp = dual_sol_temp,
+                        inner_iter = inner_iter,
+                        restart_duality_gap_flag = false,
+                        halpern_primal = halpern_primal,
+                        halpern_dual = halpern_dual,
+                        halpern_converge_info = halpern_converge_info,
+                    )
                         break
                     end
                 end

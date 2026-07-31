@@ -206,6 +206,9 @@ mutable struct MOISolution
     l_2_rel_dual_res::Float64
     relative_gap::Float64
     restart_count::Int
+    restart_current_count::Int
+    restart_mean_count::Int
+    restart_halpern_count::Int
     function MOISolution(;
         primal = Float64[],
         dual = Float64[],
@@ -223,6 +226,9 @@ mutable struct MOISolution
         l_2_rel_dual_res = NaN,
         relative_gap = NaN,
         restart_count = 0,
+        restart_current_count = 0,
+        restart_mean_count = 0,
+        restart_halpern_count = 0,
     )
         new(
             primal,
@@ -241,6 +247,9 @@ mutable struct MOISolution
             l_2_rel_dual_res,
             relative_gap,
             restart_count,
+            restart_current_count,
+            restart_mean_count,
+            restart_halpern_count,
         )
     end
 end
@@ -297,6 +306,9 @@ function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
             l_2_rel_dual_res = optimizer.sol.l_2_rel_dual_res,
             relative_gap = optimizer.sol.relative_gap,
             restart_count = optimizer.sol.restart_count,
+            restart_current_count = optimizer.sol.restart_current_count,
+            restart_mean_count = optimizer.sol.restart_mean_count,
+            restart_halpern_count = optimizer.sol.restart_halpern_count,
             objective_value = optimizer.sol.objective_value,
             dual_objective_value = optimizer.sol.dual_objective_value,
         )
@@ -749,6 +761,9 @@ function MOI.optimize!(
             l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
             relative_gap = sol_res.info.convergeInfo[1].rel_gap,
             restart_count = sol_res.info.restart_used,
+            restart_current_count = sol_res.info.restart_trigger_ergodic,
+            restart_mean_count = sol_res.info.restart_trigger_mean,
+            restart_halpern_count = sol_res.info.restart_trigger_halpern,
         )
     else
         sol_res = PDCS_GPU.rpdhg_gpu_solve(
@@ -810,6 +825,9 @@ function MOI.optimize!(
             l_2_rel_dual_res = sol_res.info.convergeInfo[1].l_2_rel_dual_res,
             relative_gap = sol_res.info.convergeInfo[1].rel_gap,
             restart_count = sol_res.info.restart_used,
+            restart_current_count = sol_res.info.restart_trigger_ergodic,
+            restart_mean_count = sol_res.info.restart_trigger_mean,
+            restart_halpern_count = sol_res.info.restart_trigger_halpern,
         )
     end
     return index_map, false

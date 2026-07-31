@@ -755,6 +755,7 @@ mutable struct PDHGCLPInfo
     restart_used::Integer
     restart_trigger_mean::Integer
     restart_trigger_ergodic::Integer
+    restart_trigger_halpern::Integer
     exit_status::Symbol
     pObj::rpdhg_float
     dObj::rpdhg_float
@@ -769,11 +770,13 @@ mutable struct PDHGCLPInfo
     omega::rpdhg_float
     max_kkt_error::rpdhg_float
     min_kkt_error::rpdhg_float
-    function PDHGCLPInfo(; iter, convergeInfo, infeaInfo, time, start_time, restart_used = 0, restart_trigger_mean = 0, restart_trigger_ergodic = 0, exit_status = :continue, pObj = 1e+30, dObj = 1e+30, exit_code = 7, normalized_duality_gap = Vector{rpdhg_float}(undef, 2), normalized_duality_gap_restart_threshold = 0, kkt_error = Vector{rpdhg_float}(undef, 2), kkt_error_restart_threshold = 0)
-        normalized_duality_gap[1] = 1e+30
-        normalized_duality_gap[2] = 1e+30
-        kkt_error[1] = 1e+30
-        kkt_error[2] = 1e+30    
+    function PDHGCLPInfo(; iter, convergeInfo, infeaInfo, time, start_time, restart_used = 0, restart_trigger_mean = 0, restart_trigger_ergodic = 0, restart_trigger_halpern = 0, exit_status = :continue, pObj = 1e+30, dObj = 1e+30, exit_code = 7, normalized_duality_gap = fill(rpdhg_float(1e+30), 3), normalized_duality_gap_restart_threshold = 0, kkt_error = fill(rpdhg_float(1e+30), 3), kkt_error_restart_threshold = 0)
+        length(normalized_duality_gap) >= 3 ||
+            throw(ArgumentError("normalized_duality_gap must hold current, mean, and Halpern candidates"))
+        length(kkt_error) >= 3 ||
+            throw(ArgumentError("kkt_error must hold current, mean, and Halpern candidates"))
+        normalized_duality_gap .= 1e+30
+        kkt_error .= 1e+30
         iter_stepsize = 0
         normalized_duality_gap_r = 1e+30
         restart_duality_gap_flag = true
@@ -781,7 +784,7 @@ mutable struct PDHGCLPInfo
         omega = 1.0
         max_kkt_error = 1e+30
         min_kkt_error = 1e+30
-        new(iter, iter_stepsize, convergeInfo, infeaInfo, time, start_time, restart_used, restart_trigger_mean, restart_trigger_ergodic, exit_status, pObj, dObj, exit_code, normalized_duality_gap, normalized_duality_gap_restart_threshold, normalized_duality_gap_r, kkt_error, kkt_error_restart_threshold, restart_duality_gap_flag, binarySearch_t0, omega, max_kkt_error, min_kkt_error)
+        new(iter, iter_stepsize, convergeInfo, infeaInfo, time, start_time, restart_used, restart_trigger_mean, restart_trigger_ergodic, restart_trigger_halpern, exit_status, pObj, dObj, exit_code, normalized_duality_gap, normalized_duality_gap_restart_threshold, normalized_duality_gap_r, kkt_error, kkt_error_restart_threshold, restart_duality_gap_flag, binarySearch_t0, omega, max_kkt_error, min_kkt_error)
     end
 end
 

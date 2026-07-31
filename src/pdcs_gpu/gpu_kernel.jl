@@ -529,10 +529,12 @@ end
         primal_sol,
         primal_sol_lag,
         primal_sol_mean,
+        primal_halpern_candidate,
         primal_restart_anchor,
         dual_sol,
         dual_sol_lag,
         dual_sol_mean,
+        dual_halpern_candidate,
         dual_restart_anchor,
         extra_coeff,
         primal_n,
@@ -544,7 +546,8 @@ end
         use_halpern,
     )
 
-Updates primal and dual solutions using reflection/extrapolation techniques.
+Updates the reflected main trajectory, its running mean, and an auxiliary
+Halpern restart candidate.
 
 This kernel implements the reflection step in the aggressive-update path.
 The reflection uses extrapolation
@@ -554,10 +557,12 @@ Arguments:
 - primal_sol: Current primal solution (GPU array, modified in-place)
 - primal_sol_lag: Lagged primal solution (GPU array)
 - primal_sol_mean: Running average of primal solution (GPU array, modified in-place)
+- primal_halpern_candidate: Auxiliary primal Halpern restart candidate
 - primal_restart_anchor: Primal restart anchor from Algorithm 1
 - dual_sol: Current dual solution (GPU array, modified in-place)
 - dual_sol_lag: Lagged dual solution (GPU array)
 - dual_sol_mean: Running average of dual solution (GPU array, modified in-place)
+- dual_halpern_candidate: Auxiliary dual Halpern restart candidate
 - dual_restart_anchor: Dual restart anchor from Algorithm 1
 - extra_coeff: Extra extrapolation coefficient
 - primal_n: Dimension of primal variable
@@ -566,16 +571,19 @@ Arguments:
 - eta_cum: Cumulative extrapolation coefficient
 - eta: Current extrapolation coefficient
 - use_reflection: Whether to apply the reflection/extrapolation term
-- use_halpern: Whether to mix the reflected point with the restart anchor
+- use_halpern: Whether to form the auxiliary Halpern candidate. The main
+  trajectory is always the reflected point.
 """
 function reflection_update(
     primal_sol::T,
     primal_sol_lag::T,
     primal_sol_mean::T,
+    primal_halpern_candidate::T,
     primal_restart_anchor::T,
     dual_sol::T,
     dual_sol_lag::T,
     dual_sol_mean::T,
+    dual_halpern_candidate::T,
     dual_restart_anchor::T,
     extra_coeff::Float64,
     primal_n::Int64,
@@ -600,6 +608,8 @@ function reflection_update(
                 CuPtr{Float64},
                 CuPtr{Float64},
                 CuPtr{Float64},
+                CuPtr{Float64},
+                CuPtr{Float64},
                 Float64,
                 Int64,
                 Int64,
@@ -612,10 +622,12 @@ function reflection_update(
             primal_sol,
             primal_sol_lag,
             primal_sol_mean,
+            primal_halpern_candidate,
             primal_restart_anchor,
             dual_sol,
             dual_sol_lag,
             dual_sol_mean,
+            dual_halpern_candidate,
             dual_restart_anchor,
             extra_coeff,
             primal_n,

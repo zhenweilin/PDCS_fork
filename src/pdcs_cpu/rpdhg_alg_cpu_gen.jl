@@ -65,8 +65,8 @@ end
 
 function printInfolevel2(;infoAll::PDHGCLPInfo, diff_nrm_x_recovered::rpdhg_float, diff_nrm_y_recovered::rpdhg_float, nrm2_x_recovered::rpdhg_float, nrm2_y_recovered::rpdhg_float, nrmInf_x_recovered::rpdhg_float, nrmInf_y_recovered::rpdhg_float, params::PDHGCLPParameters)
     info = infoAll.convergeInfo[1]
-    println(@sprintf("iter:%d rel_p_res(l2):%.3e rel_d_res(l2):%.3e primal_obj:%.3e dual_obj:%.3e rel_pd_gap:%.3e time:%.2f restart_used:%d, restart_trigger_mean:%d, restart_trigger_ergodic:%d, diff_nrm_x_recovered:%.3e diff_nrm_y_recovered:%.3e nrm2_x_recovered:%.3e nrm2_y_recovered:%.3e, nrmInf_x_recovered:%.3e nrmInf_y_recovered:%.3e dual_gap_ergodic:%.3e, dual_gap_mean:%.3e, dual_gap_restart_threshold:%.3e, dual_gap_r:%.3e, kkt_error_ergodic:%.3e, kkt_error_mean:%.3e, kkt_error_restart_threshold:%.3e, tau:%.3e, sigma:%.3e",
-    infoAll.iter, info.l_2_rel_primal_res, info.l_2_rel_dual_res, info.primal_objective, info.dual_objective, info.rel_gap, infoAll.time, infoAll.restart_used, infoAll.restart_trigger_mean, infoAll.restart_trigger_ergodic, diff_nrm_x_recovered, diff_nrm_y_recovered, nrm2_x_recovered, nrm2_y_recovered, nrmInf_x_recovered, nrmInf_y_recovered, infoAll.normalized_duality_gap[1], infoAll.normalized_duality_gap[2], infoAll.normalized_duality_gap_restart_threshold, infoAll.normalized_duality_gap_r, infoAll.kkt_error[1], infoAll.kkt_error[2], infoAll.kkt_error_restart_threshold, params.tau, params.sigma))
+    println(@sprintf("iter:%d rel_p_res(l2):%.3e rel_d_res(l2):%.3e primal_obj:%.3e dual_obj:%.3e rel_pd_gap:%.3e time:%.2f restart_used:%d, restart_trigger_mean:%d, restart_trigger_ergodic:%d, restart_trigger_halpern:%d, diff_nrm_x_recovered:%.3e diff_nrm_y_recovered:%.3e nrm2_x_recovered:%.3e nrm2_y_recovered:%.3e, nrmInf_x_recovered:%.3e nrmInf_y_recovered:%.3e dual_gap_ergodic:%.3e, dual_gap_mean:%.3e, dual_gap_halpern:%.3e, dual_gap_restart_threshold:%.3e, dual_gap_r:%.3e, kkt_error_ergodic:%.3e, kkt_error_mean:%.3e, kkt_error_halpern:%.3e, kkt_error_restart_threshold:%.3e, tau:%.3e, sigma:%.3e",
+    infoAll.iter, info.l_2_rel_primal_res, info.l_2_rel_dual_res, info.primal_objective, info.dual_objective, info.rel_gap, infoAll.time, infoAll.restart_used, infoAll.restart_trigger_mean, infoAll.restart_trigger_ergodic, infoAll.restart_trigger_halpern, diff_nrm_x_recovered, diff_nrm_y_recovered, nrm2_x_recovered, nrm2_y_recovered, nrmInf_x_recovered, nrmInf_y_recovered, infoAll.normalized_duality_gap[1], infoAll.normalized_duality_gap[2], infoAll.normalized_duality_gap[3], infoAll.normalized_duality_gap_restart_threshold, infoAll.normalized_duality_gap_r, infoAll.kkt_error[1], infoAll.kkt_error[2], infoAll.kkt_error[3], infoAll.kkt_error_restart_threshold, params.tau, params.sigma))
 end
 
 function Mnorm(; solver::rpdhgSolver, x::Vector{rpdhg_float}, y::Vector{rpdhg_float},
@@ -882,6 +882,9 @@ function rpdhg_cpu_solve(;
     use_aggressive::Bool = true,
     use_accelerated::Bool = true,
     use_resolving::Bool = true,
+    use_reflection::Bool = use_aggressive,
+    use_halpern::Bool = true,
+    halpern_mode::Symbol = :inline,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
     warm_start::Bool = false,
@@ -901,6 +904,10 @@ function rpdhg_cpu_solve(;
     method::Symbol = :average
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
+    halpern_mode in (:inline, :restart_candidate) ||
+        throw(ArgumentError(
+            "halpern_mode must be :inline or :restart_candidate",
+        ))
     # Check the assertion
     global num_threads = nthreads()
     global time_proj = 0.0
@@ -1276,7 +1283,10 @@ function rpdhg_cpu_solve(;
                                 restart_check_freq = restart_check_freq,
                                 check_terminate_freq = check_terminate_freq,
                                 print_freq = print_freq,
-                                time_limit = time_limit);
+                                time_limit = time_limit,
+                                use_reflection = use_reflection,
+                                use_halpern = use_halpern,
+                                halpern_mode = halpern_mode);
     # set the info struct
     info = PDHGCLPInfo(iter = 0,
                         convergeInfo = Vector{PDHGCLPConvergeInfo}([]),

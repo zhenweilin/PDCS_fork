@@ -35,23 +35,74 @@ dual_update(double* dual_sol, double* dual_sol_lag, double* dual_sol_diff, doubl
 }
 
 extern "C" __global__ void
-reflection_update(double* primal_sol, double* primal_sol_lag, double* primal_sol_mean, double* dual_sol, double* dual_sol_lag, double* dual_sol_mean, double extra_coeff, long primal_n, long dual_n, long inner_iter, double eta_cum, double eta)
+reflection_update(
+    double* primal_sol,
+    double* primal_sol_lag,
+    double* primal_sol_mean,
+    double* primal_halpern_candidate,
+    const double* primal_restart_anchor,
+    double* dual_sol,
+    double* dual_sol_lag,
+    double* dual_sol_mean,
+    double* dual_halpern_candidate,
+    const double* dual_restart_anchor,
+    double extra_coeff,
+    long primal_n,
+    long dual_n,
+    long inner_iter,
+    double eta_cum,
+    double eta,
+    int use_reflection,
+    int use_halpern)
 {
-    // sol.x.primal_sol.x .= (inner_iter + 1) / (inner_iter + 2) * ((1 + extra_coeff) * sol.x.primal_sol.x .- extra_coeff * sol.x.primal_sol_lag.x) + 1 / (inner_iter + 2) * sol.x.primal_sol.x
-    // sol.y.dual_sol.y .= (inner_iter + 1) / (inner_iter + 2) * ((1 + extra_coeff) * sol.y.dual_sol.y .- extra_coeff * sol.y.dual_sol_lag.y) + 1 / (inner_iter + 2) * sol.y.dual_sol.y
-    // # average update
-    // sol.x.primal_sol_mean.x .= (sol.x.primal_sol_mean.x * eta_cum .+ sol.x.primal_sol.x * eta) / (eta_cum + eta)
-    // sol.y.dual_sol_mean.y .= (sol.y.dual_sol_mean.y * eta_cum .+ sol.y.dual_sol.y * eta) / (eta_cum + eta)
+    // Reflection drives the main trajectory.  Halpern mixing is computed as a
+    // separate restart candidate and is never fed back into the next PDHG
+    // iteration:
+    //
+    // reflected = use_reflection
+    //             ? (1 + beta) * z_hat - beta * z_previous
+    //             : z_hat
+    // z_main = reflected
+    // z_halpern_candidate = use_halpern
+    //         ? alpha_k * reflected + (1 - alpha_k) * z_restart_anchor
+    //         : reflected
     long global_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     double double_inner_iter = (double) inner_iter;
-    double temp = (double_inner_iter + 1.0) / (double_inner_iter + 2.0);
+    double alpha = (double_inner_iter + 1.0) / (double_inner_iter + 2.0);
+    double anchor_weight = 1.0 / (double_inner_iter + 2.0);
     if (global_thread_idx < primal_n) {
-        primal_sol[global_thread_idx] = temp * ((1.0 + extra_coeff) * primal_sol[global_thread_idx] - extra_coeff * primal_sol_lag[global_thread_idx]) + (1.0 / (double_inner_iter + 2.0)) * primal_sol[global_thread_idx];
-        primal_sol_mean[global_thread_idx] = (primal_sol_mean[global_thread_idx] * eta_cum + primal_sol[global_thread_idx] * eta) / (eta_cum + eta);
+        double reflected = primal_sol[global_thread_idx];
+        if (use_reflection) {
+            reflected = (1.0 + extra_coeff) * reflected
+                      - extra_coeff * primal_sol_lag[global_thread_idx];
+        }
+        if (use_halpern) {
+            double halpern_candidate =
+                alpha * reflected
+                + anchor_weight * primal_restart_anchor[global_thread_idx];
+            primal_halpern_candidate[global_thread_idx] = halpern_candidate;
+        }
+        primal_sol[global_thread_idx] = reflected;
+        primal_sol_mean[global_thread_idx] =
+            (primal_sol_mean[global_thread_idx] * eta_cum + reflected * eta)
+            / (eta_cum + eta);
     }
     if (global_thread_idx < dual_n) {
-        dual_sol[global_thread_idx] = temp * ((1.0 + extra_coeff) * dual_sol[global_thread_idx] - extra_coeff * dual_sol_lag[global_thread_idx]) + (1.0 / (double_inner_iter + 2.0)) * dual_sol[global_thread_idx];
-        dual_sol_mean[global_thread_idx] = (dual_sol_mean[global_thread_idx] * eta_cum + dual_sol[global_thread_idx] * eta) / (eta_cum + eta);
+        double reflected = dual_sol[global_thread_idx];
+        if (use_reflection) {
+            reflected = (1.0 + extra_coeff) * reflected
+                      - extra_coeff * dual_sol_lag[global_thread_idx];
+        }
+        if (use_halpern) {
+            double halpern_candidate =
+                alpha * reflected
+                + anchor_weight * dual_restart_anchor[global_thread_idx];
+            dual_halpern_candidate[global_thread_idx] = halpern_candidate;
+        }
+        dual_sol[global_thread_idx] = reflected;
+        dual_sol_mean[global_thread_idx] =
+            (dual_sol_mean[global_thread_idx] * eta_cum + reflected * eta)
+            / (eta_cum + eta);
     }
 }
 
