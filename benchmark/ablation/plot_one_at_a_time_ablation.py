@@ -25,36 +25,36 @@ from plot_progressive_ablation import (
 
 CONFIGURATIONS = [
     "full",
-    "no_scaling",
-    "no_adaptive_step",
-    "no_adaptive_primal_weight",
     "no_restart",
+    "no_scaling",
     "no_reflection",
+    "no_adaptive_primal_weight",
+    "no_adaptive_step",
 ]
 
 CONFIGURATION_LABELS = [
     "Full",
-    "No scaling",
-    r"Fixed $\eta$",
-    r"Fixed $\omega$",
     "No restart",
+    "No scaling",
     "No reflection",
+    r"Fixed $\omega$",
+    r"Fixed $\eta$",
 ]
 
 ABLATIONS = [
-    "no_scaling",
-    "no_adaptive_step",
-    "no_adaptive_primal_weight",
     "no_restart",
+    "no_scaling",
     "no_reflection",
+    "no_adaptive_primal_weight",
+    "no_adaptive_step",
 ]
 
 ABLATION_LABELS = [
-    "No scaling",
-    r"Fixed $\eta$",
-    r"Fixed $\omega$",
     "No restart",
+    "No scaling",
     "No reflection",
+    r"Fixed $\omega$",
+    r"Fixed $\eta$",
 ]
 
 
