@@ -112,6 +112,7 @@ include("./rpdhg_alg_gpu_gen.jl")
 
 include("./utils.jl")
 include("./MOI_wrapper/MOI_wrapper.jl")
+include("../MOI_bulk_cache.jl")
 include("./cvxpy_wrapper/py2jl.jl")
 include("./cvxpy_wrapper/data_updating.jl")
 
@@ -129,7 +130,7 @@ redirect_stdout(devnull) do;
     end
 end
 
-export rpdhg_gpu_solve;
+export rpdhg_gpu_solve, conic_cache_from_data, model_from_conic_data;
 
 
 end
