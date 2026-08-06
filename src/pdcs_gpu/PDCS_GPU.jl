@@ -31,7 +31,6 @@ const proj_abs_tol = 1e-16
 const ThreadPerBlock = 256
 
 const MODULE_DIR = @__DIR__
-CUDA.seed!(1)
 
 
 ## standard formulation of the optimization problem ##
@@ -49,6 +48,8 @@ const few_block_proj_ptr = Ref{Ptr{Cvoid}}(C_NULL)
 
 
 function __init__()
+    CUDA.functional() || return
+    CUDA.seed!(1)
     # Open your own kernel library (NOT libcublas)
     # Replace with the actual .so path in your project
     libpath = joinpath(joinpath(MODULE_DIR, "cuda/libfew_block_proj.so"))
@@ -111,6 +112,7 @@ include("./rpdhg_alg_gpu_gen.jl")
 
 include("./utils.jl")
 include("./MOI_wrapper/MOI_wrapper.jl")
+include("../MOI_bulk_cache.jl")
 include("./cvxpy_wrapper/py2jl.jl")
 include("./cvxpy_wrapper/data_updating.jl")
 
@@ -128,7 +130,7 @@ redirect_stdout(devnull) do;
     end
 end
 
-export rpdhg_gpu_solve;
+export rpdhg_gpu_solve, conic_cache_from_data, model_from_conic_data;
 
 
 end

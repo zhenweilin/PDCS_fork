@@ -58,6 +58,19 @@ Note: The installation process will execute a small demonstration for precompila
 julia ./test/install.jl    ## Install package
 ```
 
+Importing the CPU solver does not load CUDA:
+
+```julia
+using PDCS: PDCS_CPU
+```
+
+Load CUDA explicitly before importing the GPU solver:
+
+```julia
+using CUDA
+using PDCS: PDCS_GPU
+```
+
 Example code is provided in the `./test/` directory. The following commands demonstrate how to execute the test suites:
 
 #### CPU Solver Tests
@@ -72,6 +85,49 @@ julia ./test/test_exp_gpu.jl     # Test exponential cone solver (GPU)
 julia ./test/test_soc_gpu.jl     # Test second-order cone solver (GPU)
 julia --project=. ./benchmark/random_soc_projection.jl  # Benchmark random SOC projections by size/count
 ```
+
+### PDCS CPU + JumpRW CBF Batch
+
+From the JumpRW repository root, instantiate the PDCS environment once:
+
+```bash
+julia --startup-file=no --project=external/PDCS_fork -e \
+  'using Pkg; Pkg.instantiate()'
+```
+
+Then solve the small-scale CBF fixtures with `PDCS_CPU.Optimizer` through
+JumpRW's public CBF API:
+
+```bash
+julia --startup-file=no --project=external/PDCS_fork \
+  external/PDCS_fork/benchmark/multi_period_port_pdcs_cpu.jl \
+  --input_folder test_data/small_scale \
+  --time_limit 60 --workers 8
+```
+
+The input defaults to `test_data/small_scale`. Per-instance logs default to
+`external/PDCS_fork/benchmark/results/small_scale/pdcs_cpu`; use
+`--output_folder` to override that location. An ordinary instance failure is
+logged and does not stop later instances, but any failure makes the batch exit
+nonzero after all files have been attempted.
+
+The strict bulk-handoff regression discovers every `.cbf`, `.cbf.gz`, and
+`.cbf.bz2` file under `test_data/small_scale` and compares the generic
+JuMP/MOI bridge path with JumpRW's direct PDCS cache. It checks the full CSC
+matrix, constants, bounds, objective, cone ordering, iteration count, solver
+statuses, objective value, and primal/dual vectors. Run it from the JumpRW
+repository root:
+
+```bash
+JULIA_NUM_THREADS=4 julia --startup-file=no \
+  --project=external/PDCS_fork \
+  external/PDCS_fork/test/test_bulk_jumprw_small_scale.jl
+```
+
+The comparison uses a fixed PDHG iteration budget so both paths stop at the
+same deterministic checkpoint; a wall-clock limit remains only as a safety
+guard. `max_outer_iter` and `max_inner_iter` are honored as raw PDCS optimizer
+attributes.
 
 ### Convergence Criteria
 

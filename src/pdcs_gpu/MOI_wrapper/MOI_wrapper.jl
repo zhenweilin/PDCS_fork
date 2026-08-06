@@ -121,6 +121,7 @@ struct _SetConstants{T}
     b::Vector{T}
     power_coefficients::Dict{Int,T}
     _SetConstants{T}() where {T} = new{T}(T[], Dict{Int,T}())
+    _SetConstants{T}(b::Vector{T}) where {T} = new{T}(b, Dict{Int,T}())
 end
 
 function Base.empty!(x::_SetConstants)

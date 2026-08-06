@@ -48,6 +48,7 @@ include("./rpdhg_alg_cpu_gen.jl")
 
 include("./utils.jl")
 include("./MOI_wrapper/MOI_wrapper.jl")
+include("../MOI_bulk_cache.jl")
 
 include("./precompile.jl")
 redirect_stdout(devnull) do; 
@@ -58,7 +59,7 @@ redirect_stdout(devnull) do;
     end
 end
 
-export rpdhg_cpu_solve;
+export rpdhg_cpu_solve, conic_cache_from_data, model_from_conic_data;
 
 
 end

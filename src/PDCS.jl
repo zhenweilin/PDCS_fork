@@ -7,22 +7,25 @@ for conic programming.
 # Usage
 
 ```julia
-using PDCS
-using PDCS.PDCS_GPU  # or PDCS.PDCS_CPU
+using PDCS: PDCS_CPU
 
-# Use PDCS_GPU or PDCS_CPU modules as before
+# GPU support is loaded only after CUDA is requested.
+using CUDA
+using PDCS: PDCS_GPU
 ```
 """
 
 __precompile__()
 module PDCS
 
-# Load submodules - they will be available as PDCS.PDCS_GPU and PDCS.PDCS_CPU
-include("pdcs_gpu/PDCS_GPU.jl")
+# The CPU implementation is always available. The GPU implementation is loaded
+# by PDCSGPUExt only after CUDA itself is loaded.
 include("pdcs_cpu/PDCS_CPU.jl")
 
-# Export submodules for easier access
-# Users can do: using PDCS: PDCS_GPU, PDCS_CPU
-# or: using PDCS.PDCS_GPU
+function _register_gpu!(gpu_module::Module)
+    isdefined(@__MODULE__, :PDCS_GPU) && return getfield(@__MODULE__, :PDCS_GPU)
+    Core.eval(@__MODULE__, :(const PDCS_GPU = $gpu_module))
+    return gpu_module
+end
 
 end # module PDCS

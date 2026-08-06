@@ -121,6 +121,7 @@ struct _SetConstants{T}
     b::Vector{T}
     power_coefficients::Dict{Int,T}
     _SetConstants{T}() where {T} = new{T}(T[], Dict{Int,T}())
+    _SetConstants{T}(b::Vector{T}) where {T} = new{T}(b, Dict{Int,T}())
 end
 
 function Base.empty!(x::_SetConstants)
@@ -587,6 +588,16 @@ function MOI.optimize!(
             println("time_limit_secs is not set, using default value: 1000.0")
         end
     end
+    if !haskey(options, :max_outer_iter)
+        options[:max_outer_iter] = 10_000
+    end
+    if !haskey(options, :max_inner_iter)
+        options[:max_inner_iter] = 500_000
+    end
+    options[:max_outer_iter] isa Integer && options[:max_outer_iter] > 0 ||
+        throw(ArgumentError("max_outer_iter must be a positive integer"))
+    options[:max_inner_iter] isa Integer && options[:max_inner_iter] > 0 ||
+        throw(ArgumentError("max_inner_iter must be a positive integer"))
     if !haskey(options, :use_scaling)
         options[:use_scaling] = true
         if options[:verbose] > 0
@@ -705,6 +716,8 @@ function MOI.optimize!(
             rescaling_method = options[:rescaling_method],
             method = :average,
             time_limit = options[:time_limit_secs],
+            max_outer_iter = options[:max_outer_iter],
+            max_inner_iter = options[:max_inner_iter],
             use_adaptive_restart = options[:use_adaptive_restart],
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
@@ -764,6 +777,8 @@ function MOI.optimize!(
             use_preconditioner = false,
             method = :average,
             time_limit = options[:time_limit_secs],
+            max_outer_iter = options[:max_outer_iter],
+            max_inner_iter = options[:max_inner_iter],
             use_adaptive_restart = options[:use_adaptive_restart],
             use_adaptive_step_size_weight = options[:use_adaptive_step_size_weight],
             use_resolving = options[:use_resolving],
