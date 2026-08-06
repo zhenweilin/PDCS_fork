@@ -73,6 +73,31 @@ julia ./test/test_soc_gpu.jl     # Test second-order cone solver (GPU)
 julia --project=. ./benchmark/random_soc_projection.jl  # Benchmark random SOC projections by size/count
 ```
 
+### PDCS CPU + JumpRW CBF Batch
+
+From the JumpRW repository root, instantiate the PDCS environment once:
+
+```bash
+julia --startup-file=no --project=external/PDCS_fork -e \
+  'using Pkg; Pkg.instantiate()'
+```
+
+Then solve the small-scale CBF fixtures with `PDCS_CPU.Optimizer` through
+JumpRW's public CBF API:
+
+```bash
+julia --startup-file=no --project=external/PDCS_fork \
+  external/PDCS_fork/benchmark/multi_period_port_pdcs_cpu.jl \
+  --input_folder test_data/small_scale \
+  --time_limit 60 --workers 8
+```
+
+The input defaults to `test_data/small_scale`. Per-instance logs default to
+`external/PDCS_fork/benchmark/results/small_scale/pdcs_cpu`; use
+`--output_folder` to override that location. An ordinary instance failure is
+logged and does not stop later instances, but any failure makes the batch exit
+nonzero after all files have been attempted.
+
 ### Convergence Criteria
 
 The solver employs three convergence criteria to assess solution quality:
