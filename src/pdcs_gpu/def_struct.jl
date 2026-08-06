@@ -1146,7 +1146,7 @@ mutable struct PDCS_GPU_Solver
         use_restart::Bool = use_adaptive_restart,
         use_adaptive_step::Bool = true,
         use_reflection::Bool = use_aggressive,
-        use_halpern::Bool = true,
+        use_halpern::Bool = false,
         primal_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(n),
         dual_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(m),
         warm_start::Bool = false,

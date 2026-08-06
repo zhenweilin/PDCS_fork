@@ -672,9 +672,9 @@ function MOI.optimize!(
         end
     end
     if !haskey(options, :use_halpern)
-        options[:use_halpern] = true
+        options[:use_halpern] = false
         if options[:verbose] > 0
-            println("use_halpern is not set, using default value: true.")
+            println("use_halpern is not set, using default value: false.")
         end
     end
     if !haskey(options, :kkt_restart_freq)
