@@ -596,11 +596,11 @@ function newton_rootsearch_diagonal(r0::rpdhg_float, s0::rpdhg_float, t0::rpdhg_
             rho0 = rho;
         end
     end # end for
-    # if (converged)
-    #     return max(rhol, min(rhoh, rho));
-    # else
+    if (converged)
+        return max(rhol, min(rhoh, rho));
+    else
         return rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh, rho0, dr, dt, ds_squared, ds_div_dr, dsdr);
-    # end
+    end
 end
 
 function projsol_primalexpcone(r0::rpdhg_float, s0::rpdhg_float, t0::rpdhg_float, rho::rpdhg_float)

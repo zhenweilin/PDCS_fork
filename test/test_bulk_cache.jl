@@ -121,4 +121,28 @@ end
     @test JuMP.termination_status(model) == MOI.OPTIMAL
     @test JuMP.primal_status(model) == MOI.FEASIBLE_POINT
     @test JuMP.objective_value(model) ≈ 1.0 atol=1e-5
+
+    limited_optimizer = PDCS_CPU.Optimizer()
+    for (name, value) in (
+        "verbose" => 0,
+        "time_limit_secs" => 10.0,
+        "max_outer_iter" => 1,
+        "max_inner_iter" => 1,
+        "check_terminate_freq" => 1,
+        "print_freq" => 1,
+    )
+        MOI.set(
+            limited_optimizer,
+            MOI.RawOptimizerAttribute(name),
+            value,
+        )
+    end
+    limited_model = PDCS_CPU.model_from_conic_data(
+        data;
+        optimizer=limited_optimizer,
+    )
+    JuMP.optimize!(limited_model)
+
+    @test JuMP.termination_status(limited_model) == MOI.ITERATION_LIMIT
+    @test MOI.get(limited_optimizer, PDCS_CPU.PDHGIterations()) == 1
 end

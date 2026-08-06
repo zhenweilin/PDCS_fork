@@ -111,6 +111,24 @@ The input defaults to `test_data/small_scale`. Per-instance logs default to
 logged and does not stop later instances, but any failure makes the batch exit
 nonzero after all files have been attempted.
 
+The strict bulk-handoff regression discovers every `.cbf`, `.cbf.gz`, and
+`.cbf.bz2` file under `test_data/small_scale` and compares the generic
+JuMP/MOI bridge path with JumpRW's direct PDCS cache. It checks the full CSC
+matrix, constants, bounds, objective, cone ordering, iteration count, solver
+statuses, objective value, and primal/dual vectors. Run it from the JumpRW
+repository root:
+
+```bash
+JULIA_NUM_THREADS=4 julia --startup-file=no \
+  --project=external/PDCS_fork \
+  external/PDCS_fork/test/test_bulk_jumprw_small_scale.jl
+```
+
+The comparison uses a fixed PDHG iteration budget so both paths stop at the
+same deterministic checkpoint; a wall-clock limit remains only as a safety
+guard. `max_outer_iter` and `max_inner_iter` are honored as raw PDCS optimizer
+attributes.
+
 ### Convergence Criteria
 
 The solver employs three convergence criteria to assess solution quality:
