@@ -883,7 +883,7 @@ function rpdhg_cpu_solve(;
     use_accelerated::Bool = true,
     use_resolving::Bool = true,
     use_reflection::Bool = use_aggressive,
-    use_halpern::Bool = true,
+    use_halpern::Bool = false,
     halpern_mode::Symbol = :inline,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),

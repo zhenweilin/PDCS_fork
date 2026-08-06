@@ -559,7 +559,7 @@ mutable struct PDHGCLPParameters
          eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
          sigma, tau, theta,
          restart_check_freq, check_terminate_freq, verbose, print_freq, time_limit,
-         use_reflection = true, use_halpern = true,
+         use_reflection = true, use_halpern = false,
          halpern_mode = :inline)
          halpern_mode in (:inline, :restart_candidate) ||
             throw(ArgumentError(
