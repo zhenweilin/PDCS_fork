@@ -31,7 +31,6 @@ const proj_abs_tol = 1e-16
 const ThreadPerBlock = 256
 
 const MODULE_DIR = @__DIR__
-CUDA.seed!(1)
 
 
 ## standard formulation of the optimization problem ##
@@ -49,6 +48,8 @@ const few_block_proj_ptr = Ref{Ptr{Cvoid}}(C_NULL)
 
 
 function __init__()
+    CUDA.functional() || return
+    CUDA.seed!(1)
     # Open your own kernel library (NOT libcublas)
     # Replace with the actual .so path in your project
     libpath = joinpath(joinpath(MODULE_DIR, "cuda/libfew_block_proj.so"))

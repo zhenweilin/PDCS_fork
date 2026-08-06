@@ -58,6 +58,19 @@ Note: The installation process will execute a small demonstration for precompila
 julia ./test/install.jl    ## Install package
 ```
 
+Importing the CPU solver does not load CUDA:
+
+```julia
+using PDCS: PDCS_CPU
+```
+
+Load CUDA explicitly before importing the GPU solver:
+
+```julia
+using CUDA
+using PDCS: PDCS_GPU
+```
+
 Example code is provided in the `./test/` directory. The following commands demonstrate how to execute the test suites:
 
 #### CPU Solver Tests
