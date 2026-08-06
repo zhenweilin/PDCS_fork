@@ -1,5 +1,4 @@
 #!/usr/bin/env julia
-
 """
 Solve every `.cbf.gz` file in a folder with SCS's GPU indirect solver.
 
@@ -137,6 +136,8 @@ function build_optimizer(options)
     MOI.set(raw, MOI.RawOptimizerAttribute("eps_abs"), options.tolerance)
     MOI.set(raw, MOI.RawOptimizerAttribute("eps_rel"), options.tolerance)
     MOI.set(raw, MOI.RawOptimizerAttribute("eps_infeas"), options.tolerance)
+    # Effectively unlimited (Int32 max of the GPU build): time limit governs.
+    MOI.set(raw, MOI.RawOptimizerAttribute("max_iters"), 2_147_483_647)
     MOI.set(raw, MOI.RawOptimizerAttribute("verbose"), options.verbose > 0)
     if !isnothing(options.time_limit)
         MOI.set(

@@ -1328,6 +1328,8 @@ function rpdhg_gpu_solve(;
         @info ("kkt_restart_freq: $kkt_restart_freq")
         @info ("abs_tol: $abs_tol")
         @info ("rel_tol: $rel_tol")
+        @info ("max_outer_iter: $max_outer_iter")
+        @info ("max_inner_iter: $max_inner_iter")
         @info ("eps_primal_infeasible_low_acc: $eps_primal_infeasible_low_acc")
         @info ("eps_dual_infeasible_low_acc: $eps_dual_infeasible_low_acc")
         @info ("eps_primal_infeasible_high_acc: $eps_primal_infeasible_high_acc")

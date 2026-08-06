@@ -635,6 +635,18 @@ function MOI.optimize!(
             println("use_resolving is not set, using default value: true.")
         end
     end
+    if !haskey(options, :max_outer_iter)
+        options[:max_outer_iter] = 10000
+        if options[:verbose] > 0
+            println("max_outer_iter is not set, using default value: 10000.")
+        end
+    end
+    if !haskey(options, :max_inner_iter)
+        options[:max_inner_iter] = 500000
+        if options[:verbose] > 0
+            println("max_inner_iter is not set, using default value: 500000.")
+        end
+    end
     if !haskey(options, :print_freq)
         options[:print_freq] = 2000
         if options[:verbose] > 0
@@ -735,6 +747,8 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            max_outer_iter = options[:max_outer_iter],
+            max_inner_iter = options[:max_inner_iter],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],
@@ -799,6 +813,8 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            max_outer_iter = options[:max_outer_iter],
+            max_inner_iter = options[:max_inner_iter],
             verbose = options[:verbose],
             rel_tol = options[:rel_tol],
             abs_tol = options[:abs_tol],

@@ -135,6 +135,8 @@ function build_optimizer(options)
         "tol_feas" => options.tolerance,
         "tol_infeas_abs" => options.tolerance,
         "tol_infeas_rel" => options.tolerance,
+        # Effectively unlimited (UInt32 max): the time limit governs.
+        "max_iter" => 4_294_967_295,
         "verbose" => options.verbose > 0,
     ]
     if !isnothing(options.time_limit)

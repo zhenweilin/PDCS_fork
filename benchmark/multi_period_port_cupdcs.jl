@@ -120,10 +120,16 @@ end
 
 function load_cbf(path)
     Sys.which("gzip") === nothing && error("gzip executable was not found")
-    model = MOI.FileFormats.CBF.Model()
-    open(`gzip -dc -- $path`) do stream
-        read!(stream, model)
-    end
+    # model = MOI.FileFormats.CBF.Model()
+    # open(`gzip -dc -- $path`) do stream
+    #     read!(stream, model)
+    # end
+    model = MOI.Utilities.Model{Float64}()
+    println("begin to load model")
+    flush(stdout)
+    MOI.read_from_file(model, path)
+    println("has loaded model")
+    flush(stdout)
     return model
 end
 
@@ -133,6 +139,10 @@ function build_optimizer(options)
         "abs_tol" => options.tolerance,
         "rel_tol" => options.tolerance,
         "verbose" => options.verbose,
+        # Effectively unlimited: the time limit governs termination.
+        # Product must fit in Int64 to avoid overflow in termination check.
+        "max_outer_iter" => 3_000_000_000,
+        "max_inner_iter" => 3_000_000_000,
     ]
     if !isnothing(options.time_limit)
         push!(attributes, "time_limit_secs" => options.time_limit)
