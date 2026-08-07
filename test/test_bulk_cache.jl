@@ -31,6 +31,14 @@ function cache_from_model(model)
     return backend.model_cache.model
 end
 
+@testset "PDCS reuses Int64 sparse indices" begin
+    int64_indices = Int64[1, 3, 5]
+    int32_indices = Int32[1, 3, 5]
+    @test PDCS_CPU._as_int64_indices(int64_indices) === int64_indices
+    @test PDCS_CPU._as_int64_indices(int32_indices) == int64_indices
+    @test PDCS_CPU._as_int64_indices(int32_indices) !== int32_indices
+end
+
 @testset "PDCS bulk conic cache construction" begin
     data = mock_conic_data()
     model = PDCS_CPU.model_from_conic_data(data)
