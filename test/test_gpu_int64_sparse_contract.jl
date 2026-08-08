@@ -7,6 +7,10 @@ const GPU_STRUCT_SOURCE = read(
     joinpath(@__DIR__, "..", "src", "pdcs_gpu", "def_struct.jl"),
     String,
 )
+const GPU_CSC_SOURCE = read(
+    joinpath(@__DIR__, "..", "src", "pdcs_gpu", "csc_to_csr.jl"),
+    String,
+)
 const GPU_KERNEL_SOURCE = read(
     joinpath(@__DIR__, "..", "src", "pdcs_gpu", "gpu_kernel.jl"),
     String,
@@ -21,6 +25,10 @@ const GPU_SOLVE_SOURCE = read(
 )
 const GPU_MOI_SOURCE = read(
     joinpath(@__DIR__, "..", "src", "pdcs_gpu", "MOI_wrapper", "MOI_wrapper.jl"),
+    String,
+)
+const README_SOURCE = read(
+    joinpath(@__DIR__, "..", "README.md"),
     String,
 )
 
@@ -52,9 +60,21 @@ end
     @test occursin("sparse_index_type = sparse_index_type", GPU_SOLVE_SOURCE)
     @test occursin("options[:sparse_index_type] = :auto", GPU_MOI_SOURCE)
     @test occursin("sparse_index_type = options[:sparse_index_type]", GPU_MOI_SOURCE)
+    @test length(findall(
+        "function _csc_to_gpu_csr(",
+        GPU_CSC_SOURCE * GPU_STRUCT_SOURCE,
+    )) == 2
+    @test length(findall("function _upload_csc_to_gpu_csr(", GPU_STRUCT_SOURCE)) == 2
+    @test occursin(
+        "return _upload_csc_to_gpu_csr(G, Ti)",
+        GPU_CSC_SOURCE * GPU_STRUCT_SOURCE,
+    )
     @test occursin("::Type{Int32}", GPU_STRUCT_SOURCE)
     @test occursin("::Type{Int64}", GPU_STRUCT_SOURCE)
-    @test occursin("_resolve_sparse_index_type", GPU_STRUCT_SOURCE)
+    @test occursin(
+        "_resolve_sparse_index_type",
+        GPU_CSC_SOURCE * GPU_STRUCT_SOURCE,
+    )
 end
 
 @testset "GPU preprocessing specializes on CSR index type" begin
@@ -80,4 +100,21 @@ end
         "CUDA.zeros(Int64, nnz(data.coeff.d_G))",
         GPU_PREPROCESS_SOURCE,
     )
+end
+
+
+@testset "GPU sparse index public documentation" begin
+    @test occursin("`sparse_index_type`", GPU_SOLVE_SOURCE)
+    @test occursin(":auto", GPU_SOLVE_SOURCE)
+    @test occursin(":int32", GPU_SOLVE_SOURCE)
+    @test occursin(":int64", GPU_SOLVE_SOURCE)
+    @test occursin("CUDA 11", GPU_SOLVE_SOURCE)
+    @test occursin(
+        "set_optimizer_attribute(model, \"sparse_index_type\", :auto)",
+        README_SOURCE,
+    )
+end
+
+@testset "GPU max wrappers document their reset behavior" begin
+    @test !occursin("Should be initialized to 1.0 before calling", GPU_KERNEL_SOURCE)
 end

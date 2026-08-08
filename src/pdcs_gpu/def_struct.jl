@@ -875,27 +875,14 @@ mutable struct Solution
 end
 
 
-function _csc_to_gpu_csr(
-    G::SparseMatrixCSC{Float64,<:Integer},
-    sparse_index_type = :auto,
-)
-    Ti = _resolve_sparse_index_type(
-        sparse_index_type,
-        size(G, 1),
-        size(G, 2),
-        nnz(G),
-    )
-    return _csc_to_gpu_csr(G, Ti)
-end
-
-function _csc_to_gpu_csr(
+function _upload_csc_to_gpu_csr(
     G::SparseMatrixCSC{Float64,<:Integer},
     ::Type{Int32},
 )
     return CUDA.CUSPARSE.CuSparseMatrixCSR(G)
 end
 
-function _csc_to_gpu_csr(
+function _upload_csc_to_gpu_csr(
     G::SparseMatrixCSC{Float64,<:Integer},
     ::Type{Int64},
 )
@@ -906,10 +893,6 @@ function _csc_to_gpu_csr(
         CuArray(components.nzval),
         components.dims,
     )
-end
-
-function _csc_to_gpu_csr(G::AbstractMatrix{Float64}, sparse_index_type = :auto)
-    return _csc_to_gpu_csr(sparse(G), sparse_index_type)
 end
 
 mutable struct coeffUnion{

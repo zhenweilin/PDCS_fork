@@ -50,14 +50,42 @@ function _resolve_sparse_index_type(
     return normalized
 end
 
+function _csc_to_gpu_csr(
+    G::SparseMatrixCSC{Float64,<:Integer},
+    sparse_index_type = :auto,
+)
+    Ti = _resolve_sparse_index_type(
+        sparse_index_type,
+        size(G, 1),
+        size(G, 2),
+        nnz(G),
+    )
+    return _upload_csc_to_gpu_csr(G, Ti)
+end
+
+function _csc_to_gpu_csr(G::AbstractMatrix{Float64}, sparse_index_type = :auto)
+    return _csc_to_gpu_csr(sparse(G), sparse_index_type)
+end
+
+_as_sparse_index_vector(values::Vector{Ti}, ::Type{Ti}) where {
+    Ti<:Union{Int32,Int64}
+} = values
+
+function _as_sparse_index_vector(
+    values::AbstractVector{<:Integer},
+    ::Type{Ti},
+) where {Ti<:Union{Int32,Int64}}
+    return Ti.(values)
+end
+
 function _csc_to_csr_components(
     G::SparseMatrixCSC{Tv,<:Integer},
     ::Type{Ti},
 ) where {Tv,Ti<:Union{Int32,Int64}}
     transposed = copy(transpose(G))
     return (;
-        rowptr = Ti.(transposed.colptr),
-        colval = Ti.(transposed.rowval),
+        rowptr = _as_sparse_index_vector(transposed.colptr, Ti),
+        colval = _as_sparse_index_vector(transposed.rowval, Ti),
         nzval = transposed.nzval,
         dims = size(G),
     )

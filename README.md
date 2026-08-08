@@ -71,6 +71,18 @@ using CUDA
 using PDCS: PDCS_GPU
 ```
 
+For JuMP models, GPU sparse indices default to automatic width selection. The
+same behavior can be requested explicitly with a raw optimizer attribute:
+
+```julia
+model = Model(PDCS_GPU.Optimizer)
+set_optimizer_attribute(model, "sparse_index_type", :auto)
+```
+
+Automatic selection uses `Int32` when the matrix dimensions and stored-entry
+count fit safely, and `Int64` otherwise. Int64 CUSPARSE indices require CUDA 11
+or newer.
+
 Example code is provided in the `./test/` directory. The following commands demonstrate how to execute the test suites:
 
 #### CPU Solver Tests

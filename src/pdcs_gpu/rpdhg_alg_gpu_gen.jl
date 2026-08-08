@@ -1216,6 +1216,12 @@ end # end rpdhg_cpu_solve
     - `verbose`: the level of verbosity, `0`, `1` or `2`
     - `time_limit`: the time limit for the solver
     - `method`: the method to solve the problem, `:average`, `:halpern`, `:average_no_restart`, `:halpern_no_restart`
+    - `sparse_index_type`: sparse CSR index selection. The default `:auto`
+      uses `Int32` when the row count, column count, and stored-entry count fit
+      safely, and otherwise uses `Int64`. Accepted values are `:auto`,
+      `:int32`, `:int64`, `"auto"`, `"int32"`, `"int64"`, `Int32`, and
+      `Int64`. Forcing `Int32` on an oversized matrix raises an error. Int64
+      CUSPARSE indices require CUDA 11 or newer.
 
     !!! note
         To successfully warmstart the solver `primal_sol`, `dual_sol` and `slack`

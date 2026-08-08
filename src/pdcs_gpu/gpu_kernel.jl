@@ -1409,7 +1409,7 @@ This is used for row scaling in matrix preconditioning.
 Arguments:
 - d_G: CSR sparse matrix on GPU (CuSparseMatrixCSR)
 - result: Output vector of row maxima (GPU array, modified in-place)
-          Should be initialized to 1.0 before calling
+          The function resets it to 0.0 before computing the maxima
 """
 function max_abs_row(d_G, result)
     result .= 0.0
@@ -1482,7 +1482,7 @@ This is used for column scaling in matrix preconditioning.
 Arguments:
 - d_G: CSR sparse matrix on GPU (CuSparseMatrixCSR)
 - result: Output vector of column maxima (GPU array, modified in-place)
-          Should be initialized to 1.0 before calling
+          The function resets it to 0.0 before computing the maxima
 """
 function max_abs_col(d_G, result)
     return max_abs_col_elementwise(d_G, result)
