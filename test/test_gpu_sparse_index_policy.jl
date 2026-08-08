@@ -61,3 +61,40 @@ end
         @test eltype(csr.colval) === Ti
     end
 end
+
+@testset "Sparse index vector conversion avoids exact-type copies" begin
+    @test isdefined(@__MODULE__, :_as_sparse_index_vector)
+    if isdefined(@__MODULE__, :_as_sparse_index_vector)
+        exact = Int64[1, 3, 4, 6]
+        @test _as_sparse_index_vector(exact, Int64) === exact
+
+        narrower = Int32[1, 3, 4, 6]
+        converted = _as_sparse_index_vector(narrower, Int64)
+        @test converted == exact
+        @test eltype(converted) === Int64
+        @test converted !== narrower
+    end
+end
+
+@testset "Forced Int32 rejects oversized sparse metadata" begin
+    oversized_rows = Int(typemax(Int32)) + 1
+    G = SparseMatrixCSC{Float64,Int64}(
+        oversized_rows,
+        1,
+        Int64[1, 1],
+        Int64[],
+        Float64[],
+    )
+    @test size(G) == (oversized_rows, 1)
+    @test nnz(G) == 0
+    @test isdefined(@__MODULE__, :_csc_to_gpu_csr)
+    @test_throws ArgumentError _resolve_sparse_index_type(
+        Int32,
+        size(G, 1),
+        size(G, 2),
+        nnz(G),
+    )
+    if isdefined(@__MODULE__, :_csc_to_gpu_csr)
+        @test_throws ArgumentError _csc_to_gpu_csr(G, Int32)
+    end
+end

@@ -273,8 +273,7 @@ warpWise_block_proj(args...) = sufficient_block_proj(args...)
 # We need to create and manage cuBLAS handles for performing linear algebra
 # operations on the GPU (e.g., matrix-vector products, norms).
 
-# cuBLAS library path and type definitions
-const libcublas_path = CUDA.CUBLAS.libcublas  # Path to cuBLAS library
+# cuBLAS type definitions
 const cublasStatus_t = Cint                    # cuBLAS status code type
 const CUBLAS_STATUS_SUCCESS = 0                # Success status code
 const cublasHandle_t = Ptr{Cvoid}              # cuBLAS handle type (opaque pointer)
@@ -1409,7 +1408,7 @@ This is used for row scaling in matrix preconditioning.
 Arguments:
 - d_G: CSR sparse matrix on GPU (CuSparseMatrixCSR)
 - result: Output vector of row maxima (GPU array, modified in-place)
-          Should be initialized to 1.0 before calling
+          The function resets it to 0.0 before computing the maxima
 """
 function max_abs_row(d_G, result)
     result .= 0.0
@@ -1482,7 +1481,7 @@ This is used for column scaling in matrix preconditioning.
 Arguments:
 - d_G: CSR sparse matrix on GPU (CuSparseMatrixCSR)
 - result: Output vector of column maxima (GPU array, modified in-place)
-          Should be initialized to 1.0 before calling
+          The function resets it to 0.0 before computing the maxima
 """
 function max_abs_col(d_G, result)
     return max_abs_col_elementwise(d_G, result)
