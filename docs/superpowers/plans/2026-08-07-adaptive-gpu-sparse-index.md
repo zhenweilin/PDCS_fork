@@ -4,7 +4,7 @@
 
 **Goal:** Make PDCS_GPU use Int32 sparse indices for ordinary matrices, automatically promote to Int64 at the Int32 boundary, and allow users to force either type.
 
-**Architecture:** A CUDA-independent policy module normalizes and resolves `sparse_index_type` from matrix metadata. The CPU solve path passes that option to a two-path GPU uploader: CUDA.jl's existing Int32 convenience upload for representable matrices and the explicit Int64 CSR upload for oversized matrices. Shared CUDA.jl preprocessing kernels specialize on the CSR array element type, so both storage and index arithmetic match the resolved choice.
+**Architecture:** A CUDA-independent policy module normalizes and resolves `sparse_index_type` from matrix metadata. The CPU solve path passes that option to a two-path GPU uploader: CUDA.jl's existing Int32 convenience upload for representable matrices and the explicit Int64 CSR upload for oversized matrices. Shared CUDA.jl preprocessing kernels specialize on the CSR array element type: signed CSR storage and sparse payload indices retain the resolved choice, while same-width unsigned companions (`UInt32`/`UInt64`) handle launch positions and CSR array addresses safely.
 
 **Tech Stack:** Julia 1.10, JuMP, MathOptInterface, CUDA.jl 5/6, CUSPARSE, Julia `Test`.
 
@@ -16,6 +16,9 @@
 - Forced Int32 must fail before GPU allocation when the matrix is not representable.
 - Floating-point matrix values and solver vectors remain `Float64`.
 - Existing GPU CSR inputs retain their existing index type without conversion.
+- Sparse preprocessing converts a launch position back to signed CSR index type
+  only after comparing its same-width unsigned value against the unsigned bound;
+  unsigned row-pointer addresses preserve the `m + 1` slot at `typemax(Ti)`.
 - Runtime CUDA.jl kernels replace the historical PTX preprocessing entry points for the affected sparse operations.
 - Int64 CUSPARSE execution requires CUDA 11 or newer.
 - The local machine has no NVIDIA GPU; actual Int32 and Int64 GPU numerical runs must be completed on a CUDA machine.
@@ -379,6 +382,13 @@ git commit -m "feat: select GPU sparse index type"
 **Interfaces:**
 - Consumes: `CuSparseMatrixCSR{Float64,Int32}` or `CuSparseMatrixCSR{Float64,Int64}` selected in Task 2.
 - Produces: shared `_sparse_*_kernel!` definitions specialized by `eltype(rowptr)` or `eltype(indices)`, plus CSR-typed row-index workspace.
+
+**Boundary correction:** Signed CSR storage and sparse value/index semantics remain
+`Int32` or `Int64`. Every CUDA launch position and CSR row-pointer array address
+uses `unsigned(Ti)` (`UInt32` or `UInt64`) so padded lanes cannot wrap negative
+and the final `rowptr[m + 1]` access remains representable. Convert an unsigned
+position to `Ti` only after its unsigned bound check. This correction supersedes
+the signed launch-position examples below where they conflict.
 
 - [ ] **Step 1: Write failing generic-kernel contract tests**
 

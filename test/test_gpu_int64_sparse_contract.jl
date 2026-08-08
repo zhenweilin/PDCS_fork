@@ -70,6 +70,9 @@ end
         @test occursin(kernel, GPU_KERNEL_SOURCE)
     end
     @test occursin("_sparse_thread_index", GPU_KERNEL_SOURCE)
+    @test occursin("Tu = unsigned(Ti)", GPU_KERNEL_SOURCE)
+    @test occursin("first_position = @inbounds rowptr[row_address]", GPU_KERNEL_SOURCE)
+    @test occursin("rowptr[row_address + one(Tu)]", GPU_KERNEL_SOURCE)
     @test !occursin("_index64_thread", GPU_KERNEL_SOURCE)
     @test !occursin("Int64(@inbounds rowptr", GPU_KERNEL_SOURCE)
     @test occursin("similar(data.coeff.d_G.colVal", GPU_PREPROCESS_SOURCE)

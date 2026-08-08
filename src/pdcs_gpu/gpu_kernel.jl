@@ -486,8 +486,12 @@ utils_path = joinpath(MODULE_DIR, "cuda/utils.ptx")
 # actual array types, so matrices with more than typemax(Int32) stored entries
 # keep Int64 row pointers and column indices throughout preprocessing.
 @inline function _sparse_thread_index(::Type{Ti}) where {Ti<:Integer}
-    return (Ti(CUDA.blockIdx().x) - one(Ti)) * Ti(CUDA.blockDim().x) +
-           Ti(CUDA.threadIdx().x)
+    return _sparse_unsigned_thread_index(
+        Ti,
+        CUDA.blockIdx().x,
+        CUDA.blockDim().x,
+        CUDA.threadIdx().x,
+    )
 end
 
 function _rescale_csr_sparse_kernel!(
@@ -499,10 +503,12 @@ function _rescale_csr_sparse_kernel!(
     nrows,
 )
     Ti = eltype(rowptr)
-    row = _sparse_thread_index(Ti)
-    if row <= nrows
-        first_position = @inbounds rowptr[row]
-        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+    Tu = unsigned(Ti)
+    row_address = _sparse_thread_index(Ti)
+    if row_address <= Tu(nrows)
+        row = Ti(row_address)
+        first_position = @inbounds rowptr[row_address]
+        last_position = (@inbounds rowptr[row_address + one(Tu)]) - one(Ti)
         for position in first_position:last_position
             column = @inbounds colval[position]
             @inbounds values[position] /= row_scaling[row] * col_scaling[column]
@@ -513,10 +519,12 @@ end
 
 function _max_abs_row_sparse_kernel!(values, rowptr, result, nrows)
     Ti = eltype(rowptr)
-    row = _sparse_thread_index(Ti)
-    if row <= nrows
-        first_position = @inbounds rowptr[row]
-        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+    Tu = unsigned(Ti)
+    row_address = _sparse_thread_index(Ti)
+    if row_address <= Tu(nrows)
+        row = Ti(row_address)
+        first_position = @inbounds rowptr[row_address]
+        last_position = (@inbounds rowptr[row_address + one(Tu)]) - one(Ti)
         maximum_value = 0.0
         for position in first_position:last_position
             maximum_value = max(maximum_value, abs(@inbounds values[position]))
@@ -529,10 +537,12 @@ end
 
 function _alpha_norm_row_sparse_kernel!(values, rowptr, alpha, result, nrows)
     Ti = eltype(rowptr)
-    row = _sparse_thread_index(Ti)
-    if row <= nrows
-        first_position = @inbounds rowptr[row]
-        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+    Tu = unsigned(Ti)
+    row_address = _sparse_thread_index(Ti)
+    if row_address <= Tu(nrows)
+        row = Ti(row_address)
+        first_position = @inbounds rowptr[row_address]
+        last_position = (@inbounds rowptr[row_address + one(Tu)]) - one(Ti)
         total = 0.0
         for position in first_position:last_position
             value = abs(@inbounds values[position])
@@ -545,10 +555,12 @@ end
 
 function _fill_row_sparse_kernel!(rowptr, row_indices, nrows)
     Ti = eltype(rowptr)
-    row = _sparse_thread_index(Ti)
-    if row <= nrows
-        first_position = @inbounds rowptr[row]
-        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+    Tu = unsigned(Ti)
+    row_address = _sparse_thread_index(Ti)
+    if row_address <= Tu(nrows)
+        row = Ti(row_address)
+        first_position = @inbounds rowptr[row_address]
+        last_position = (@inbounds rowptr[row_address + one(Tu)]) - one(Ti)
         for position in first_position:last_position
             @inbounds row_indices[position] = row
         end
@@ -565,8 +577,10 @@ function _rescale_coo_sparse_kernel!(
     num_entries,
 )
     Ti = eltype(row_indices)
-    position = _sparse_thread_index(Ti)
-    if position <= num_entries
+    Tu = unsigned(Ti)
+    position_address = _sparse_thread_index(Ti)
+    if position_address <= Tu(num_entries)
+        position = Ti(position_address)
         row = @inbounds row_indices[position]
         column = @inbounds col_indices[position]
         @inbounds values[position] /= row_scaling[row] * col_scaling[column]
@@ -576,8 +590,10 @@ end
 
 function _max_abs_indexed_sparse_kernel!(values, indices, result, num_entries)
     Ti = eltype(indices)
-    position = _sparse_thread_index(Ti)
-    if position <= num_entries
+    Tu = unsigned(Ti)
+    position_address = _sparse_thread_index(Ti)
+    if position_address <= Tu(num_entries)
+        position = Ti(position_address)
         output_index = @inbounds indices[position]
         value = abs(@inbounds values[position])
         CUDA.@atomic result[output_index] = max(result[output_index], value)
@@ -593,8 +609,10 @@ function _alpha_norm_indexed_sparse_kernel!(
     num_entries,
 )
     Ti = eltype(indices)
-    position = _sparse_thread_index(Ti)
-    if position <= num_entries
+    Tu = unsigned(Ti)
+    position_address = _sparse_thread_index(Ti)
+    if position_address <= Tu(num_entries)
+        position = Ti(position_address)
         output_index = @inbounds indices[position]
         value = abs(@inbounds values[position])
         contribution = alpha == 1.0 ? value : value^alpha

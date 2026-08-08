@@ -75,9 +75,13 @@ inferred from the CPU matrix's storage type because the MOI cache may use
 
 Sparse preprocessing kernels will be generic over the CSR index element type.
 CUDA.jl will compile specialized Int32 and Int64 versions from the same Julia
-kernel definitions. Thread positions, CSR offsets, column indices, loop bounds,
-and atomic output indices will use that resolved type rather than being
-unconditionally converted to `Int64`.
+kernel definitions. Signed CSR payload storage, CSR offsets, column indices,
+loop bounds, and atomic output indices use that resolved type rather than being
+unconditionally converted to `Int64`. Launch positions and CSR array addresses
+instead use the same-width unsigned companion (`UInt32` for `Int32`, `UInt64`
+for `Int64`): this safely rejects padded lanes above `typemax(Ti)` and addresses
+the `m + 1` CSR row-pointer slot when `m == typemax(Ti)`. A launch position is
+converted back to signed `Ti` only after the unsigned bound check succeeds.
 
 Temporary sparse-index arrays, including the COO-style row-index workspace used
 by preprocessing, will use `eltype(d_G.rowPtr)`. Floating-point vectors and

@@ -36,6 +36,13 @@ end
     @test_throws ArgumentError _resolve_sparse_index_type(:auto, -1, 1, 0)
 end
 
+@testset "GPU sparse launch address arithmetic" begin
+    padded_position = _sparse_unsigned_thread_index(Int32, 8_388_608, 256, 256)
+    @test padded_position == UInt32(2_147_483_648)
+    @test typeof(padded_position) === UInt32
+    @test padded_position > UInt32(typemax(Int32))
+end
+
 @testset "Typed CSC to CSR components" begin
     G = SparseMatrixCSC{Float64,Int64}(sparse(
         [1, 3, 2, 1, 3],

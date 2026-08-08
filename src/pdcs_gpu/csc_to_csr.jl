@@ -2,6 +2,16 @@ const _SPARSE_INDEX_TYPE_ERROR =
     "sparse_index_type must be :auto, Int32, or Int64 " *
     "(aliases :int32, :int64, \"auto\", \"int32\", and \"int64\" are accepted)"
 
+@inline function _sparse_unsigned_thread_index(
+    ::Type{Ti},
+    block_index::Integer,
+    block_dimension::Integer,
+    thread_index::Integer,
+) where {Ti<:Union{Int32,Int64}}
+    Tu = unsigned(Ti)
+    return (Tu(block_index) - one(Tu)) * Tu(block_dimension) + Tu(thread_index)
+end
+
 function _normalize_sparse_index_type(option)
     option === :auto && return :auto
     option === "auto" && return :auto
