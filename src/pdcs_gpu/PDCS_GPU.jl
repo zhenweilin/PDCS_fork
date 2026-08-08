@@ -32,6 +32,8 @@ const ThreadPerBlock = 256
 
 const MODULE_DIR = @__DIR__
 
+include("./csc_to_csr.jl")
+
 
 ## standard formulation of the optimization problem ##
 
