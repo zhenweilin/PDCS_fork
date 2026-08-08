@@ -678,6 +678,12 @@ function MOI.optimize!(
             println("use_halpern is not set, using default value: false.")
         end
     end
+    if !haskey(options, :use_mean_restart_candidate)
+        options[:use_mean_restart_candidate] = true
+        if options[:verbose] > 0
+            println("use_mean_restart_candidate is not set, using default value: true.")
+        end
+    end
     if !haskey(options, :kkt_restart_freq)
         options[:kkt_restart_freq] = 2000
         if options[:verbose] > 0
@@ -748,6 +754,7 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],
             verbose = options[:verbose],
@@ -814,6 +821,7 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],
             verbose = options[:verbose],

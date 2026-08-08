@@ -809,6 +809,7 @@ mutable struct PDHGCLPParameters
     use_adaptive_step_size_weight::Bool
     use_reflection::Bool
     use_halpern::Bool
+    use_mean_restart_candidate::Bool
     use_resolving::Bool
     use_kkt_restart::Bool
     kkt_restart_freq::Integer
@@ -833,6 +834,7 @@ mutable struct PDHGCLPParameters
          sigma, tau, theta,
          use_restart, use_adaptive_step, use_adaptive_step_size_weight,
          use_reflection, use_halpern, use_resolving,
+         use_mean_restart_candidate = true,
          use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit)
          beta_suff = 0.4
          beta_necessary = 0.8
@@ -847,7 +849,7 @@ mutable struct PDHGCLPParameters
         eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
         sigma, tau, theta,
         use_restart, use_adaptive_step, use_adaptive_step_size_weight,
-        use_reflection, use_halpern, use_resolving,
+        use_reflection, use_halpern, use_mean_restart_candidate, use_resolving,
         use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit,
         beta_suff, beta_necessary, beta_suff_kkt, beta_necessary_kkt, beta_artificial, proj_base_tol, proj_abs_tol, proj_rel_tol)
     end
@@ -1094,6 +1096,7 @@ mutable struct PDCS_GPU_Solver
     use_adaptive_step::Bool
     use_reflection::Bool
     use_halpern::Bool
+    use_mean_restart_candidate::Bool
     primal_sol::Union{Vector{rpdhg_float}, CuArray}
     dual_sol::Union{Vector{rpdhg_float}, CuArray}
     warm_start::Bool
@@ -1147,6 +1150,7 @@ mutable struct PDCS_GPU_Solver
         use_adaptive_step::Bool = true,
         use_reflection::Bool = use_aggressive,
         use_halpern::Bool = false,
+        use_mean_restart_candidate::Bool = true,
         primal_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(n),
         dual_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(m),
         warm_start::Bool = false,
@@ -1214,6 +1218,7 @@ mutable struct PDCS_GPU_Solver
             use_adaptive_step,
             use_reflection,
             use_halpern,
+            use_mean_restart_candidate,
             primal_sol,
             dual_sol,
             warm_start,

@@ -30,10 +30,10 @@ CONFIGURATIONS = [
 STAGE_LABELS = [
     "PDHG",
     "+Restart",
-    "+Scaling",
-    "+Reflection",
-    r"+Adapt. $\omega$",
-    r"+Adapt. $\eta$",
+    r"\shortstack{+Diagonal\\Scaling}",
+    r"\shortstack{+Reflected\\Halpern}",
+    r"\shortstack{+Adapt.\\ $\omega$}",
+    r"\shortstack{+Adapt.\\ $\eta$}",
 ]
 
 COMPONENTS = [
@@ -63,11 +63,21 @@ BAR_TEMPLATE = r"""\documentclass[tikz,border=3pt]{standalone}
   height=6.35cm,
   __TITLE_OPTION__
   title style={font=\small},
+  clip=false,
+  set layers=standard,
   xmin=0.45,
   xmax=__XMAX__,
   xtick={__XTICKS__},
   xticklabels={__LABELS__},
-  xticklabel style={rotate=27,anchor=east,font=\small},
+  xticklabel pos=lower,
+  xticklabel style={
+    rotate=27,
+    anchor=east,
+    xshift=15pt,
+    yshift=-10pt,
+    font=\scriptsize,
+    on layer=axis foreground
+  },
   tick label style={font=\small},
   label style={font=\small},
   ylabel={__YLABEL__},
@@ -386,12 +396,12 @@ def solved_tex(overall: Dict[str, Dict[str, str]]) -> str:
             float(overall[configuration]["verified_solved"])
             for configuration in CONFIGURATIONS
         ],
-        ylabel="Verified solves (out of 63)",
+        ylabel="Solved Num. (out of 63)",
         ymax=66,
         yticks=[0, 10, 20, 30, 40, 50, 60],
         color="0,114,178",
         precision=0,
-        title="Core components (Halpern candidate disabled)",
+        # title="Core components (Halpern candidate disabled)",
     )
 
 

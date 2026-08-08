@@ -416,6 +416,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
+    use_mean_restart_candidate::Bool = true,
     primal_sol::CuArray{rpdhg_float} = CuArray(zeros(n)),
     dual_sol::CuArray{rpdhg_float} = CuArray(zeros(m)),
     warm_start::Bool = false,
@@ -478,6 +479,7 @@ dGType<:Union{
         @info ("use_adaptive_step: $use_adaptive_step")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
+        @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
         @info ("duality_gap_restart_freq: $duality_gap_restart_freq")
@@ -916,6 +918,7 @@ dGType<:Union{
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
+                                use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
                                 use_kkt_restart = use_kkt_restart,
@@ -1265,6 +1268,7 @@ function rpdhg_gpu_solve(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
+    use_mean_restart_candidate::Bool = true,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
     warm_start::Bool = false,
@@ -1321,6 +1325,7 @@ function rpdhg_gpu_solve(;
         @info ("use_adaptive_step: $use_adaptive_step")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
+        @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
         @info ("duality_gap_restart_freq: $duality_gap_restart_freq")
@@ -1760,6 +1765,7 @@ function rpdhg_gpu_solve(;
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
+                                use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
                                 use_kkt_restart = use_kkt_restart,
@@ -2028,6 +2034,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step = solver.use_adaptive_step,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
+            use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
             warm_start = solver.warm_start,
@@ -2077,6 +2084,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step = solver.use_adaptive_step,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
+            use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
             warm_start = solver.warm_start,
