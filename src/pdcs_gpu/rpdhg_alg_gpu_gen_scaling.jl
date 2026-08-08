@@ -447,8 +447,10 @@ end
 @inline restart_merit(value::Real) = isfinite(value) ? Float64(value) : Inf
 
 """
-Return the restart candidate index using the legacy tie policy: the running
-mean wins a tie with the current point, while Halpern must be strictly better.
+Return the restart candidate index using the legacy tie policy: when enabled,
+the running mean wins a tie with the current point, while Halpern must be
+strictly better. If `use_mean=false`, the mean is ineligible and current is the
+fallback candidate.
 
 Indices are current=1, mean=2, and Halpern=3.
 """
@@ -457,11 +459,17 @@ function restart_candidate_index(
     mean_merit::Real,
     halpern_merit::Real,
     use_halpern::Bool,
+    use_mean::Bool = true,
 )
-    selected = 2
-    best = restart_merit(mean_merit)
     current = restart_merit(current_merit)
-    if current < best
+    if use_mean
+        selected = 2
+        best = restart_merit(mean_merit)
+    else
+        selected = 1
+        best = current
+    end
+    if use_mean && current < best
         selected = 1
         best = current
     end
@@ -492,6 +500,7 @@ function install_restart_candidate!(
         merits[2],
         merits[3],
         halpern_enabled,
+        sol.params.use_mean_restart_candidate,
     )
     if selected == 1
         sol.info.restart_trigger_ergodic += 1
@@ -507,7 +516,7 @@ function install_restart_candidate!(
         sol.info.restart_trigger_mean += 1
         selected_name = "mean"
     end
-    @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] halpern_merit=(halpern_enabled ? merits[3] : Inf)
+    @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] mean_enabled=sol.params.use_mean_restart_candidate halpern_merit=(halpern_enabled ? merits[3] : Inf)
     return selected
 end
 
@@ -674,7 +683,9 @@ function restart_condition_check_diagonal!(;
         sol.info.normalized_duality_gap[3] = Inf
         merits = sol.info.normalized_duality_gap
         # condition 1
-        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+        enabled_mean_merit = sol.params.use_mean_restart_candidate ?
+            restart_merit(merits[2]) : Inf
+        if min(restart_merit(merits[1]), enabled_mean_merit) <
            sol.params.beta_suff * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
             if use_halpern
@@ -701,7 +712,7 @@ function restart_condition_check_diagonal!(;
             return true
         end # end if rhoVal_left
         # condition 2
-        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+        if min(restart_merit(merits[1]), enabled_mean_merit) <
            sol.params.beta_necessary * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
             if use_halpern
@@ -740,7 +751,9 @@ function restart_condition_check_diagonal!(;
             false,
         )
         # condition 1
-        if min(restart_merit(merits[1]), restart_merit(merits[2])) <
+        enabled_mean_merit = sol.params.use_mean_restart_candidate ?
+            restart_merit(merits[2]) : Inf
+        if min(restart_merit(merits[1]), enabled_mean_merit) <
            sol.params.beta_suff_kkt * sol.info.kkt_error_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
             evaluate_halpern_restart_kkt_candidate!(
@@ -764,7 +777,11 @@ function restart_condition_check_diagonal!(;
             return true
         end # end if rhoVal_left
         # condition 2
-        enabled_indices = use_halpern ? (1, 2, 3) : (1, 2)
+        enabled_indices = if sol.params.use_mean_restart_candidate
+            use_halpern ? (1, 2, 3) : (1, 2)
+        else
+            use_halpern ? (1, 3) : (1,)
+        end
         if any(
             restart_merit(merits[index]) <
                 sol.params.beta_necessary_kkt *
