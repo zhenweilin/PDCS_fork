@@ -356,7 +356,7 @@ function rescale_problem!(;
   variable_rescaling::CuArray{Float64},
   constraint_rescaling_G::CuArray{Float64}
 )
-    row_idx = CUDA.zeros(Int64, nnz(data.coeff.d_G))
+    row_idx = similar(data.coeff.d_G.colVal, nnz(data.coeff.d_G))
     get_row_index(data.coeff.d_G, row_idx)
     variable_rescaling .= 1.0
     constraint_rescaling_G .= 1.0

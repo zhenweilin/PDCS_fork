@@ -481,6 +481,128 @@ gridWise_block_proj(args...) = few_block_proj(args...)
 # Path to the shared PTX file containing all utility kernels
 utils_path = joinpath(MODULE_DIR, "cuda/utils.ptx")
 
+# CUDA.jl's CPU CSC convenience upload and the historical utility PTX both
+# assume 32-bit sparse indices. These kernels are compiled by CUDA.jl for the
+# actual array types, so matrices with more than typemax(Int32) stored entries
+# keep Int64 row pointers and column indices throughout preprocessing.
+@inline function _sparse_thread_index(::Type{Ti}) where {Ti<:Integer}
+    return (Ti(CUDA.blockIdx().x) - one(Ti)) * Ti(CUDA.blockDim().x) +
+           Ti(CUDA.threadIdx().x)
+end
+
+function _rescale_csr_sparse_kernel!(
+    values,
+    rowptr,
+    colval,
+    row_scaling,
+    col_scaling,
+    nrows,
+)
+    Ti = eltype(rowptr)
+    row = _sparse_thread_index(Ti)
+    if row <= nrows
+        first_position = @inbounds rowptr[row]
+        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+        for position in first_position:last_position
+            column = @inbounds colval[position]
+            @inbounds values[position] /= row_scaling[row] * col_scaling[column]
+        end
+    end
+    return
+end
+
+function _max_abs_row_sparse_kernel!(values, rowptr, result, nrows)
+    Ti = eltype(rowptr)
+    row = _sparse_thread_index(Ti)
+    if row <= nrows
+        first_position = @inbounds rowptr[row]
+        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+        maximum_value = 0.0
+        for position in first_position:last_position
+            maximum_value = max(maximum_value, abs(@inbounds values[position]))
+        end
+        @inbounds result[row] = maximum_value
+    end
+    return
+end
+
+
+function _alpha_norm_row_sparse_kernel!(values, rowptr, alpha, result, nrows)
+    Ti = eltype(rowptr)
+    row = _sparse_thread_index(Ti)
+    if row <= nrows
+        first_position = @inbounds rowptr[row]
+        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+        total = 0.0
+        for position in first_position:last_position
+            value = abs(@inbounds values[position])
+            total += alpha == 1.0 ? value : value^alpha
+        end
+        @inbounds result[row] = total
+    end
+    return
+end
+
+function _fill_row_sparse_kernel!(rowptr, row_indices, nrows)
+    Ti = eltype(rowptr)
+    row = _sparse_thread_index(Ti)
+    if row <= nrows
+        first_position = @inbounds rowptr[row]
+        last_position = (@inbounds rowptr[row + one(Ti)]) - one(Ti)
+        for position in first_position:last_position
+            @inbounds row_indices[position] = row
+        end
+    end
+    return
+end
+
+function _rescale_coo_sparse_kernel!(
+    values,
+    row_indices,
+    col_indices,
+    row_scaling,
+    col_scaling,
+    num_entries,
+)
+    Ti = eltype(row_indices)
+    position = _sparse_thread_index(Ti)
+    if position <= num_entries
+        row = @inbounds row_indices[position]
+        column = @inbounds col_indices[position]
+        @inbounds values[position] /= row_scaling[row] * col_scaling[column]
+    end
+    return
+end
+
+function _max_abs_indexed_sparse_kernel!(values, indices, result, num_entries)
+    Ti = eltype(indices)
+    position = _sparse_thread_index(Ti)
+    if position <= num_entries
+        output_index = @inbounds indices[position]
+        value = abs(@inbounds values[position])
+        CUDA.@atomic result[output_index] = max(result[output_index], value)
+    end
+    return
+end
+
+function _alpha_norm_indexed_sparse_kernel!(
+    values,
+    indices,
+    alpha,
+    result,
+    num_entries,
+)
+    Ti = eltype(indices)
+    position = _sparse_thread_index(Ti)
+    if position <= num_entries
+        output_index = @inbounds indices[position]
+        value = abs(@inbounds values[position])
+        contribution = alpha == 1.0 ? value : value^alpha
+        CUDA.@atomic result[output_index] += contribution
+    end
+    return
+end
+
 # ----------------------------------------------------------------------------
 # Reflection Update Kernel
 # ----------------------------------------------------------------------------
@@ -1121,15 +1243,27 @@ Arguments:
 - m: Number of rows
 - n: Number of columns
 """
-function rescale_csr(d_G::CUDA.CUSPARSE.CuSparseMatrixCSR, row_scaling::CuArray, col_scaling::CuArray, m::Int64, n::Int64)
-    # Number of blocks based on number of non-zero elements
-    nBlock = cld(length(d_G.nzVal) + ThreadPerBlock - 1, ThreadPerBlock)
+function rescale_csr(
+    d_G::CUDA.CUSPARSE.CuSparseMatrixCSR,
+    row_scaling::CuArray,
+    col_scaling::CuArray,
+    m::Int64,
+    n::Int64,
+)
+    m == 0 && return
+    typed_m = eltype(d_G.rowPtr)(m)
+    nblocks = cld(m, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_rescale_csr_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, CuPtr{Float64}, CuPtr{Float64}, Int64, Int64),
-         d_G.nzVal, d_G.rowPtr, d_G.colVal, row_scaling, col_scaling, m, n; 
-         blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _rescale_csr_sparse_kernel!(
+            d_G.nzVal,
+            d_G.rowPtr,
+            d_G.colVal,
+            row_scaling,
+            col_scaling,
+            typed_m,
+        )
     end
+    return
 end
 
 # ----------------------------------------------------------------------------
@@ -1260,22 +1394,20 @@ Arguments:
           Should be initialized to 1.0 before calling
 """
 function max_abs_row(d_G, result)
-    # Extract CSR matrix components
-    rowptr = d_G.rowPtr    # Row pointers (CSR format)
-    values = d_G.nzVal     # Non-zero values
-    nrows = Int64(size(d_G, 1))   # Number of rows
-    
-    # Initialize result to 1.0 (will be overwritten by kernel)
-    result .= 1.0
-    
-    # Calculate blocks: uses 32x more blocks for better parallelism
-    nBlock = Int64(ceil((nrows + ThreadPerBlock + 1) * 32 / ThreadPerBlock))
+    result .= 0.0
+    nrows = size(d_G, 1)
+    nrows == 0 && return
+    typed_nrows = eltype(d_G.rowPtr)(nrows)
+    nblocks = cld(nrows, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_max_abs_row_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int}, Int64, CuPtr{Float64}), 
-        values, rowptr, nrows, result;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _max_abs_row_sparse_kernel!(
+            d_G.nzVal,
+            d_G.rowPtr,
+            result,
+            typed_nrows,
+        )
     end
+    return
 end
 
 
@@ -1335,21 +1467,7 @@ Arguments:
           Should be initialized to 1.0 before calling
 """
 function max_abs_col(d_G, result)
-    nrows = Int64(size(d_G, 1))
-    ncols = Int64(size(d_G, 2))
-    
-    # Initialize result to 1.0 (will be overwritten by kernel)
-    result .= 1.0
-    
-    # Calculate blocks: uses 32x more blocks for better parallelism
-    nBlock = cld((ncols + ThreadPerBlock + 1) * 32, ThreadPerBlock)
-
-    CUDA.@sync begin
-        CUDA.cudacall(get_max_abs_col_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int32}, CuPtr{Int32}, Int64, Int64, CuPtr{Float64}), 
-        d_G.nzVal, d_G.colVal, d_G.rowPtr, nrows, ncols, result;
-        blocks = nBlock, threads = ThreadPerBlock)
-    end
+    return max_abs_col_elementwise(d_G, result)
 end
 
 
@@ -1413,21 +1531,21 @@ Arguments:
           Should be initialized to 0.0 before calling
 """
 function alpha_norm_row(d_G, alpha, result)
-    rowptr = d_G.rowPtr    # Row pointers (CSR format)
-    values = d_G.nzVal     # Non-zero values
-    nrows = size(d_G, 1)   # Number of rows
-    
-    # Initialize result to 0.0
     result .= 0.0
-    
-    # Calculate blocks: uses 32x more blocks for better parallelism
-    nBlock = cld((nrows + ThreadPerBlock + 1) * 32, ThreadPerBlock)
+    nrows = size(d_G, 1)
+    nrows == 0 && return
+    typed_nrows = eltype(d_G.rowPtr)(nrows)
+    nblocks = cld(nrows, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_alpha_norm_row_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int}, Int, CuPtr{Float64}, Float64), 
-        values, rowptr, nrows, result, alpha;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _alpha_norm_row_sparse_kernel!(
+            d_G.nzVal,
+            d_G.rowPtr,
+            Float64(alpha),
+            result,
+            typed_nrows,
+        )
     end
+    return
 end
 
 
@@ -1494,22 +1612,7 @@ Arguments:
           Should be initialized to 0.0 before calling
 """
 function alpha_norm_col(d_G, alpha, result)
-    nrows = size(d_G, 1)
-    ncols = size(d_G, 2)
-    
-    # Initialize result to 0.0
-    result .= 0.0
-    
-    # Calculate blocks: uses 32x more blocks for better parallelism
-    nBlock = cld((ncols + ThreadPerBlock + 1) * 32, ThreadPerBlock)
-    CUDA.@sync begin
-        CUDA.cudacall(get_alpha_norm_col_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int}, CuPtr{Int}, Int, Int, CuPtr{Float64}, Float64), 
-        d_G.nzVal, d_G.colVal, d_G.rowPtr, nrows, ncols, result, alpha;
-        blocks = nBlock, threads = ThreadPerBlock)
-    end
-    # Note: When alpha = 1.0, we skip the final power operation since result^(1/1) = result
-    # result .= result .^ (1.0 / alpha)
+    return alpha_norm_col_elementwise(d_G, alpha, result)
 end
 
 
@@ -1570,21 +1673,18 @@ Arguments:
            Length should equal the number of non-zero elements (nnz)
 """
 function get_row_index(d_G, row_idx)
-    nnz = length(d_G.nzVal)
     nrows = size(d_G, 1)
-    ncols = size(d_G, 2)
-
-    # Calculate blocks based on number of non-zero elements
-    nBlock = cld(nnz + ThreadPerBlock + 1, ThreadPerBlock)
-
-    k = get_row_index_kernel()
-
+    nrows == 0 && return
+    typed_nrows = eltype(d_G.rowPtr)(nrows)
+    nblocks = cld(nrows, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(k, 
-        (CuPtr{Int}, Int64, CuPtr{Int}), 
-        d_G.rowPtr, nrows, row_idx;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _fill_row_sparse_kernel!(
+            d_G.rowPtr,
+            row_idx,
+            typed_nrows,
+        )
     end
+    return
 end
 
 
@@ -1651,17 +1751,29 @@ Arguments:
 - row_idx: Precomputed row indices for each non-zero element (GPU array)
            Should be computed using get_row_index() before calling this function
 """
-function rescale_coo(d_G::CUDA.CUSPARSE.CuSparseMatrixCSR, row_scaling::CuArray, col_scaling::CuArray, m::Int64, n::Int64, row_idx::CuArray)
-    nnz = length(d_G.nzVal)
-    
-    # Calculate blocks based on number of non-zero elements
-    nBlock = cld(nnz + ThreadPerBlock + 1, ThreadPerBlock)
+function rescale_coo(
+    d_G::CUDA.CUSPARSE.CuSparseMatrixCSR,
+    row_scaling::CuArray,
+    col_scaling::CuArray,
+    m::Int64,
+    n::Int64,
+    row_idx::CuArray,
+)
+    num_entries = length(d_G.nzVal)
+    num_entries == 0 && return
+    typed_entries = eltype(row_idx)(num_entries)
+    nblocks = cld(num_entries, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_rescale_coo_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, CuPtr{Float64}, CuPtr{Float64}, Int64, Int64),
-         d_G.nzVal, row_idx, d_G.colVal, row_scaling, col_scaling, nnz; 
-         blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _rescale_coo_sparse_kernel!(
+            d_G.nzVal,
+            row_idx,
+            d_G.colVal,
+            row_scaling,
+            col_scaling,
+            typed_entries,
+        )
     end
+    return
 end
 
 
@@ -1734,21 +1846,20 @@ Arguments:
           Should be initialized to 0.0 before calling
 """
 function max_abs_row_elementwise(d_G, row_idx, result)
-    values = d_G.nzVal     # Non-zero values
-    nrows = Int64(size(d_G, 1))   # Number of rows
-    nnz = length(d_G.nzVal)       # Number of non-zero elements
-    
-    # Initialize result to 0.0
     result .= 0.0
-    
-    # Calculate blocks based on number of non-zero elements
-    nBlock = cld(nnz + ThreadPerBlock + 1, ThreadPerBlock)
+    num_entries = length(d_G.nzVal)
+    num_entries == 0 && return
+    typed_entries = eltype(row_idx)(num_entries)
+    nblocks = cld(num_entries, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_max_abs_row_elementwise_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int}, Int64, CuPtr{Float64}), 
-        values, row_idx, nnz, result;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _max_abs_indexed_sparse_kernel!(
+            d_G.nzVal,
+            row_idx,
+            result,
+            typed_entries,
+        )
     end
+    return
 end
 
 
@@ -1809,23 +1920,20 @@ Arguments:
           Should be initialized to 0.0 before calling
 """
 function max_abs_col_elementwise(d_G, result)
-    values = d_G.nzVal      # Non-zero values
-    col_idx = d_G.colVal    # Column indices (CSR format)
-    ncols = Int64(size(d_G, 2))  # Number of columns
-    nnz = length(d_G.nzVal)      # Number of non-zero elements
-    
-    # Initialize result to 0.0
     result .= 0.0
-    
-    # Calculate blocks based on number of non-zero elements
-    nBlock = cld(nnz + ThreadPerBlock + 1, ThreadPerBlock)
-    k = get_max_abs_col_elementwise_kernel()
+    num_entries = length(d_G.nzVal)
+    num_entries == 0 && return
+    typed_entries = eltype(d_G.colVal)(num_entries)
+    nblocks = cld(num_entries, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(k, 
-        (CuPtr{Float64}, CuPtr{Int}, Int64, CuPtr{Float64}), 
-        values, col_idx, nnz, result;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _max_abs_indexed_sparse_kernel!(
+            d_G.nzVal,
+            d_G.colVal,
+            result,
+            typed_entries,
+        )
     end
+    return
 end
 
 
@@ -1890,20 +1998,19 @@ Arguments:
           Should be initialized to 0.0 before calling
 """
 function alpha_norm_col_elementwise(d_G, alpha, result)
-    nnz = length(d_G.nzVal)
-    ncols = size(d_G, 2)
-    
-    # Initialize result to 0.0
     result .= 0.0
-    
-    # Calculate blocks based on number of non-zero elements
-    nBlock = cld(nnz + ThreadPerBlock + 1, ThreadPerBlock)
+    num_entries = length(d_G.nzVal)
+    num_entries == 0 && return
+    typed_entries = eltype(d_G.colVal)(num_entries)
+    nblocks = cld(num_entries, ThreadPerBlock)
     CUDA.@sync begin
-        CUDA.cudacall(get_alpha_norm_col_elementwise_kernel(), 
-        (CuPtr{Float64}, CuPtr{Int}, Int64, CuPtr{Float64}, Float64, Int64), 
-        d_G.nzVal, d_G.colVal, nnz, result, alpha, ncols;
-        blocks = nBlock, threads = ThreadPerBlock)
+        CUDA.@cuda threads=ThreadPerBlock blocks=nblocks _alpha_norm_indexed_sparse_kernel!(
+            d_G.nzVal,
+            d_G.colVal,
+            Float64(alpha),
+            result,
+            typed_entries,
+        )
     end
-    # Note: When alpha = 1.0, we skip the final power operation since result^(1/1) = result
-    # result .= result .^ (1.0 / alpha)
+    return
 end
