@@ -190,6 +190,9 @@ function _to_sparse(
     return -A.nzval, A.rowval, A.colptr
 end
 
+_as_int64_indices(indices::Vector{Int64}) = indices
+_as_int64_indices(indices::AbstractVector{<:Integer}) = Int64.(indices)
+
 mutable struct MOISolution
     primal::Vector{Float64}
     dual::Vector{Float64}
@@ -571,7 +574,13 @@ function MOI.optimize!(
     dest.cones = deepcopy(Ab.sets)
     mGzero = sum(_map_sets(MOI.dimension, T, Ab, MOI.Zeros))
     mGnonnegative = sum(_map_sets(MOI.dimension, T, Ab, MOI.Nonnegatives))
-    G = SparseMatrixCSC{Float64, Int64}(A.m, A.n, Int64.(A.colptr), Int64.(A.rowval), A.nzval)
+    G = SparseMatrixCSC{Float64,Int64}(
+        A.m,
+        A.n,
+        _as_int64_indices(A.colptr),
+        _as_int64_indices(A.rowval),
+        A.nzval,
+    )
     bl = fill(-Inf, A.n)
     bl .= src.model.variables.lower
     bu = fill(Inf, A.n)
