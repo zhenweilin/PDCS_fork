@@ -723,6 +723,9 @@ function MOI.optimize!(
             println("abs_tol is not set, using default value: 1e-6.")
         end
     end
+    if !haskey(options, :sparse_index_type)
+        options[:sparse_index_type] = :auto
+    end
     if options[:use_scaling]
         sol_res = PDCS_GPU.rpdhg_gpu_solve(
             n = A.n,
@@ -767,6 +770,7 @@ function MOI.optimize!(
             duality_gap_restart_freq = options[:duality_gap_restart_freq],
             use_kkt_restart = options[:use_kkt_restart],
             use_duality_gap_restart = options[:use_duality_gap_restart],
+            sparse_index_type = options[:sparse_index_type],
         )
         dest.sol = MOISolution(
             primal = sol_res.x.recovered_primal.primal_sol.x,
@@ -833,6 +837,7 @@ function MOI.optimize!(
             duality_gap_restart_freq = options[:duality_gap_restart_freq],
             use_kkt_restart = options[:use_kkt_restart],
             use_duality_gap_restart = options[:use_duality_gap_restart],
+            sparse_index_type = options[:sparse_index_type],
         )
         dest.sol = MOISolution(
             primal = sol_res.x.recovered_primal.primal_sol.x,

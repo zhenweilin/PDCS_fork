@@ -873,6 +873,43 @@ mutable struct Solution
 end
 
 
+function _csc_to_gpu_csr(
+    G::SparseMatrixCSC{Float64,<:Integer},
+    sparse_index_type = :auto,
+)
+    Ti = _resolve_sparse_index_type(
+        sparse_index_type,
+        size(G, 1),
+        size(G, 2),
+        nnz(G),
+    )
+    return _csc_to_gpu_csr(G, Ti)
+end
+
+function _csc_to_gpu_csr(
+    G::SparseMatrixCSC{Float64,<:Integer},
+    ::Type{Int32},
+)
+    return CUDA.CUSPARSE.CuSparseMatrixCSR(G)
+end
+
+function _csc_to_gpu_csr(
+    G::SparseMatrixCSC{Float64,<:Integer},
+    ::Type{Int64},
+)
+    components = _csc_to_csr_components(G, Int64)
+    return CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64}(
+        CuArray(components.rowptr),
+        CuArray(components.colval),
+        CuArray(components.nzval),
+        components.dims,
+    )
+end
+
+function _csc_to_gpu_csr(G::AbstractMatrix{Float64}, sparse_index_type = :auto)
+    return _csc_to_gpu_csr(sparse(G), sparse_index_type)
+end
+
 mutable struct coeffUnion{
     dhType<:Union{CuVector{Float64},CuArray, Nothing},
     dGType<:Union{CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int32}, Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int32}}, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64}, Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int64}}}
@@ -882,12 +919,13 @@ mutable struct coeffUnion{
     m::Integer
     n::Integer
     function coeffUnion(; G::GType,
-        h::hType, m::Integer, n::Integer, d_G=nothing, d_h=nothing) where{
+        h::hType, m::Integer, n::Integer, d_G=nothing, d_h=nothing,
+        sparse_index_type = :auto) where{
            hType<:Union{Vector{rpdhg_float}, Nothing},
            GType<:Union{AbstractMatrix{rpdhg_float}, Nothing}
         }
         if d_G === nothing
-            d_G = CUDA.CUSPARSE.CuSparseMatrixCSR(G)
+            d_G = _csc_to_gpu_csr(G, sparse_index_type)
             d_h = CuArray(h)
         end
         new{typeof(d_h), typeof(d_G)}(d_G, d_h, m, n)       

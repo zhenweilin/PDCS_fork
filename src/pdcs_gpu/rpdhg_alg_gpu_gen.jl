@@ -1285,7 +1285,8 @@ function rpdhg_gpu_solve(;
     use_kkt_restart::Bool = false,
     kkt_restart_freq::Integer = 2000,
     use_duality_gap_restart::Bool = true,
-    duality_gap_restart_freq::Integer = 2000
+    duality_gap_restart_freq::Integer = 2000,
+    sparse_index_type = :auto,
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
     if logfile_name === nothing
@@ -1407,7 +1408,8 @@ function rpdhg_gpu_solve(;
         m = m,
         n = n,
         d_G = nothing,
-        d_h = nothing
+        d_h = nothing,
+        sparse_index_type = sparse_index_type,
     )
     coeffTrans = coeffUnion(
         G = nothing,
