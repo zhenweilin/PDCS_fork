@@ -1,0 +1,210 @@
+generator_version = 1
+julia_version = "1.12.5"
+manifest_sha256 = "415d61ce8040e252e968c785d14f304e62dfebec5dabcead98970e70916b096c"
+master_seed = "20260728"
+preset = "table5"
+project_sha256 = "7848608f0876116ae2bebb96d39dd42be07524ba268024c4b9725be598aaa384"
+replicates = 5
+schema_version = 1
+script_sha256 = "eb7607a182260ec8798f8911a819f1a4e13100cbc71e19013f91c5947899d28d"
+
+[[instances]]
+density = 0.0001
+id = "table5-m10000-n100000-r01"
+m = 10000
+n = 100000
+preset = "table5"
+replicate = 1
+seed = "1456099608458829617"
+[[instances]]
+density = 0.0001
+id = "table5-m10000-n100000-r02"
+m = 10000
+n = 100000
+preset = "table5"
+replicate = 2
+seed = "3774683599633055197"
+[[instances]]
+density = 0.0001
+id = "table5-m10000-n100000-r03"
+m = 10000
+n = 100000
+preset = "table5"
+replicate = 3
+seed = "7352328007339572649"
+[[instances]]
+density = 0.0001
+id = "table5-m10000-n100000-r04"
+m = 10000
+n = 100000
+preset = "table5"
+replicate = 4
+seed = "8539239721064585772"
+[[instances]]
+density = 0.0001
+id = "table5-m10000-n100000-r05"
+m = 10000
+n = 100000
+preset = "table5"
+replicate = 5
+seed = "2682075302358372869"
+[[instances]]
+density = 0.0001
+id = "table5-m70000-n700000-r01"
+m = 70000
+n = 700000
+preset = "table5"
+replicate = 1
+seed = "6866308190711936842"
+[[instances]]
+density = 0.0001
+id = "table5-m70000-n700000-r02"
+m = 70000
+n = 700000
+preset = "table5"
+replicate = 2
+seed = "3717777317041247579"
+[[instances]]
+density = 0.0001
+id = "table5-m70000-n700000-r03"
+m = 70000
+n = 700000
+preset = "table5"
+replicate = 3
+seed = "6230819915418504357"
+[[instances]]
+density = 0.0001
+id = "table5-m70000-n700000-r04"
+m = 70000
+n = 700000
+preset = "table5"
+replicate = 4
+seed = "5050833866237992834"
+[[instances]]
+density = 0.0001
+id = "table5-m70000-n700000-r05"
+m = 70000
+n = 700000
+preset = "table5"
+replicate = 5
+seed = "3478211357477831271"
+[[instances]]
+density = 0.0001
+id = "table5-m400000-n7000000-r01"
+m = 400000
+n = 7000000
+preset = "table5"
+replicate = 1
+seed = "2810953517340410803"
+[[instances]]
+density = 0.0001
+id = "table5-m400000-n7000000-r02"
+m = 400000
+n = 7000000
+preset = "table5"
+replicate = 2
+seed = "6916851584803374380"
+[[instances]]
+density = 0.0001
+id = "table5-m400000-n7000000-r03"
+m = 400000
+n = 7000000
+preset = "table5"
+replicate = 3
+seed = "2252237519727520935"
+[[instances]]
+density = 0.0001
+id = "table5-m400000-n7000000-r04"
+m = 400000
+n = 7000000
+preset = "table5"
+replicate = 4
+seed = "9202490041639810005"
+[[instances]]
+density = 0.0001
+id = "table5-m400000-n7000000-r05"
+m = 400000
+n = 7000000
+preset = "table5"
+replicate = 5
+seed = "1459784771767232267"
+[[instances]]
+density = 0.0001
+id = "table5-m700000-n7000000-r01"
+m = 700000
+n = 7000000
+preset = "table5"
+replicate = 1
+seed = "2694979877904449328"
+[[instances]]
+density = 0.0001
+id = "table5-m700000-n7000000-r02"
+m = 700000
+n = 7000000
+preset = "table5"
+replicate = 2
+seed = "706412229318414900"
+[[instances]]
+density = 0.0001
+id = "table5-m700000-n7000000-r03"
+m = 700000
+n = 7000000
+preset = "table5"
+replicate = 3
+seed = "2776373863867649000"
+[[instances]]
+density = 0.0001
+id = "table5-m700000-n7000000-r04"
+m = 700000
+n = 7000000
+preset = "table5"
+replicate = 4
+seed = "780990368380045832"
+[[instances]]
+density = 0.0001
+id = "table5-m700000-n7000000-r05"
+m = 700000
+n = 7000000
+preset = "table5"
+replicate = 5
+seed = "6974796360093007817"
+[[instances]]
+density = 0.0001
+id = "table5-m750000-n7500000-r01"
+m = 750000
+n = 7500000
+preset = "table5"
+replicate = 1
+seed = "3464449634565370456"
+[[instances]]
+density = 0.0001
+id = "table5-m750000-n7500000-r02"
+m = 750000
+n = 7500000
+preset = "table5"
+replicate = 2
+seed = "7063733435616014003"
+[[instances]]
+density = 0.0001
+id = "table5-m750000-n7500000-r03"
+m = 750000
+n = 7500000
+preset = "table5"
+replicate = 3
+seed = "7306719367855031537"
+[[instances]]
+density = 0.0001
+id = "table5-m750000-n7500000-r04"
+m = 750000
+n = 7500000
+preset = "table5"
+replicate = 4
+seed = "66351557481754279"
+[[instances]]
+density = 0.0001
+id = "table5-m750000-n7500000-r05"
+m = 750000
+n = 7500000
+preset = "table5"
+replicate = 5
+seed = "7133432016813647455"

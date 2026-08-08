@@ -1,0 +1,852 @@
+TABLE5_SOLVE_PHASE_START storage=no_cbf utc=2026-07-30T02:40:47Z
+JULIA_VERSION julia version 1.12.5
+KEEP_EXISTING_MANIFEST config=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/lasso_table5.toml
+TABLE5_SOLVE_PHASE_START storage=no_cbf utc=2026-07-30T02:40:47Z
+id	m	n	density	replicate	seed
+table5-m10000-n100000-r01	10000	100000	0.0001	1	1456099608458829617
+table5-m10000-n100000-r02	10000	100000	0.0001	2	3774683599633055197
+table5-m10000-n100000-r03	10000	100000	0.0001	3	7352328007339572649
+table5-m10000-n100000-r04	10000	100000	0.0001	4	8539239721064585772
+table5-m10000-n100000-r05	10000	100000	0.0001	5	2682075302358372869
+table5-m70000-n700000-r01	70000	700000	0.0001	1	6866308190711936842
+table5-m70000-n700000-r02	70000	700000	0.0001	2	3717777317041247579
+table5-m70000-n700000-r03	70000	700000	0.0001	3	6230819915418504357
+table5-m70000-n700000-r04	70000	700000	0.0001	4	5050833866237992834
+table5-m70000-n700000-r05	70000	700000	0.0001	5	3478211357477831271
+table5-m400000-n7000000-r01	400000	7000000	0.0001	1	2810953517340410803
+table5-m400000-n7000000-r02	400000	7000000	0.0001	2	6916851584803374380
+table5-m400000-n7000000-r03	400000	7000000	0.0001	3	2252237519727520935
+table5-m400000-n7000000-r04	400000	7000000	0.0001	4	9202490041639810005
+table5-m400000-n7000000-r05	400000	7000000	0.0001	5	1459784771767232267
+table5-m700000-n7000000-r01	700000	7000000	0.0001	1	2694979877904449328
+table5-m700000-n7000000-r02	700000	7000000	0.0001	2	706412229318414900
+table5-m700000-n7000000-r03	700000	7000000	0.0001	3	2776373863867649000
+table5-m700000-n7000000-r04	700000	7000000	0.0001	4	780990368380045832
+table5-m700000-n7000000-r05	700000	7000000	0.0001	5	6974796360093007817
+table5-m750000-n7500000-r01	750000	7500000	0.0001	1	3464449634565370456
+table5-m750000-n7500000-r02	750000	7500000	0.0001	2	7063733435616014003
+table5-m750000-n7500000-r03	750000	7500000	0.0001	3	7306719367855031537
+table5-m750000-n7500000-r04	750000	7500000	0.0001	4	66351557481754279
+table5-m750000-n7500000-r05	750000	7500000	0.0001	5	7133432016813647455
+TABLE5_MANIFEST_VALID instances=25 unique_ids=25 unique_seeds=25
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m700000-n7000000-r01
+JULIA_VERSION julia version 1.12.5
+KEEP_EXISTING_MANIFEST config=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/lasso_table5.toml
+id	m	n	density	replicate	seed
+table5-m10000-n100000-r01	10000	100000	0.0001	1	1456099608458829617
+table5-m10000-n100000-r02	10000	100000	0.0001	2	3774683599633055197
+table5-m10000-n100000-r03	10000	100000	0.0001	3	7352328007339572649
+table5-m10000-n100000-r04	10000	100000	0.0001	4	8539239721064585772
+table5-m10000-n100000-r05	10000	100000	0.0001	5	2682075302358372869
+table5-m70000-n700000-r01	70000	700000	0.0001	1	6866308190711936842
+table5-m70000-n700000-r02	70000	700000	0.0001	2	3717777317041247579
+table5-m70000-n700000-r03	70000	700000	0.0001	3	6230819915418504357
+table5-m70000-n700000-r04	70000	700000	0.0001	4	5050833866237992834
+table5-m70000-n700000-r05	70000	700000	0.0001	5	3478211357477831271
+table5-m400000-n7000000-r01	400000	7000000	0.0001	1	2810953517340410803
+table5-m400000-n7000000-r02	400000	7000000	0.0001	2	6916851584803374380
+table5-m400000-n7000000-r03	400000	7000000	0.0001	3	2252237519727520935
+table5-m400000-n7000000-r04	400000	7000000	0.0001	4	9202490041639810005
+table5-m400000-n7000000-r05	400000	7000000	0.0001	5	1459784771767232267
+table5-m700000-n7000000-r01	700000	7000000	0.0001	1	2694979877904449328
+table5-m700000-n7000000-r02	700000	7000000	0.0001	2	706412229318414900
+table5-m700000-n7000000-r03	700000	7000000	0.0001	3	2776373863867649000
+table5-m700000-n7000000-r04	700000	7000000	0.0001	4	780990368380045832
+table5-m700000-n7000000-r05	700000	7000000	0.0001	5	6974796360093007817
+table5-m750000-n7500000-r01	750000	7500000	0.0001	1	3464449634565370456
+table5-m750000-n7500000-r02	750000	7500000	0.0001	2	7063733435616014003
+table5-m750000-n7500000-r03	750000	7500000	0.0001	3	7306719367855031537
+table5-m750000-n7500000-r04	750000	7500000	0.0001	4	66351557481754279
+table5-m750000-n7500000-r05	750000	7500000	0.0001	5	7133432016813647455
+TABLE5_MANIFEST_VALID instances=25 unique_ids=25 unique_seeds=25
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m700000-n7000000-r03
+GPU_PREFLIGHT 6, GPU-790986fa-7e8a-1825-d49a-9b2ba1c63325, NVIDIA H100 80GB HBM3, 0, 81081, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m700000-n7000000-r01 gpu=6 utc=2026-07-30T02:40:47Z
+GPU_PREFLIGHT 7, GPU-3b36dfea-7222-7369-c9ce-f51b2765aeaf, NVIDIA H100 80GB HBM3, 915, 80167, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m700000-n7000000-r03 gpu=7 utc=2026-07-30T02:40:48Z
+┌ Info: CondaPkg: Waiting for lock to be freed. You may delete this file if no other process is resolving.
+└   lock_file = "/home/zhenwei/PDCS_fork/.CondaPkg/lock"
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+    CondaPkg Resolving changes
+             ~ libstdcxx
+             ~ libstdcxx-ng
+             ~ openssl
+             ~ python
+    CondaPkg Initialising pixi
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ init
+             │ --format pixi
+             └ /home/zhenwei/PDCS_fork/.CondaPkg
+✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+             │ [dependencies]
+             │ openssl = ">=3, <3.6"
+             │ libstdcxx = ">=3.4,<15.0"
+             │ libstdcxx-ng = ">=3.4,<15.0"
+             │ 
+             │     [dependencies.python]
+             │     channel = "conda-forge"
+             │     build = "*cp*"
+             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+             │ 
+             │ [workspace]
+             │ name = ".CondaPkg"
+             │ platforms = ["linux-64"]
+             │ channels = ["conda-forge"]
+             │ channel-priority = "strict"
+             └ description = "automatically generated by CondaPkg.jl"
+    CondaPkg Installing packages
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ install
+             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+✔ The default environment has been installed.
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m700000-n7000000-r03 m=700000 n=7000000 density=0.0001 seed=2776373863867649000 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m700000-n7000000-r01 m=700000 n=7000000 density=0.0001 seed=2694979877904449328 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_INSTANCE_READY instance=table5-m700000-n7000000-r01 nnz=489966133 lambda=0.12331210291489622 numerical_digest=14682a0201b8ec27f054a6dfc7849af710b5a7345b1ac8e2b27a9828de9e7ddb model_digest=7de21e703297657ae631a0ecccbdec7eb4b6db33d31bce5847097c5f142c74aa generation_seconds=103.29750299453735
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 10800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 14700004
+[ Info: constraint number: 15400005
+[ Info: non-zero elements in G: 995332275
+[ Info: Number of box constraints: 14700004
+[ Info: Number of equal constraints: 700003
+[ Info: Number of nonnegative constraints: 14000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 5.0538069585863304e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.7263714408085484e6
+[ Info: initial nrm1h: 2275.2600527718705
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:8.001075929393485
+[ Info: norm Dr_product:22480.673820968048
+[ Info: max Dl_product:29.042952639522166
+[ Info: norm Dl_product:22480.673843186796
+[ Info: after scaling, norm1 c: 289722.1845055987
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 5.939155152674824e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.40 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):2.617e-04 rel_d_res(inf):1.351e-01 primal_obj:1.09054e+01 dual_obj:1.65919e+01 rel_pd_gap:3.232e-01 time:206.98 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:6.475e+00 diff_nrm_y_recovered:4.976e+02 nrm2_x_recovered:6.475e+00 nrm2_y_recovered:4.976e+02, nrmInf_x_recovered:3.996e+00 nrmInf_y_recovered:1.097e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.283e-02, sigma:7.606e+01
+[ Info: iter:2000 rel_p_res(inf):6.374e-05 rel_d_res(inf):7.256e-02 primal_obj:1.08127e+01 dual_obj:1.43066e+01 rel_pd_gap:2.283e-01 time:353.46 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:1.080e+00 diff_nrm_y_recovered:1.795e+01 nrm2_x_recovered:7.488e+00 nrm2_y_recovered:4.925e+02, nrmInf_x_recovered:4.724e+00 nrmInf_y_recovered:1.132e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.515e-02, sigma:8.983e+01
+[ Info: restart due to condition 1
+[ Info: omega:77.00330174938058, x_diff_norm:9.513966243407452, y_diff_norm:531.891664870635
+[ Info: iter:3000 rel_p_res(inf):1.457e-05 rel_d_res(inf):4.150e-02 primal_obj:1.17367e+01 dual_obj:1.31869e+01 rel_pd_gap:1.022e-01 time:501.72 restart_used:1, restart_trigger_mean:1, restart_trigger_ergodic:0, diff_nrm_x_recovered:5.177e-01 diff_nrm_y_recovered:7.206e+00 nrm2_x_recovered:7.983e+00 nrm2_y_recovered:4.904e+02, nrmInf_x_recovered:5.078e+00 nrmInf_y_recovered:1.153e+01 dual_gap_ergodic:2.094e-03, dual_gap_mean:2.023e-03, dual_gap_restart_threshold:2.624e-03, dual_gap_r:7.013e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.598e-02, sigma:6.880e+01
+[ Info: iter:4000 rel_p_res(inf):6.843e-06 rel_d_res(inf):2.090e-02 primal_obj:1.16228e+01 dual_obj:1.23776e+01 rel_pd_gap:5.642e-02 time:646.69 restart_used:1, restart_trigger_mean:1, restart_trigger_ergodic:0, diff_nrm_x_recovered:3.321e-01 diff_nrm_y_recovered:8.770e+00 nrm2_x_recovered:8.284e+00 nrm2_y_recovered:4.881e+02, nrmInf_x_recovered:5.293e+00 nrmInf_y_recovered:1.130e+01 dual_gap_ergodic:2.094e-03, dual_gap_mean:2.023e-03, dual_gap_restart_threshold:2.624e-03, dual_gap_r:7.013e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.680e-02, sigma:7.234e+01
+[ Info: restart due to condition 1
+[ Info: omega:65.61233035503547, x_diff_norm:3.1698705249999466, y_diff_norm:52.10605938258806
+[ Info: iter:5000 rel_p_res(inf):7.511e-06 rel_d_res(inf):1.859e-03 primal_obj:1.16079e+01 dual_obj:1.16201e+01 rel_pd_gap:9.667e-04 time:795.06 restart_used:2, restart_trigger_mean:1, restart_trigger_ergodic:1, diff_nrm_x_recovered:2.859e-01 diff_nrm_y_recovered:8.127e+00 nrm2_x_recovered:8.545e+00 nrm2_y_recovered:4.859e+02, nrmInf_x_recovered:5.479e+00 nrmInf_y_recovered:1.102e+01 dual_gap_ergodic:8.055e-04, dual_gap_mean:1.561e-03, dual_gap_restart_threshold:8.055e-04, dual_gap_r:6.393e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.917e-02, sigma:3.146e+01
+[ Info: iter:6000 rel_p_res(inf):3.800e-06 rel_d_res(inf):9.507e-04 primal_obj:1.15785e+01 dual_obj:1.15849e+01 rel_pd_gap:5.104e-04 time:940.05 restart_used:2, restart_trigger_mean:1, restart_trigger_ergodic:1, diff_nrm_x_recovered:1.065e-02 diff_nrm_y_recovered:6.167e-01 nrm2_x_recovered:8.538e+00 nrm2_y_recovered:4.857e+02, nrmInf_x_recovered:5.475e+00 nrmInf_y_recovered:1.098e+01 dual_gap_ergodic:8.055e-04, dual_gap_mean:1.561e-03, dual_gap_restart_threshold:8.055e-04, dual_gap_r:6.393e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:3.408e-02, sigma:3.676e+01
+[ Info: iter:7000 rel_p_res(inf):2.514e-06 rel_d_res(inf):6.241e-04 primal_obj:1.15682e+01 dual_obj:1.15722e+01 rel_pd_gap:3.161e-04 time:1087.48 restart_used:2, restart_trigger_mean:1, restart_trigger_ergodic:1, diff_nrm_x_recovered:3.699e-03 diff_nrm_y_recovered:2.197e-01 nrm2_x_recovered:8.536e+00 nrm2_y_recovered:4.856e+02, nrmInf_x_recovered:5.473e+00 nrmInf_y_recovered:1.097e+01 dual_gap_ergodic:6.675e-04, dual_gap_mean:1.979e-03, dual_gap_restart_threshold:8.055e-04, dual_gap_r:6.393e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:3.694e-02, sigma:3.984e+01
+[ Info: iter:8000 rel_p_res(inf):1.899e-06 rel_d_res(inf):4.713e-04 primal_obj:1.15632e+01 dual_obj:1.15663e+01 rel_pd_gap:2.460e-04 time:1232.24 restart_used:2, restart_trigger_mean:1, restart_trigger_ergodic:1, diff_nrm_x_recovered:1.861e-03 diff_nrm_y_recovered:1.048e-01 nrm2_x_recovered:8.535e+00 nrm2_y_recovered:4.856e+02, nrmInf_x_recovered:5.472e+00 nrmInf_y_recovered:1.096e+01 dual_gap_ergodic:6.675e-04, dual_gap_mean:1.979e-03, dual_gap_restart_threshold:8.055e-04, dual_gap_r:6.393e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.995e-02, sigma:3.230e+01
+[ Info: restart due to condition 1
+[ Info: omega:32.84097821253834, x_diff_norm:0.37697932181473015, y_diff_norm:14.10087795070097
+[ Info: iter:9000 rel_p_res(inf):2.162e-07 rel_d_res(inf):2.483e-05 primal_obj:1.15497e+01 dual_obj:1.15470e+01 rel_pd_gap:2.184e-04 time:1381.05 restart_used:3, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:4.747e-03 diff_nrm_y_recovered:3.185e-01 nrm2_x_recovered:8.532e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.471e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:2.480e-04, dual_gap_mean:1.071e-03, dual_gap_restart_threshold:2.480e-04, dual_gap_r:1.096e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:3.079e-02, sigma:3.782e+01
+[ Info: iter:10000 rel_p_res(inf):1.082e-07 rel_d_res(inf):1.289e-05 primal_obj:1.15488e+01 dual_obj:1.15474e+01 rel_pd_gap:1.106e-04 time:1525.97 restart_used:3, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:6.470e-04 diff_nrm_y_recovered:3.711e-03 nrm2_x_recovered:8.532e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:2.480e-04, dual_gap_mean:1.071e-03, dual_gap_restart_threshold:2.480e-04, dual_gap_r:1.096e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.902e-02, sigma:3.565e+01
+[ Info: restart due to artificial condition, beta_artificial = 0.223, inner_iter = 2297, iter = 10297 or force_restart
+[ Info: omega:35.048735562434985, x_diff_norm:0.007951463845902444, y_diff_norm:0.49529721333956156
+[ Info: iter:11000 rel_p_res(inf):1.570e-08 rel_d_res(inf):2.484e-05 primal_obj:1.15480e+01 dual_obj:1.15470e+01 rel_pd_gap:8.537e-05 time:1675.08 restart_used:4, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:3.682e-04 diff_nrm_y_recovered:1.114e-02 nrm2_x_recovered:8.532e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:4.307e-04, dual_gap_mean:1.649e-03, dual_gap_restart_threshold:1.459e-03, dual_gap_r:7.992e-03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.052e-02, sigma:4.480e+01
+[ Info: iter:12000 rel_p_res(inf):2.205e-08 rel_d_res(inf):1.039e-05 primal_obj:1.15480e+01 dual_obj:1.15475e+01 rel_pd_gap:3.583e-05 time:1819.95 restart_used:4, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:1.935e-04 diff_nrm_y_recovered:6.207e-03 nrm2_x_recovered:8.531e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:4.307e-04, dual_gap_mean:1.649e-03, dual_gap_restart_threshold:1.459e-03, dual_gap_r:7.992e-03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.277e-02, sigma:4.970e+01
+[ Info: iter:13000 rel_p_res(inf):4.211e-09 rel_d_res(inf):6.612e-06 primal_obj:1.15480e+01 dual_obj:1.15477e+01 rel_pd_gap:2.288e-05 time:1967.78 restart_used:4, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:5.037e-05 diff_nrm_y_recovered:1.629e-03 nrm2_x_recovered:8.531e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:1.018e-01, dual_gap_mean:2.116e-03, dual_gap_restart_threshold:1.459e-03, dual_gap_r:7.992e-03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.125e-02, sigma:4.639e+01
+[ Info: restart due to artificial condition, beta_artificial = 0.223, inner_iter = 2965, iter = 13293 or force_restart
+[ Info: omega:46.724598189858874, x_diff_norm:0.002353655752615007, y_diff_norm:0.03685679627045049
+[ Info: iter:14000 rel_p_res(inf):8.695e-09 rel_d_res(inf):2.281e-06 primal_obj:1.15479e+01 dual_obj:1.15479e+01 rel_pd_gap:1.093e-06 time:2114.18 restart_used:5, restart_trigger_mean:1, restart_trigger_ergodic:2, diff_nrm_x_recovered:1.080e-04 diff_nrm_y_recovered:1.244e-03 nrm2_x_recovered:8.531e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:1.018e-01, dual_gap_mean:2.116e-03, dual_gap_restart_threshold:1.952e-03, dual_gap_r:2.333e-04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:3.931e-02, sigma:2.876e+01
+[ Info: restart due to condition 2
+[ Info: omega:27.049553905164405, x_diff_norm:0.000432230427893144, y_diff_norm:0.008740313688392927
+[ Info: iter:15000 rel_p_res(inf):1.483e-09 rel_d_res(inf):9.224e-08 primal_obj:1.15479e+01 dual_obj:1.15479e+01 rel_pd_gap:1.253e-06 time:2263.22 restart_used:6, restart_trigger_mean:1, restart_trigger_ergodic:3, diff_nrm_x_recovered:2.168e-05 diff_nrm_y_recovered:1.593e-03 nrm2_x_recovered:8.531e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:9.418e-04, dual_gap_mean:2.564e-03, dual_gap_restart_threshold:3.757e-04, dual_gap_r:7.459e-06, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:5.582e-02, sigma:3.053e+01
+[ Info: iter:16000 rel_p_res(inf):7.555e-10 rel_d_res(inf):4.960e-08 primal_obj:1.15479e+01 dual_obj:1.15479e+01 rel_pd_gap:6.406e-07 time:2626.57 restart_used:6, restart_trigger_mean:1, restart_trigger_ergodic:3, diff_nrm_x_recovered:4.550e-06 diff_nrm_y_recovered:1.682e-04 nrm2_x_recovered:8.531e+00 nrm2_y_recovered:4.855e+02, nrmInf_x_recovered:5.470e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:9.418e-04, dual_gap_mean:2.564e-03, dual_gap_restart_threshold:3.757e-04, dual_gap_r:7.459e-06, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:5.041e-02, sigma:2.758e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     16000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           6.1053e-07
+[ Info: l_2_rel_primal_res:           1.3573e-10
+[ Info: l_inf_abs_primal_res:         4.2121e-09
+[ Info: l_inf_rel_primal_res:         7.5554e-10
+[ Info: l_2_abs_dual_res:             8.0197e-07
+[ Info: l_2_rel_dual_res:             4.6454e-13
+[ Info: l_inf_abs_dual_res:           1.4880e-07
+[ Info: l_inf_rel_dual_res:           4.9599e-08
+[ Info: rel_gap:                      6.4056e-07
+[ Info: abs_gap:                      8.0377e-06
+[ Info: primal_obj:                   1.1548e+01
+[ Info: dual_obj:                     1.1548e+01
+[ Info: time:                         2626.5730
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 5.469877512030633
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 10.939756686064126
+[ Info: time for projection: 4.9383299350738525
+[ Info: time for iterative: 2351.6131570339203
+[ Info: time for restart check: 8.643017768859863
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.5433628559112549
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m700000-n7000000-r01 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=16000 objective=11.547933880129712 optimize_wall_seconds=4564.7330758571625
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m700000-n7000000-r01 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m700000-n7000000-r01/attempt_20260730T024047Z/result.toml
+RESOURCE_SNAPSHOT label=solve_cupdcs_table5-m700000-n7000000-r01 utc=2026-07-30T04:18:04Z
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Ti       221Gi       1.0Ti        55Mi       741Gi       1.7Ti
+Swap:             0B          0B          0B
+Filesystem                    Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-lv--0  778G  726G   13G  99% /home
+SOLVE_CASE_COMPLETE solver=cupdcs id=table5-m700000-n7000000-r01 utc=2026-07-30T04:18:04Z
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m700000-n7000000-r04
+GPU_PREFLIGHT 6, GPU-790986fa-7e8a-1825-d49a-9b2ba1c63325, NVIDIA H100 80GB HBM3, 0, 81081, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m700000-n7000000-r04 gpu=6 utc=2026-07-30T04:18:04Z
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+    CondaPkg Resolving changes
+             ~ libstdcxx
+             ~ libstdcxx-ng
+             ~ openssl
+             ~ python
+    CondaPkg Initialising pixi
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ init
+             │ --format pixi
+             └ /home/zhenwei/PDCS_fork/.CondaPkg
+✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+             │ [dependencies]
+             │ openssl = ">=3, <3.6"
+             │ libstdcxx = ">=3.4,<15.0"
+             │ libstdcxx-ng = ">=3.4,<15.0"
+             │ 
+             │     [dependencies.python]
+             │     channel = "conda-forge"
+             │     build = "*cp*"
+             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+             │ 
+             │ [workspace]
+             │ name = ".CondaPkg"
+             │ platforms = ["linux-64"]
+             │ channels = ["conda-forge"]
+             │ channel-priority = "strict"
+             └ description = "automatically generated by CondaPkg.jl"
+    CondaPkg Installing packages
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ install
+             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+✔ The default environment has been installed.
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m700000-n7000000-r04 m=700000 n=7000000 density=0.0001 seed=780990368380045832 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_INSTANCE_READY instance=table5-m700000-n7000000-r04 nnz=490025873 lambda=0.11988256988229479 numerical_digest=6469f5d80919a94e23bd656718ffa4aa2eb60c199fdc633055ce9c7e6d8cdc04 model_digest=2ee8dccfe2d07d01cfbfdf054b495664b35abbf7d8c52025b1e51883264370f0 generation_seconds=100.41684317588806
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 10800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 14700004
+[ Info: constraint number: 15400005
+[ Info: non-zero elements in G: 995451755
+[ Info: Number of box constraints: 14700004
+[ Info: Number of equal constraints: 700003
+[ Info: Number of nonnegative constraints: 14000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 5.0543545577936417e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.6783579783521267e6
+[ Info: initial nrm1h: 2277.7647148349092
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:8.14192227031762
+[ Info: norm Dr_product:22481.89172123843
+[ Info: max Dl_product:29.1036080371424
+[ Info: norm Dl_product:22481.891743455973
+[ Info: after scaling, norm1 c: 281650.3419462832
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 5.939036300176135e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.75 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):7.986e-06 rel_d_res(inf):8.568e-03 primal_obj:1.16145e+01 dual_obj:1.18903e+01 rel_pd_gap:2.140e-02 time:361.72 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:8.325e+00 diff_nrm_y_recovered:4.740e+02 nrm2_x_recovered:8.325e+00 nrm2_y_recovered:4.740e+02, nrmInf_x_recovered:5.323e+00 nrmInf_y_recovered:1.094e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.568e-02, sigma:8.786e+01
+[ Info: iter:2000 rel_p_res(inf):1.964e-07 rel_d_res(inf):1.227e-04 primal_obj:1.15636e+01 dual_obj:1.15678e+01 rel_pd_gap:3.281e-04 time:508.20 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:1.388e-01 diff_nrm_y_recovered:3.660e+00 nrm2_x_recovered:8.448e+00 nrm2_y_recovered:4.730e+02, nrmInf_x_recovered:5.410e+00 nrmInf_y_recovered:1.082e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.466e-02, sigma:8.213e+01
+┌ Info: restart candidate selected
+│   reason = "duality-gap condition 1"
+│   selected_name = "current"
+│   current_merit = 1.2993427314400665e-6
+│   mean_merit = 0.000830661450083333
+└   halpern_merit = 6.297022250993869e-5
+[ Info: restart due to condition 1
+[ Info: omega:74.85772031213823, x_diff_norm:10.676570282965546, y_diff_norm:504.3444476632511
+[ Info: iter:3000 rel_p_res(inf):1.482e-09 rel_d_res(inf):2.056e-07 primal_obj:1.15631e+01 dual_obj:1.15631e+01 rel_pd_gap:5.011e-07 time:658.71 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:2.047e-03 diff_nrm_y_recovered:5.434e-02 nrm2_x_recovered:8.449e+00 nrm2_y_recovered:4.730e+02, nrmInf_x_recovered:5.411e+00 nrmInf_y_recovered:1.082e+01 dual_gap_ergodic:1.299e-06, dual_gap_mean:8.307e-04, dual_gap_restart_threshold:1.299e-06, dual_gap_r:1.085e+04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.757e-02, sigma:6.212e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     3000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           4.9320e-07
+[ Info: l_2_rel_primal_res:           1.0986e-10
+[ Info: l_inf_abs_primal_res:         8.2027e-09
+[ Info: l_inf_rel_primal_res:         1.4824e-09
+[ Info: l_2_abs_dual_res:             6.9782e-06
+[ Info: l_2_rel_dual_res:             4.1578e-12
+[ Info: l_inf_abs_dual_res:           6.1666e-07
+[ Info: l_inf_rel_dual_res:           2.0555e-07
+[ Info: rel_gap:                      5.0110e-07
+[ Info: abs_gap:                      6.2953e-06
+[ Info: primal_obj:                   1.1563e+01
+[ Info: dual_obj:                     1.1563e+01
+[ Info: time:                         658.7124
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 5.411348001030059
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 10.822703098062869
+[ Info: time for projection: 1.1621394157409668
+[ Info: time for iterative: 641.0171008110046
+[ Info: time for restart check: 2.492176055908203
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.4635372161865234
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m700000-n7000000-r04 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=3000 objective=11.563091692395604 optimize_wall_seconds=2660.1201541423798
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m700000-n7000000-r04 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m700000-n7000000-r04/attempt_20260730T024047Z/result.toml
+RESOURCE_SNAPSHOT label=solve_cupdcs_table5-m700000-n7000000-r04 utc=2026-07-30T05:25:30Z
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Ti       209Gi       1.0Ti        55Mi       742Gi       1.8Ti
+Swap:             0B          0B          0B
+Filesystem                    Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-lv--0  778G  726G   13G  99% /home
+SOLVE_CASE_COMPLETE solver=cupdcs id=table5-m700000-n7000000-r04 utc=2026-07-30T05:25:30Z
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m750000-n7500000-r01
+GPU_PREFLIGHT 6, GPU-790986fa-7e8a-1825-d49a-9b2ba1c63325, NVIDIA H100 80GB HBM3, 0, 81081, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m750000-n7500000-r01 gpu=6 utc=2026-07-30T05:25:30Z
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+    CondaPkg Resolving changes
+             ~ libstdcxx
+             ~ libstdcxx-ng
+             ~ openssl
+             ~ python
+    CondaPkg Initialising pixi
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ init
+             │ --format pixi
+             └ /home/zhenwei/PDCS_fork/.CondaPkg
+✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+             │ [dependencies]
+             │ openssl = ">=3, <3.6"
+             │ libstdcxx = ">=3.4,<15.0"
+             │ libstdcxx-ng = ">=3.4,<15.0"
+             │ 
+             │     [dependencies.python]
+             │     channel = "conda-forge"
+             │     build = "*cp*"
+             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+             │ 
+             │ [workspace]
+             │ name = ".CondaPkg"
+             │ platforms = ["linux-64"]
+             │ channels = ["conda-forge"]
+             │ channel-priority = "strict"
+             └ description = "automatically generated by CondaPkg.jl"
+    CondaPkg Installing packages
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ install
+             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+✔ The default environment has been installed.
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m750000-n7500000-r01 m=750000 n=7500000 density=0.0001 seed=3464449634565370456 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_INSTANCE_READY instance=table5-m750000-n7500000-r01 nnz=562488957 lambda=0.12278433941019516 numerical_digest=81f8a3715b3b996fedf98e07b9026bf85220dd6d37ac57cfd64b2da0d896e4d6 model_digest=0ba04e12ba8ea0512c94309d53d0974b647f04079a47ce2950f2c67b8c4d9d55 generation_seconds=115.50371098518372
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 10800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 15750004
+[ Info: constraint number: 16500005
+[ Info: non-zero elements in G: 1141477923
+[ Info: Number of box constraints: 15750004
+[ Info: Number of equal constraints: 750003
+[ Info: Number of nonnegative constraints: 15000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 5.789923449615084e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.8417670911529285e6
+[ Info: initial nrm1h: 2438.4395751134207
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:8.28908052833663
+[ Info: norm Dr_product:24062.259755634615
+[ Info: max Dl_product:30.160383284480098
+[ Info: norm Dl_product:24062.259776392955
+[ Info: after scaling, norm1 c: 298749.93289851095
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 6.28234792731743e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.58 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):9.810e-06 rel_d_res(inf):1.250e-02 primal_obj:1.24307e+01 dual_obj:1.28756e+01 rel_pd_gap:3.207e-02 time:263.98 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:8.743e+00 diff_nrm_y_recovered:5.033e+02 nrm2_x_recovered:8.743e+00 nrm2_y_recovered:5.033e+02, nrmInf_x_recovered:5.621e+00 nrmInf_y_recovered:1.169e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.321e-02, sigma:7.773e+01
+[ Info: iter:2000 rel_p_res(inf):2.187e-07 rel_d_res(inf):2.738e-04 primal_obj:1.23684e+01 dual_obj:1.23782e+01 rel_pd_gap:7.316e-04 time:679.05 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:2.141e-01 diff_nrm_y_recovered:5.527e+00 nrm2_x_recovered:8.935e+00 nrm2_y_recovered:5.019e+02, nrmInf_x_recovered:5.758e+00 nrmInf_y_recovered:1.153e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.296e-02, sigma:7.622e+01
+┌ Info: restart candidate selected
+│   reason = "duality-gap condition 1"
+│   selected_name = "current"
+│   current_merit = 1.8955145492483848e-6
+│   mean_merit = 0.0006891139527042156
+└   halpern_merit = 9.36372451541155e-5
+[ Info: restart due to condition 1
+[ Info: omega:76.69761556598515, x_diff_norm:11.271907798740187, y_diff_norm:535.5568312789871
+[ Info: iter:3000 rel_p_res(inf):2.963e-09 rel_d_res(inf):9.016e-07 primal_obj:1.23671e+01 dual_obj:1.23671e+01 rel_pd_gap:1.977e-06 time:854.26 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:4.780e-03 diff_nrm_y_recovered:1.277e-01 nrm2_x_recovered:8.939e+00 nrm2_y_recovered:5.019e+02, nrmInf_x_recovered:5.761e+00 nrmInf_y_recovered:1.152e+01 dual_gap_ergodic:1.896e-06, dual_gap_mean:6.891e-04, dual_gap_restart_threshold:1.896e-06, dual_gap_r:1.354e+04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.628e-02, sigma:5.932e+01
+[ Info: iter:4000 rel_p_res(inf):4.656e-11 rel_d_res(inf):3.997e-09 primal_obj:1.23671e+01 dual_obj:1.23671e+01 rel_pd_gap:1.014e-08 time:1022.66 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:1.493e-05 diff_nrm_y_recovered:5.214e-04 nrm2_x_recovered:8.939e+00 nrm2_y_recovered:5.019e+02, nrmInf_x_recovered:5.761e+00 nrmInf_y_recovered:1.152e+01 dual_gap_ergodic:1.896e-06, dual_gap_mean:6.891e-04, dual_gap_restart_threshold:1.896e-06, dual_gap_r:1.354e+04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.024e-02, sigma:7.375e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     4000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           1.1180e-08
+[ Info: l_2_rel_primal_res:           2.3291e-12
+[ Info: l_inf_abs_primal_res:         2.6913e-10
+[ Info: l_inf_rel_primal_res:         4.6556e-11
+[ Info: l_2_abs_dual_res:             1.7659e-07
+[ Info: l_2_rel_dual_res:             9.5881e-14
+[ Info: l_inf_abs_dual_res:           1.1990e-08
+[ Info: l_inf_rel_dual_res:           3.9968e-09
+[ Info: rel_gap:                      1.0144e-08
+[ Info: abs_gap:                      1.3559e-07
+[ Info: primal_obj:                   1.2367e+01
+[ Info: dual_obj:                     1.2367e+01
+[ Info: time:                         1022.6629
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 5.7609860006039355
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 11.521972148080515
+[ Info: time for projection: 1.2842926979064941
+[ Info: time for iterative: 913.7230000495911
+[ Info: time for restart check: 2.875185012817383
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.488142967224121
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m750000-n7500000-r01 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=4000 objective=12.367106218557923 optimize_wall_seconds=3143.0090248584747
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m750000-n7500000-r01 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m750000-n7500000-r01/attempt_20260730T024047Z/result.toml
+RESOURCE_SNAPSHOT label=solve_cupdcs_table5-m750000-n7500000-r01 utc=2026-07-30T06:42:12Z
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Ti       297Gi       974Gi        34Mi       743Gi       1.7Ti
+Swap:             0B          0B          0B
+Filesystem                    Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-lv--0  778G  727G   12G  99% /home
+SOLVE_CASE_COMPLETE solver=cupdcs id=table5-m750000-n7500000-r01 utc=2026-07-30T06:42:12Z
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m750000-n7500000-r03
+GPU_PREFLIGHT 6, GPU-790986fa-7e8a-1825-d49a-9b2ba1c63325, NVIDIA H100 80GB HBM3, 0, 81081, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m750000-n7500000-r03 gpu=6 utc=2026-07-30T06:42:12Z
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+    CondaPkg Resolving changes
+             ~ libstdcxx
+             ~ libstdcxx-ng
+             ~ openssl
+             ~ python
+    CondaPkg Initialising pixi
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ init
+             │ --format pixi
+             └ /home/zhenwei/PDCS_fork/.CondaPkg
+✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+             │ [dependencies]
+             │ openssl = ">=3, <3.6"
+             │ libstdcxx = ">=3.4,<15.0"
+             │ libstdcxx-ng = ">=3.4,<15.0"
+             │ 
+             │     [dependencies.python]
+             │     channel = "conda-forge"
+             │     build = "*cp*"
+             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+             │ 
+             │ [workspace]
+             │ name = ".CondaPkg"
+             │ platforms = ["linux-64"]
+             │ channels = ["conda-forge"]
+             │ channel-priority = "strict"
+             └ description = "automatically generated by CondaPkg.jl"
+    CondaPkg Installing packages
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ install
+             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+✔ The default environment has been installed.
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m750000-n7500000-r03 m=750000 n=7500000 density=0.0001 seed=7306719367855031537 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_INSTANCE_READY instance=table5-m750000-n7500000-r03 nnz=562478594 lambda=0.12566164043565964 numerical_digest=4ae5c02277e579d329d3ffeff6b849f443a3e6919819ee4d387429c1d80f0ff5 model_digest=189c6c5a3100903dfe6ad640af1bd95ed59a6c4d0cb413cd9f3ec5683eff8305 generation_seconds=114.59318804740906
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 10800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 15750004
+[ Info: constraint number: 16500005
+[ Info: non-zero elements in G: 1141457197
+[ Info: Number of box constraints: 15750004
+[ Info: Number of equal constraints: 750003
+[ Info: Number of nonnegative constraints: 15000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 5.789680960310314e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.8849266065348908e6
+[ Info: initial nrm1h: 2441.6094937187304
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:8.469874153821602
+[ Info: norm Dr_product:24061.75587144788
+[ Info: max Dl_product:30.04085243887461
+[ Info: norm Dl_product:24061.75589220664
+[ Info: after scaling, norm1 c: 305754.6172565155
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 6.2823883806693135e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.49 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):1.012e-05 rel_d_res(inf):1.263e-02 primal_obj:1.24674e+01 dual_obj:1.29178e+01 rel_pd_gap:3.236e-02 time:253.66 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:8.863e+00 diff_nrm_y_recovered:5.143e+02 nrm2_x_recovered:8.863e+00 nrm2_y_recovered:5.143e+02, nrmInf_x_recovered:5.707e+00 nrmInf_y_recovered:1.188e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.229e-02, sigma:7.570e+01
+[ Info: iter:2000 rel_p_res(inf):3.552e-07 rel_d_res(inf):2.176e-04 primal_obj:1.23995e+01 dual_obj:1.24073e+01 rel_pd_gap:5.831e-04 time:672.43 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:2.029e-01 diff_nrm_y_recovered:5.740e+00 nrm2_x_recovered:9.042e+00 nrm2_y_recovered:5.128e+02, nrmInf_x_recovered:5.835e+00 nrmInf_y_recovered:1.168e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.447e-02, sigma:8.918e+01
+┌ Info: restart candidate selected
+│   reason = "duality-gap condition 1"
+│   selected_name = "current"
+│   current_merit = 0.00011997601891654348
+│   mean_merit = 0.0008891326358124189
+└   halpern_merit = 0.0001242716990482131
+[ Info: restart due to condition 1
+[ Info: omega:78.4938015509333, x_diff_norm:11.402318428390405, y_diff_norm:546.2071337768718
+[ Info: iter:3000 rel_p_res(inf):2.775e-09 rel_d_res(inf):3.623e-07 primal_obj:1.23984e+01 dual_obj:1.23984e+01 rel_pd_gap:6.218e-07 time:847.81 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:3.560e-03 diff_nrm_y_recovered:1.035e-01 nrm2_x_recovered:9.045e+00 nrm2_y_recovered:5.128e+02, nrmInf_x_recovered:5.837e+00 nrmInf_y_recovered:1.167e+01 dual_gap_ergodic:1.200e-04, dual_gap_mean:8.891e-04, dual_gap_restart_threshold:1.200e-04, dual_gap_r:1.230e+04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.701e-02, sigma:6.398e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     3000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           9.8731e-07
+[ Info: l_2_rel_primal_res:           2.0488e-10
+[ Info: l_inf_abs_primal_res:         1.6193e-08
+[ Info: l_inf_rel_primal_res:         2.7754e-09
+[ Info: l_2_abs_dual_res:             1.2101e-05
+[ Info: l_2_rel_dual_res:             6.4201e-12
+[ Info: l_inf_abs_dual_res:           1.0870e-06
+[ Info: l_inf_rel_dual_res:           3.6233e-07
+[ Info: rel_gap:                      6.2178e-07
+[ Info: abs_gap:                      8.3309e-06
+[ Info: primal_obj:                   1.2398e+01
+[ Info: dual_obj:                     1.2398e+01
+[ Info: time:                         847.8126
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 5.836997964528604
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 11.674009462678196
+[ Info: time for projection: 1.1345834732055664
+[ Info: time for iterative: 750.4484360218048
+[ Info: time for restart check: 2.8112730979919434
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.5218300819396973
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m750000-n7500000-r03 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=3000 objective=12.398378610487708 optimize_wall_seconds=3062.2440440654755
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m750000-n7500000-r03 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m750000-n7500000-r03/attempt_20260730T024047Z/result.toml
+RESOURCE_SNAPSHOT label=solve_cupdcs_table5-m750000-n7500000-r03 utc=2026-07-30T07:57:43Z
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Ti       320Gi       950Gi        34Mi       743Gi       1.6Ti
+Swap:             0B          0B          0B
+Filesystem                    Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-lv--0  778G  727G   12G  99% /home
+SOLVE_CASE_COMPLETE solver=cupdcs id=table5-m750000-n7500000-r03 utc=2026-07-30T07:57:43Z
+SOLVE_RERUN_TIME_LIMIT solver=cupdcs id=table5-m750000-n7500000-r05
+GPU_PREFLIGHT 6, GPU-790986fa-7e8a-1825-d49a-9b2ba1c63325, NVIDIA H100 80GB HBM3, 0, 81081, 0
+SOLVE_CASE_START solver=cupdcs id=table5-m750000-n7500000-r05 gpu=6 utc=2026-07-30T07:57:43Z
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+    CondaPkg Resolving changes
+             ~ libstdcxx
+             ~ libstdcxx-ng
+             ~ openssl
+             ~ python
+    CondaPkg Initialising pixi
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ init
+             │ --format pixi
+             └ /home/zhenwei/PDCS_fork/.CondaPkg
+✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+             │ [dependencies]
+             │ openssl = ">=3, <3.6"
+             │ libstdcxx = ">=3.4,<15.0"
+             │ libstdcxx-ng = ">=3.4,<15.0"
+             │ 
+             │     [dependencies.python]
+             │     channel = "conda-forge"
+             │     build = "*cp*"
+             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+             │ 
+             │ [workspace]
+             │ name = ".CondaPkg"
+             │ platforms = ["linux-64"]
+             │ channels = ["conda-forge"]
+             │ channel-priority = "strict"
+             └ description = "automatically generated by CondaPkg.jl"
+    CondaPkg Installing packages
+             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+             │ install
+             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+✔ The default environment has been installed.
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m750000-n7500000-r05 m=750000 n=7500000 density=0.0001 seed=7133432016813647455 tolerance=1.0e-6 time_limit=10800.0
+TABLE5_INSTANCE_READY instance=table5-m750000-n7500000-r05 nnz=562500738 lambda=0.12778585685875246 numerical_digest=6d70e25ae29564e347b6b3c0f3a1ed1007a5a9a2997d79917a8eb3eaf7005fc0 model_digest=36fe2cd5879f9798bfd28053c5d779b9f29bbf33f84388eb53b4860d893011bd generation_seconds=112.03862500190735
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 10800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 15750004
+[ Info: constraint number: 16500005
+[ Info: non-zero elements in G: 1141501485
+[ Info: Number of box constraints: 15750004
+[ Info: Number of equal constraints: 750003
+[ Info: Number of nonnegative constraints: 15000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 5.790083177325375e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.9167898528812854e6
+[ Info: initial nrm1h: 2440.308472494931
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:8.235466834420272
+[ Info: norm Dr_product:24062.59165839504
+[ Info: max Dl_product:30.181936639283496
+[ Info: norm Dl_product:24062.591679153084
+[ Info: after scaling, norm1 c: 310912.98920242133
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 6.282308820450162e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.71 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):9.556e-06 rel_d_res(inf):1.249e-02 primal_obj:1.24708e+01 dual_obj:1.29189e+01 rel_pd_gap:3.219e-02 time:269.41 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:8.929e+00 diff_nrm_y_recovered:5.223e+02 nrm2_x_recovered:8.929e+00 nrm2_y_recovered:5.223e+02, nrmInf_x_recovered:5.754e+00 nrmInf_y_recovered:1.197e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.167e-02, sigma:7.432e+01
+[ Info: iter:2000 rel_p_res(inf):1.580e-07 rel_d_res(inf):1.725e-04 primal_obj:1.24028e+01 dual_obj:1.24091e+01 rel_pd_gap:4.657e-04 time:685.31 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:1.902e-01 diff_nrm_y_recovered:5.868e+00 nrm2_x_recovered:9.095e+00 nrm2_y_recovered:5.208e+02, nrmInf_x_recovered:5.873e+00 nrmInf_y_recovered:1.175e+01 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.181e-02, sigma:7.521e+01
+┌ Info: restart candidate selected
+│   reason = "duality-gap condition 1"
+│   selected_name = "current"
+│   current_merit = 1.8043434216927481e-6
+│   mean_merit = 0.0006239950416048487
+└   halpern_merit = 8.237142462020909e-5
+[ Info: restart due to condition 1
+[ Info: omega:79.81781675665118, x_diff_norm:11.4666564635094, y_diff_norm:553.9126348614793
+[ Info: iter:3000 rel_p_res(inf):2.029e-09 rel_d_res(inf):1.366e-07 primal_obj:1.24020e+01 dual_obj:1.24020e+01 rel_pd_gap:4.418e-08 time:860.52 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:2.697e-03 diff_nrm_y_recovered:8.556e-02 nrm2_x_recovered:9.098e+00 nrm2_y_recovered:5.208e+02, nrmInf_x_recovered:5.874e+00 nrmInf_y_recovered:1.175e+01 dual_gap_ergodic:1.804e-06, dual_gap_mean:6.240e-04, dual_gap_restart_threshold:1.804e-06, dual_gap_r:1.519e+04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.660e-02, sigma:6.400e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     3000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           7.9283e-07
+[ Info: l_2_rel_primal_res:           1.6435e-10
+[ Info: l_inf_abs_primal_res:         1.1892e-08
+[ Info: l_inf_rel_primal_res:         2.0290e-09
+[ Info: l_2_abs_dual_res:             1.1091e-05
+[ Info: l_2_rel_dual_res:             5.7862e-12
+[ Info: l_inf_abs_dual_res:           4.0971e-07
+[ Info: l_inf_rel_dual_res:           1.3657e-07
+[ Info: rel_gap:                      4.4179e-08
+[ Info: abs_gap:                      5.9208e-07
+[ Info: primal_obj:                   1.2402e+01
+[ Info: dual_obj:                     1.2402e+01
+[ Info: time:                         860.5161
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 5.874362759288786
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 11.748730676926332
+[ Info: time for projection: 1.0843784809112549
+[ Info: time for iterative: 502.52575421333313
+[ Info: time for restart check: 2.8482470512390137
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.5922601222991943
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m750000-n7500000-r05 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=3000 objective=12.401955688639301 optimize_wall_seconds=3057.2495200634003
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m750000-n7500000-r05 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m750000-n7500000-r05/attempt_20260730T024047Z/result.toml
+RESOURCE_SNAPSHOT label=solve_cupdcs_table5-m750000-n7500000-r05 utc=2026-07-30T09:13:32Z
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Ti        65Gi       1.2Ti       6.0Mi       744Gi       1.9Ti
+Swap:             0B          0B          0B
+Filesystem                    Size  Used Avail Use% Mounted on
+/dev/mapper/ubuntu--vg-lv--0  778G  727G   12G  99% /home
+SOLVE_CASE_COMPLETE solver=cupdcs id=table5-m750000-n7500000-r05 utc=2026-07-30T09:13:32Z
+TABLE5_REPORT_WRITTEN markdown=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_report.md csv=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_report.csv solver_csv=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_report.csv recorded=25/25 successful_cases=25 failed_cases=0 skipped_cases=0 pending_cases=0
+TABLE5_SOLVE_PHASE_COMPLETE cases=5 storage=no_cbf utc=2026-07-30T09:13:32Z
+TABLE5_DRIVER_FINISH command=solve status=0 log=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_logs/driver_20260730T024047Z.log utc=2026-07-30T09:13:32Z

@@ -153,10 +153,18 @@ def solver_result(
     done = case_dir / "DONE"
     if done.is_file():
         attempt_name = done.read_text(encoding="utf-8").strip()
+        if attempt_name in {
+            "EARLY_STOP_PENDING",
+            "HALF_HOUR_PENDING",
+            "IN_PROGRESS_GPU0",
+        }:
+            return "pending", None, str(done)
         result_path = case_dir / attempt_name / "result.toml"
         if not result_path.is_file():
             return "failed", None, str(result_path)
         result = read_toml(result_path)
+        if result.get("run_status") == "skipped":
+            return "skipped", result, str(result_path)
         if result.get("run_status") != "completed":
             return "failed", result, str(result_path)
         return "completed", result, str(result_path)
@@ -206,13 +214,16 @@ def collect_rows(
                 solver,
                 instance["id"],
             )
-            if execution_status == "completed" and result is not None:
+            if execution_status in {"completed", "skipped"} and result is not None:
                 termination_status = str(result.get("termination_status", ""))
-                status = (
-                    "success"
-                    if termination_status in SUCCESSFUL_TERMINATIONS
-                    else "failed"
-                )
+                if execution_status == "skipped":
+                    status = "skipped"
+                else:
+                    status = (
+                        "success"
+                        if termination_status in SUCCESSFUL_TERMINATIONS
+                        else "failed"
+                    )
             else:
                 termination_status = ""
                 status = execution_status
@@ -239,6 +250,7 @@ def collect_rows(
                             "optimize_wall_seconds",
                             "",
                         ),
+                        "reason": result.get("reason", result.get("error", "")),
                         "result": result_path,
                     }
                 )
@@ -247,6 +259,10 @@ def collect_rows(
                 completed_results.append(result)
                 solver_labels.append(
                     f"{solver}:{termination_status}({status})"
+                )
+            elif execution_status == "skipped" and result is not None:
+                solver_labels.append(
+                    f"{solver}:{termination_status}(skipped)"
                 )
             else:
                 solver_labels.append(f"{solver}:{status}")
@@ -266,6 +282,8 @@ def collect_rows(
             case_status = "failed"
         elif statuses and all(status == "success" for status in statuses):
             case_status = "success"
+        elif "skipped" in statuses:
+            case_status = "skipped"
         else:
             case_status = "pending"
         case_rows.append(
@@ -297,11 +315,18 @@ def command_validate_runs(arguments: argparse.Namespace) -> int:
     )
     completed = sum(row["status"] == "success" for row in rows)
     failed = sum(row["status"] == "failed" for row in rows)
-    if arguments.require_complete and completed != 25:
-        fail(f"expected 25 successful cases, found {completed}; failed={failed}")
+    skipped = sum(row["status"] == "skipped" for row in rows)
+    pending = len(rows) - completed - failed - skipped
+    recorded = len(rows) - pending
+    if arguments.require_complete and pending != 0:
+        fail(
+            f"expected 25 recorded case outcomes, found {recorded}; "
+            f"successful={completed} failed={failed} skipped={skipped} "
+            f"pending={pending}"
+        )
     print(
-        f"TABLE5_RUNS_VALID completed={completed} failed={failed} "
-        f"pending={25 - completed - failed}"
+        f"TABLE5_RUNS_VALID recorded={recorded}/25 successful={completed} "
+        f"failed={failed} skipped={skipped} pending={pending}"
     )
     return 0
 
@@ -332,6 +357,7 @@ def command_report(arguments: argparse.Namespace) -> int:
             "generation_seconds",
             "setup_seconds",
             "optimize_wall_seconds",
+            "reason",
             "result",
         ]
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
@@ -340,7 +366,14 @@ def command_report(arguments: argparse.Namespace) -> int:
 
     success_count = sum(row["status"] == "success" for row in rows)
     failed_count = sum(row["status"] == "failed" for row in rows)
+    skipped_count = sum(row["status"] == "skipped" for row in rows)
     pending_count = sum(row["status"] == "pending" for row in rows)
+    recorded_count = len(rows) - pending_count
+    expected_solver_records = len(rows) * len(solvers)
+    recorded_solver_records = len(solver_rows)
+    solver_outcomes = Counter(
+        (row["solver"], row["outcome"]) for row in solver_rows
+    )
     dimension_success = Counter(
         (int(row["m"]), int(row["n"]))
         for row in rows
@@ -367,14 +400,33 @@ def command_report(arguments: argparse.Namespace) -> int:
             "",
             "## Summary",
             "",
-            f"- Successful cases: {success_count}/25",
+            f"- Recorded case outcomes: {recorded_count}/25",
+            (
+                "- Recorded solver-case results: "
+                f"{recorded_solver_records}/{expected_solver_records}"
+            ),
+            f"- Cases where every requested solver succeeded: {success_count}/25",
             f"- Failed cases: {failed_count}",
+            f"- Skipped cases: {skipped_count}",
             f"- Pending cases: {pending_count}",
         ]
     )
+    for solver in solvers:
+        lines.append(
+            f"- {solver}: "
+            f"{solver_outcomes[(solver, 'success')]} successful, "
+            f"{solver_outcomes[(solver, 'failed')]} failed, "
+            f"{solver_outcomes[(solver, 'skipped')]} skipped"
+        )
     for m, n, _density in EXPECTED_DIMENSIONS:
-        lines.append(f"- m={m}, n={n}: {dimension_success[(m, n)]}/5 successful")
-    lines.append(f"- All 25 complete: {'yes' if success_count == 25 else 'no'}")
+        lines.append(
+            f"- m={m}, n={n}: "
+            f"{dimension_success[(m, n)]}/5 all-solver successes"
+        )
+    lines.append(
+        f"- All requested results recorded: "
+        f"{'yes' if pending_count == 0 and recorded_solver_records == expected_solver_records else 'no'}"
+    )
     failed_rows = [row for row in rows if row["status"] == "failed"]
     if failed_rows:
         first = failed_rows[0]
@@ -388,8 +440,10 @@ def command_report(arguments: argparse.Namespace) -> int:
     arguments.markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(
         f"TABLE5_REPORT_WRITTEN markdown={arguments.markdown} csv={arguments.csv} "
-        f"solver_csv={arguments.solver_csv} completed={success_count} "
-        f"failed={failed_count} pending={pending_count}"
+        f"solver_csv={arguments.solver_csv} "
+        f"recorded={recorded_solver_records}/{expected_solver_records} "
+        f"successful_cases={success_count} failed_cases={failed_count} "
+        f"skipped_cases={skipped_count} pending_cases={pending_count}"
     )
     return 0
 
