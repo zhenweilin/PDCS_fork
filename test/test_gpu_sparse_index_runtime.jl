@@ -30,6 +30,7 @@ using CUDA
             @test Array(col_max) == [5.0, 3.0, 4.0]
 
             row_idx = similar(d_G.colVal, nnz(d_G))
+            @test eltype(row_idx) === Ti
             PDCS_GPU.get_row_index(d_G, row_idx)
             @test Array(row_idx) == Ti[1, 1, 2, 3, 3]
         end
