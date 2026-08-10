@@ -446,6 +446,16 @@ end
 
 @inline restart_merit(value::Real) = isfinite(value) ? Float64(value) : Inf
 
+"""Return whether either side of the problem contains an EXP/dual-EXP cone."""
+@inline function contains_exponential_cones(sol)
+    primal = sol.x.primal_sol
+    dual = sol.y.dual_sol
+    return !isempty(primal.exp_cone_indices_start) ||
+           !isempty(primal.dual_exp_cone_indices_start) ||
+           !isempty(dual.exp_cone_indices_start) ||
+           !isempty(dual.dual_exp_cone_indices_start)
+end
+
 """
 Return the restart candidate index using the legacy tie policy: when enabled,
 the running mean wins a tie with the current point, while Halpern must be
@@ -460,7 +470,12 @@ function restart_candidate_index(
     halpern_merit::Real,
     use_halpern::Bool,
     use_mean::Bool = true,
+    force_mean::Bool = false,
 )
+    # For EXP problems, paper-era artificial/force restarts kept the running
+    # mean as the next epoch's starting point. This override is intentionally
+    # independent of the candidates enabled for ordinary merit-based restarts.
+    force_mean && return 2
     current = restart_merit(current_merit)
     if use_mean
         selected = 2
@@ -492,6 +507,7 @@ function install_restart_candidate!(
     merits,
     use_halpern::Bool;
     reason::AbstractString,
+    force_mean::Bool = false,
 )
     halpern_enabled =
         use_halpern && halpern_primal !== nothing && halpern_dual !== nothing
@@ -501,6 +517,7 @@ function install_restart_candidate!(
         merits[3],
         halpern_enabled,
         sol.params.use_mean_restart_candidate,
+        force_mean,
     )
     if selected == 1
         sol.info.restart_trigger_ergodic += 1
@@ -516,7 +533,11 @@ function install_restart_candidate!(
         sol.info.restart_trigger_mean += 1
         selected_name = "mean"
     end
-    @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] mean_enabled=sol.params.use_mean_restart_candidate halpern_merit=(halpern_enabled ? merits[3] : Inf)
+    if force_mean
+        @info "restart candidate selected" reason selected_name forced_mean=true
+    else
+        @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] mean_enabled=sol.params.use_mean_restart_candidate halpern_merit=(halpern_enabled ? merits[3] : Inf)
+    end
     return selected
 end
 
@@ -816,51 +837,63 @@ function restart_condition_check_diagonal!(;
     if inner_iter >= sol.info.iter * sol.params.beta_artificial && sol.info.iter > 100000
         @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter)")
         sol.info.restart_used = sol.info.restart_used + 1
-        merits = restart_duality_gap_flag ?
-            sol.info.normalized_duality_gap :
-            sol.info.kkt_error
-        if use_halpern && restart_duality_gap_flag
-            solver.data.diagonal_scale.Dr_temp.x .=
-                sol.x.primal_sol.x .- primal_sol_0.x
-            solver.data.diagonal_scale.Dl_temp.y .=
-                sol.y.dual_sol.y .- dual_sol_0.y
-            radius = Mnorm(
-                solver = solver,
-                x = solver.data.diagonal_scale.Dr_temp.x,
-                y = solver.data.diagonal_scale.Dl_temp.y,
-                tau = sol.params.tau,
-                sigma = sol.params.sigma,
-                AxTemp = dual_sol_temp.dual_sol_mean,
-            )
-            merits[3] = binary_search_duality_gap_diagonal!(
-                solver = solver,
-                r = radius,
-                primal = halpern_primal,
-                dual = halpern_dual,
-                slack = sol.y.slack,
-                dual_sol_temp = dual_sol_temp,
-                tau = sol.params.tau,
-                sigma = sol.params.sigma,
-            )
-        elseif use_halpern
-            evaluate_halpern_restart_kkt_candidate!(
+        if contains_exponential_cones(sol)
+            install_restart_candidate!(
                 sol,
-                solver,
-                dual_sol_temp,
+                nothing,
+                nothing,
+                sol.info.kkt_error,
+                false;
+                reason = "artificial condition (EXP paper-era mean)",
+                force_mean = true,
+            )
+        else
+            merits = restart_duality_gap_flag ?
+                sol.info.normalized_duality_gap :
+                sol.info.kkt_error
+            if use_halpern && restart_duality_gap_flag
+                solver.data.diagonal_scale.Dr_temp.x .=
+                    sol.x.primal_sol.x .- primal_sol_0.x
+                solver.data.diagonal_scale.Dl_temp.y .=
+                    sol.y.dual_sol.y .- dual_sol_0.y
+                radius = Mnorm(
+                    solver = solver,
+                    x = solver.data.diagonal_scale.Dr_temp.x,
+                    y = solver.data.diagonal_scale.Dl_temp.y,
+                    tau = sol.params.tau,
+                    sigma = sol.params.sigma,
+                    AxTemp = dual_sol_temp.dual_sol_mean,
+                )
+                merits[3] = binary_search_duality_gap_diagonal!(
+                    solver = solver,
+                    r = radius,
+                    primal = halpern_primal,
+                    dual = halpern_dual,
+                    slack = sol.y.slack,
+                    dual_sol_temp = dual_sol_temp,
+                    tau = sol.params.tau,
+                    sigma = sol.params.sigma,
+                )
+            elseif use_halpern
+                evaluate_halpern_restart_kkt_candidate!(
+                    sol,
+                    solver,
+                    dual_sol_temp,
+                    halpern_primal,
+                    halpern_dual,
+                    halpern_converge_info,
+                    use_halpern,
+                )
+            end
+            install_restart_candidate!(
+                sol,
                 halpern_primal,
                 halpern_dual,
-                halpern_converge_info,
-                use_halpern,
+                merits,
+                use_halpern;
+                reason = "artificial condition",
             )
         end
-        install_restart_candidate!(
-            sol,
-            halpern_primal,
-            halpern_dual,
-            merits,
-            use_halpern;
-            reason = "artificial condition",
-        )
         return true
     end # end if inner_iter
     return false
@@ -1273,6 +1306,7 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 eta,
                 sol.params.use_reflection,
                 sol.params.use_halpern,
+                sol.params.use_inline_halpern,
             )
             eta_cum += eta
             if sol.params.use_restart &&
@@ -1280,23 +1314,35 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 (force_restart && inner_iter > 100))
                 @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter) or force_restart")
                 sol.info.restart_used = sol.info.restart_used + 1
-                merits = evaluate_restart_kkt_candidates!(
-                    sol,
-                    solver,
-                    dual_sol_temp,
-                    halpern_primal,
-                    halpern_dual,
-                    halpern_converge_info,
-                    sol.params.use_halpern,
-                )
-                install_restart_candidate!(
-                    sol,
-                    halpern_primal,
-                    halpern_dual,
-                    merits,
-                    sol.params.use_halpern;
-                    reason = "force/artificial condition",
-                )
+                if contains_exponential_cones(sol)
+                    install_restart_candidate!(
+                        sol,
+                        nothing,
+                        nothing,
+                        sol.info.kkt_error,
+                        false;
+                        reason = "force/artificial condition (EXP paper-era mean)",
+                        force_mean = true,
+                    )
+                else
+                    merits = evaluate_restart_kkt_candidates!(
+                        sol,
+                        solver,
+                        dual_sol_temp,
+                        halpern_primal,
+                        halpern_dual,
+                        halpern_converge_info,
+                        sol.params.use_halpern,
+                    )
+                    install_restart_candidate!(
+                        sol,
+                        halpern_primal,
+                        halpern_dual,
+                        merits,
+                        sol.params.use_halpern;
+                        reason = "force/artificial condition",
+                    )
+                end
                 break
             end # end if inner_iter
             if sol.params.use_restart &&

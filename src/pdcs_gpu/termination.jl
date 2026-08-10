@@ -50,6 +50,18 @@ mutable struct TerminationCriteria
     end # function
 end # module
 
+function saturated_iteration_limit(
+    max_outer_iter::Integer,
+    max_inner_iter::Integer,
+)::Int
+    outer = Int(max_outer_iter)
+    inner = Int(max_inner_iter)
+    if outer > 0 && inner > 0 && outer > typemax(Int) ÷ inner
+        return typemax(Int)
+    end
+    return outer * inner
+end
+
 function validate_termination_criteria(criteria::TerminationCriteria)
     if criteria.eps_primal_infeasible < 0
         error("eps_primal_infeasible must be nonnegative")
@@ -240,7 +252,13 @@ function check_termination_criteria(;
             return :dual_infeasible_high_acc
         end
     end
-    if info.iter >= params.max_outer_iter * params.max_inner_iter
+    # Saturate instead of overflowing when an experiment deliberately removes
+    # the practical iteration cap by setting both limits to typemax(Int).
+    total_iteration_limit = saturated_iteration_limit(
+        params.max_outer_iter,
+        params.max_inner_iter,
+    )
+    if info.iter >= total_iteration_limit
         info.exit_status = :max_iter
         info.exit_code = 1
         for c_info in info.convergeInfo

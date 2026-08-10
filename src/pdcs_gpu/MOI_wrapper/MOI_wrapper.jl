@@ -687,6 +687,16 @@ function MOI.optimize!(
             println("use_halpern is not set, using default value: false.")
         end
     end
+    if !haskey(options, :use_inline_halpern)
+        options[:use_inline_halpern] = false
+        if options[:verbose] > 0
+            println("use_inline_halpern is not set, using default value: false.")
+        end
+    end
+    options[:use_halpern] && options[:use_inline_halpern] && throw(ArgumentError(
+        "use_halpern (restart candidate) and use_inline_halpern " *
+        "(legacy inline trajectory) cannot both be true",
+    ))
     if !haskey(options, :use_mean_restart_candidate)
         options[:use_mean_restart_candidate] = true
         if options[:verbose] > 0
@@ -766,6 +776,7 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            use_inline_halpern = options[:use_inline_halpern],
             use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],
@@ -834,6 +845,7 @@ function MOI.optimize!(
             use_adaptive_step = options[:use_adaptive_step],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
+            use_inline_halpern = options[:use_inline_halpern],
             use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],

@@ -683,6 +683,7 @@ end
         eta,
         use_reflection,
         use_halpern,
+        use_inline_halpern,
     )
 
 Updates the reflected main trajectory, its running mean, and an auxiliary
@@ -710,8 +711,10 @@ Arguments:
 - eta_cum: Cumulative extrapolation coefficient
 - eta: Current extrapolation coefficient
 - use_reflection: Whether to apply the reflection/extrapolation term
-- use_halpern: Whether to form the auxiliary Halpern candidate. The main
-  trajectory is always the reflected point.
+- use_halpern: Whether to form the auxiliary restart-only Halpern candidate.
+- use_inline_halpern: Whether to apply the legacy inline update to the main
+  trajectory. This reproduces the archived formula that mixes the reflected
+  point with the unreflected PDHG point from the same iteration.
 """
 function reflection_update(
     primal_sol::T,
@@ -732,6 +735,7 @@ function reflection_update(
     eta::Float64,
     use_reflection::Bool,
     use_halpern::Bool,
+    use_inline_halpern::Bool,
 ) where T<:CuArray
     # Calculate blocks based on maximum dimension (primal or dual)
     nBlock = cld(max(primal_n, dual_n), ThreadPerBlock)
@@ -757,6 +761,7 @@ function reflection_update(
                 Float64,
                 Int32,
                 Int32,
+                Int32,
             ),
             primal_sol,
             primal_sol_lag,
@@ -775,7 +780,8 @@ function reflection_update(
             eta_cum,
             eta,
             Int32(use_reflection),
-            Int32(use_halpern);
+            Int32(use_halpern),
+            Int32(use_inline_halpern);
             blocks = nBlock,
             threads = ThreadPerBlock,
         )

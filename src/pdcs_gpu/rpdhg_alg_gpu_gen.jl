@@ -416,6 +416,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
+    use_inline_halpern::Bool = false,
     use_mean_restart_candidate::Bool = true,
     primal_sol::CuArray{rpdhg_float} = CuArray(zeros(n)),
     dual_sol::CuArray{rpdhg_float} = CuArray(zeros(m)),
@@ -445,6 +446,10 @@ dGType<:Union{
     CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64},
     Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int64}}
 }}
+    use_halpern && use_inline_halpern && throw(ArgumentError(
+        "use_halpern (restart candidate) and use_inline_halpern " *
+        "(legacy inline trajectory) cannot both be true",
+    ))
     if logfile_name === nothing
         if verbose > 0
             @info "verbose is set to $verbose"
@@ -479,6 +484,7 @@ dGType<:Union{
         @info ("use_adaptive_step: $use_adaptive_step")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
+        @info ("use_inline_halpern: $use_inline_halpern")
         @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
@@ -918,6 +924,7 @@ dGType<:Union{
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
+                                use_inline_halpern = use_inline_halpern,
                                 use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
@@ -1274,6 +1281,7 @@ function rpdhg_gpu_solve(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
+    use_inline_halpern::Bool = false,
     use_mean_restart_candidate::Bool = true,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
@@ -1299,6 +1307,10 @@ function rpdhg_gpu_solve(;
     sparse_index_type = :auto,
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
+    use_halpern && use_inline_halpern && throw(ArgumentError(
+        "use_halpern (restart candidate) and use_inline_halpern " *
+        "(legacy inline trajectory) cannot both be true",
+    ))
     if logfile_name === nothing
         if verbose > 0
             @info "logfile is set to $logfile_name"
@@ -1332,6 +1344,7 @@ function rpdhg_gpu_solve(;
         @info ("use_adaptive_step: $use_adaptive_step")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
+        @info ("use_inline_halpern: $use_inline_halpern")
         @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
@@ -1773,6 +1786,7 @@ function rpdhg_gpu_solve(;
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
+                                use_inline_halpern = use_inline_halpern,
                                 use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
@@ -2042,6 +2056,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step = solver.use_adaptive_step,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
+            use_inline_halpern = solver.use_inline_halpern,
             use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
@@ -2092,6 +2107,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_adaptive_step = solver.use_adaptive_step,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
+            use_inline_halpern = solver.use_inline_halpern,
             use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,

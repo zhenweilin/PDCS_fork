@@ -53,7 +53,8 @@ reflection_update(
     double eta_cum,
     double eta,
     int use_reflection,
-    int use_halpern)
+    int use_halpern,
+    int use_inline_halpern)
 {
     // Reflection drives the main trajectory.  Halpern mixing is computed as a
     // separate restart candidate and is never fed back into the next PDHG
@@ -62,7 +63,9 @@ reflection_update(
     // reflected = use_reflection
     //             ? (1 + beta) * z_hat - beta * z_previous
     //             : z_hat
-    // z_main = reflected
+    // z_main = use_inline_halpern
+    //        ? alpha_k * reflected + (1 - alpha_k) * z_hat
+    //        : reflected
     // z_halpern_candidate = use_halpern
     //         ? alpha_k * reflected + (1 - alpha_k) * z_restart_anchor
     //         : reflected
@@ -71,7 +74,8 @@ reflection_update(
     double alpha = (double_inner_iter + 1.0) / (double_inner_iter + 2.0);
     double anchor_weight = 1.0 / (double_inner_iter + 2.0);
     if (global_thread_idx < primal_n) {
-        double reflected = primal_sol[global_thread_idx];
+        double base_point = primal_sol[global_thread_idx];
+        double reflected = base_point;
         if (use_reflection) {
             reflected = (1.0 + extra_coeff) * reflected
                       - extra_coeff * primal_sol_lag[global_thread_idx];
@@ -82,13 +86,17 @@ reflection_update(
                 + anchor_weight * primal_restart_anchor[global_thread_idx];
             primal_halpern_candidate[global_thread_idx] = halpern_candidate;
         }
-        primal_sol[global_thread_idx] = reflected;
+        double main_point = use_inline_halpern
+            ? alpha * reflected + anchor_weight * base_point
+            : reflected;
+        primal_sol[global_thread_idx] = main_point;
         primal_sol_mean[global_thread_idx] =
-            (primal_sol_mean[global_thread_idx] * eta_cum + reflected * eta)
+            (primal_sol_mean[global_thread_idx] * eta_cum + main_point * eta)
             / (eta_cum + eta);
     }
     if (global_thread_idx < dual_n) {
-        double reflected = dual_sol[global_thread_idx];
+        double base_point = dual_sol[global_thread_idx];
+        double reflected = base_point;
         if (use_reflection) {
             reflected = (1.0 + extra_coeff) * reflected
                       - extra_coeff * dual_sol_lag[global_thread_idx];
@@ -99,9 +107,12 @@ reflection_update(
                 + anchor_weight * dual_restart_anchor[global_thread_idx];
             dual_halpern_candidate[global_thread_idx] = halpern_candidate;
         }
-        dual_sol[global_thread_idx] = reflected;
+        double main_point = use_inline_halpern
+            ? alpha * reflected + anchor_weight * base_point
+            : reflected;
+        dual_sol[global_thread_idx] = main_point;
         dual_sol_mean[global_thread_idx] =
-            (dual_sol_mean[global_thread_idx] * eta_cum + reflected * eta)
+            (dual_sol_mean[global_thread_idx] * eta_cum + main_point * eta)
             / (eta_cum + eta);
     }
 }
