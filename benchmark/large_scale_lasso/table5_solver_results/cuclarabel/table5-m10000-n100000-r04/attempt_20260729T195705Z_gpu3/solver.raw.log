@@ -1,0 +1,91 @@
+Precompiling packages...
+    MathOptInterface Being precompiled by another process (pid: 2254177, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/MathOptInterface/tyub8_ZeWUM.ji.pidfile)
+  16087.2 ms  ✓ MathOptInterface
+    JuMP Being precompiled by another process (pid: 2254177, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/JuMP/DmXqY_ZeWUM.ji.pidfile)
+  22172.4 ms  ✓ JuMP
+  2 dependencies successfully precompiled in 38 seconds. 42 already precompiled.
+Precompiling packages...
+    658.1 ms  ✓ ExprTools
+   1015.0 ms  ✓ Tracy
+   1705.3 ms  ✓ LLVMExtra_jll
+   3405.3 ms  ✓ StringManipulation
+    PrettyTables Being precompiled by another process (pid: 2255591, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/PrettyTables/kRdcL_ZeWUM.ji.pidfile)
+   4103.6 ms  ✓ CUDA_Runtime_jll
+   2677.4 ms  ✓ CUDA_Compiler_jll
+   7986.0 ms  ✓ LLVM
+   1178.6 ms  ✓ GPUToolbox
+   1239.4 ms  ✓ LLVM → BFloat16sExt
+   2226.4 ms  ✓ UnsafeAtomics → UnsafeAtomicsLLVM
+   4977.5 ms  ✓ GPUArrays
+  16953.1 ms  ✓ PrettyTables
+  24354.0 ms  ✓ GPUCompiler
+  37391.6 ms  ✓ CUDA
+    Atomix → AtomixCUDAExt Being precompiled by another process (pid: 2254177, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/AtomixCUDAExt/B0Tg4_ZeWUM.ji.pidfile)
+   7401.5 ms  ✓ Atomix → AtomixCUDAExt
+  15 dependencies successfully precompiled in 79 seconds. 77 already precompiled.
+Precompiling packages...
+    CUDA → SpecialFunctionsExt Being precompiled by another process (pid: 2254177, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/SpecialFunctionsExt/9h4VD_ZeWUM.ji.pidfile)
+   3312.9 ms  ✓ CUDA → SpecialFunctionsExt
+  1 dependency successfully precompiled in 4 seconds. 98 already precompiled.
+Precompiling packages...
+    TimerOutputs Being precompiled by another process (pid: 2254457, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/TimerOutputs/hd2yD_ZeWUM.ji.pidfile)
+    DataStructures Being precompiled by another process (pid: 2254457, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/DataStructures/xKiwJ_ZeWUM.ji.pidfile)
+    CUDSS_jll Being precompiled by another process (pid: 2254457, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/CUDSS_jll/zjbKf_ZeWUM.ji.pidfile)
+   1650.1 ms  ✓ DataStructures
+   2793.6 ms  ✓ CUDSS_jll
+    CUDSS Being precompiled by another process (pid: 2254457, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/CUDSS/zEqeZ_ZeWUM.ji.pidfile)
+   3797.5 ms  ✓ TimerOutputs
+   6399.9 ms  ✓ CUDSS
+    Clarabel Being precompiled by another process (pid: 2254457, pidfile: /tmp/pdcs_cuclarabel_depot/compiled/v1.12/Clarabel/g676L_ZeWUM.ji.pidfile)
+  77122.6 ms  ✓ Clarabel
+  5 dependencies successfully precompiled in 87 seconds. 123 already precompiled.
+TABLE5_SOLVE_START solver=cuclarabel instance=table5-m10000-n100000-r04 m=10000 n=100000 density=0.0001 seed=8539239721064585772 tolerance=1.0e-6 time_limit=600.0
+TABLE5_INSTANCE_READY instance=table5-m10000-n100000-r04 nnz=100186 lambda=0.030464354934446564 numerical_digest=c908b5684763cfe8179a62cd603cb013a15a9115fff037027212c05c04349add model_digest=d842ad0b6f78b8bf29632a1ed5c157a0bfd0440bcee131e637e3065cf5d6fafb generation_seconds=1.4749999046325684
+-------------------------------------------------------------
+           Clarabel.jl v0.11.0  -  Clever Acronym              
+
+                   (c) Paul Goulart                          
+                University of Oxford, 2022                   
+-------------------------------------------------------------
+
+problem:
+  variables     = 210004
+  constraints   = 220005
+  nnz(P)        = 0
+  nnz(A)        = 420381
+  cones (total) = 3
+    : Zero        = 1,  numel = 10003
+    : Nonnegative = 1,  numel = 200000
+    : SecondOrder = 1,  numel = 10002
+
+settings:
+  linear algebra: direct / cudss, precision: 64 bit 
+  max iter = 200, time limit = 600.000000,  max step = 0.990
+  tol_feas = 1.0e-06, tol_gap_abs = 1.0e-06, tol_gap_rel = 1.0e-06,
+  static reg : on, ϵ1 = 1.0e-08, ϵ2 = 4.9e-32
+  dynamic reg: on, ϵ = 1.0e-13, δ = 2.0e-07
+  iter refine: on, reltol = 1.0e-12, abstol = 1.0e-12, 
+               max iter = 10, stop ratio = 5.0
+  equilibrate: on, min_scale = 1.0e-04, max_scale = 1.0e+04
+               max iter = 10
+
+iter    pcost        dcost       gap       pres      dres      k/t        μ       step      
+---------------------------------------------------------------------------------------------
+  0  -5.4210e-19  -3.8106e-16  3.81e-16  9.95e-01  9.63e-01  1.00e+00  1.03e+00   ------   
+  1  -8.4313e+00  -1.4123e+00  4.97e+00  9.62e-01  8.35e-01  7.24e+00  9.44e-01  9.90e-01  
+  2  -5.8952e+01  -8.0527e+00  6.32e+00  2.53e-01  1.92e-01  5.09e+01  6.26e-01  9.90e-01  
+  3  -4.5072e+00  -5.2147e-01  3.99e+00  2.13e-01  5.45e-02  3.99e+00  7.90e-02  8.77e-01  
+  4  -2.4683e-01   9.3095e-02  3.40e-01  2.74e-02  5.50e-03  3.40e-01  7.52e-03  9.12e-01  
+  5   4.9360e-02   1.4398e-01  9.46e-02  1.09e-02  2.19e-03  9.47e-02  3.00e-03  7.22e-01  
+  6   1.2720e-01   1.5927e-01  3.21e-02  4.85e-03  9.75e-04  3.21e-02  1.34e-03  6.61e-01  
+  7   1.5480e-01   1.6523e-01  1.04e-02  1.98e-03  3.98e-04  1.04e-02  5.48e-04  6.75e-01  
+  8   1.6398e-01   1.6737e-01  3.39e-03  7.25e-04  1.46e-04  3.40e-03  2.01e-04  6.75e-01  
+  9   1.6766e-01   1.6827e-01  6.15e-04  1.97e-04  3.96e-05  6.17e-04  5.46e-05  8.18e-01  
+ 10   1.6835e-01   1.6846e-01  1.04e-04  3.59e-05  7.23e-06  1.04e-04  9.96e-06  8.31e-01  
+ 11   1.6848e-01   1.6849e-01  1.13e-05  4.06e-06  8.17e-07  1.13e-05  1.12e-06  8.91e-01  
+ 12   1.6849e-01   1.6850e-01  9.33e-07  3.42e-07  6.88e-08  9.36e-07  9.48e-08  9.17e-01  
+---------------------------------------------------------------------------------------------
+Terminated with status = solved
+total time =  56.0s (setup time =  19.9s, solve time =  22.2s)
+TABLE5_SOLVE_RESULT solver=cuclarabel instance=table5-m10000-n100000-r04 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=12 objective=0.16849485731976654 optimize_wall_seconds=64.25173282623291
+TABLE5_SOLVE_FINISH solver=cuclarabel instance=table5-m10000-n100000-r04 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cuclarabel/table5-m10000-n100000-r04/attempt_20260729T195705Z_gpu3/result.toml

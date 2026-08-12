@@ -1,0 +1,9 @@
+instance_id = "table5-m400000-n7000000-r04"
+probe_instance = "table5-m400000-n7000000-r01"
+probe_result = "/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/scs_gpu/table5-m400000-n7000000-r01/attempt_20260729T195705Z_gpu4/result.toml"
+reason = "Skipped after the first 400000-by-7000000 seed failed to complete SCS GPU iteration 0 within the 1800-second large-case limit."
+run_status = "skipped"
+schema_version = 1
+solver = "scs_gpu"
+termination_status = "SKIPPED_AFTER_PROBE_FAILURE"
+time_limit_seconds = 1800.0

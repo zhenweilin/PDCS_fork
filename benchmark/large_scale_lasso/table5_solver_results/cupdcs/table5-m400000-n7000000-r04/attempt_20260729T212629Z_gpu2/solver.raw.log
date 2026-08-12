@@ -1,0 +1,119 @@
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m400000-n7000000-r04 m=400000 n=7000000 density=0.0001 seed=9202490041639810005 tolerance=1.0e-6 time_limit=1800.0
+TABLE5_INSTANCE_READY instance=table5-m400000-n7000000-r04 nnz=279981174 lambda=0.09482065892406456 numerical_digest=1e6bc31a3be695d80b66538deb54930a1f0d4ff73c4490a7ed8d8da29eeffccf model_digest=7f99a895dfeff1f1dc93a0abbdc1ed49758cd670a0f4f7d775a3453e8352c549 generation_seconds=59.29837203025818
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 1800.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 14400004
+[ Info: constraint number: 14800005
+[ Info: non-zero elements in G: 574762357
+[ Info: Number of box constraints: 14400004
+[ Info: Number of equal constraints: 400003
+[ Info: Number of nonnegative constraints: 14000000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 2.94790288907327e8, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 1.327491224936906e6
+[ Info: initial nrm1h: 1306.8517564889705
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:6.691412053145778
+[ Info: norm Dr_product:17169.458013969223
+[ Info: max Dl_product:29.06088628375592
+[ Info: norm Dl_product:17169.458043061135
+[ Info: after scaling, norm1 c: 293101.86456457485
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 5.681222879546413e6
+[ Info: after scaling, normInf G: 0.7071067811865475
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:3.52 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):1.421e-04 rel_d_res(inf):9.597e-02 primal_obj:5.15130e+00 dual_obj:8.87179e+00 rel_pd_gap:3.769e-01 time:90.10 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:4.379e+00 diff_nrm_y_recovered:3.775e+02 nrm2_x_recovered:4.379e+00 nrm2_y_recovered:3.775e+02, nrmInf_x_recovered:2.472e+00 nrmInf_y_recovered:6.053e+00 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.274e-02, sigma:7.813e+01
+[ Info: iter:2000 rel_p_res(inf):8.485e-05 rel_d_res(inf):5.051e-02 primal_obj:5.87736e+00 dual_obj:7.82630e+00 rel_pd_gap:2.208e-01 time:175.69 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:4.974e-01 diff_nrm_y_recovered:9.288e+00 nrm2_x_recovered:4.822e+00 nrm2_y_recovered:3.749e+02, nrmInf_x_recovered:2.798e+00 nrmInf_y_recovered:6.114e+00 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.265e-02, sigma:7.758e+01
+[ Info: restart due to condition 1
+[ Info: omega:78.30595255956129, x_diff_norm:6.2612908694959115, y_diff_norm:401.517803229433
+[ Info: iter:3000 rel_p_res(inf):7.125e-06 rel_d_res(inf):7.355e-03 primal_obj:6.66741e+00 dual_obj:6.81672e+00 rel_pd_gap:1.910e-02 time:262.12 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:4.033e-01 diff_nrm_y_recovered:9.005e+00 nrm2_x_recovered:5.185e+00 nrm2_y_recovered:3.725e+02, nrmInf_x_recovered:3.062e+00 nrmInf_y_recovered:6.268e+00 dual_gap_ergodic:6.177e-04, dual_gap_mean:3.515e-03, dual_gap_restart_threshold:6.177e-04, dual_gap_r:5.163e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.393e-02, sigma:6.994e+01
+[ Info: iter:4000 rel_p_res(inf):3.519e-06 rel_d_res(inf):3.672e-03 primal_obj:6.65340e+00 dual_obj:6.72868e+00 rel_pd_gap:9.741e-03 time:346.43 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:3.928e-02 diff_nrm_y_recovered:1.271e+00 nrm2_x_recovered:5.216e+00 nrm2_y_recovered:3.722e+02, nrmInf_x_recovered:3.085e+00 nrmInf_y_recovered:6.242e+00 dual_gap_ergodic:6.177e-04, dual_gap_mean:3.515e-03, dual_gap_restart_threshold:6.177e-04, dual_gap_r:5.163e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.358e-02, sigma:6.821e+01
+[ Info: iter:5000 rel_p_res(inf):2.319e-06 rel_d_res(inf):2.459e-03 primal_obj:6.64891e+00 dual_obj:6.69932e+00 rel_pd_gap:6.547e-03 time:432.09 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:1.250e-02 diff_nrm_y_recovered:4.252e-01 nrm2_x_recovered:5.226e+00 nrm2_y_recovered:3.721e+02, nrmInf_x_recovered:3.092e+00 nrmInf_y_recovered:6.233e+00 dual_gap_ergodic:5.770e-04, dual_gap_mean:1.381e-03, dual_gap_restart_threshold:6.177e-04, dual_gap_r:5.163e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.644e-02, sigma:8.254e+01
+[ Info: iter:6000 rel_p_res(inf):1.753e-06 rel_d_res(inf):1.842e-03 primal_obj:6.64680e+00 dual_obj:6.68472e+00 rel_pd_gap:4.934e-03 time:516.40 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:6.235e-03 diff_nrm_y_recovered:2.145e-01 nrm2_x_recovered:5.231e+00 nrm2_y_recovered:3.720e+02, nrmInf_x_recovered:3.096e+00 nrmInf_y_recovered:6.228e+00 dual_gap_ergodic:5.770e-04, dual_gap_mean:1.381e-03, dual_gap_restart_threshold:6.177e-04, dual_gap_r:5.163e+03, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.682e-02, sigma:8.447e+01
+[ Info: restart due to condition 2
+[ Info: omega:70.86272550026563, x_diff_norm:0.5979692797289948, y_diff_norm:16.980714226666404
+[ Info: iter:7000 rel_p_res(inf):2.040e-06 rel_d_res(inf):1.419e-04 primal_obj:6.64257e+00 dual_obj:6.64381e+00 rel_pd_gap:1.619e-04 time:602.96 restart_used:2, restart_trigger_mean:0, restart_trigger_ergodic:2, diff_nrm_x_recovered:1.734e-02 diff_nrm_y_recovered:5.854e-01 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.214e+00 dual_gap_ergodic:4.002e-04, dual_gap_mean:1.444e-03, dual_gap_restart_threshold:4.002e-04, dual_gap_r:2.484e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.426e-02, sigma:4.882e+01
+[ Info: iter:8000 rel_p_res(inf):3.083e-07 rel_d_res(inf):7.233e-05 primal_obj:6.64152e+00 dual_obj:6.64217e+00 rel_pd_gap:8.481e-05 time:687.32 restart_used:2, restart_trigger_mean:0, restart_trigger_ergodic:2, diff_nrm_x_recovered:6.259e-04 diff_nrm_y_recovered:3.294e-02 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.213e+00 dual_gap_ergodic:4.002e-04, dual_gap_mean:1.444e-03, dual_gap_restart_threshold:4.002e-04, dual_gap_r:2.484e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.224e-02, sigma:4.476e+01
+[ Info: iter:9000 rel_p_res(inf):2.057e-07 rel_d_res(inf):4.783e-05 primal_obj:6.64117e+00 dual_obj:6.64159e+00 rel_pd_gap:5.553e-05 time:773.18 restart_used:2, restart_trigger_mean:0, restart_trigger_ergodic:2, diff_nrm_x_recovered:2.183e-04 diff_nrm_y_recovered:1.129e-02 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.213e+00 dual_gap_ergodic:4.812e-04, dual_gap_mean:1.586e-03, dual_gap_restart_threshold:4.002e-04, dual_gap_r:2.484e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.597e-02, sigma:5.225e+01
+[ Info: iter:10000 rel_p_res(inf):1.553e-07 rel_d_res(inf):3.630e-05 primal_obj:6.64099e+00 dual_obj:6.64132e+00 rel_pd_gap:4.248e-05 time:857.52 restart_used:2, restart_trigger_mean:0, restart_trigger_ergodic:2, diff_nrm_x_recovered:1.035e-04 diff_nrm_y_recovered:5.385e-03 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.213e+00 dual_gap_ergodic:4.812e-04, dual_gap_mean:1.586e-03, dual_gap_restart_threshold:4.002e-04, dual_gap_r:2.484e+01, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.582e-02, sigma:5.196e+01
+[ Info: restart due to condition 2
+[ Info: omega:44.8587808236749, x_diff_norm:0.02587920829485444, y_diff_norm:0.9931378492746543
+[ Info: iter:11000 rel_p_res(inf):1.977e-08 rel_d_res(inf):7.906e-07 primal_obj:6.64051e+00 dual_obj:6.64048e+00 rel_pd_gap:4.426e-06 time:944.32 restart_used:3, restart_trigger_mean:0, restart_trigger_ergodic:3, diff_nrm_x_recovered:3.108e-04 diff_nrm_y_recovered:1.601e-02 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.212e+00 dual_gap_ergodic:3.134e-04, dual_gap_mean:1.433e-03, dual_gap_restart_threshold:3.134e-04, dual_gap_r:4.528e-02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.311e-02, sigma:3.979e+01
+[ Info: iter:12000 rel_p_res(inf):8.103e-09 rel_d_res(inf):4.100e-07 primal_obj:6.64049e+00 dual_obj:6.64047e+00 rel_pd_gap:2.227e-06 time:1028.66 restart_used:3, restart_trigger_mean:0, restart_trigger_ergodic:3, diff_nrm_x_recovered:1.216e-05 diff_nrm_y_recovered:5.125e-04 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.212e+00 dual_gap_ergodic:3.134e-04, dual_gap_mean:1.433e-03, dual_gap_restart_threshold:3.134e-04, dual_gap_r:4.528e-02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:3.026e-02, sigma:5.209e+01
+[ Info: restart due to artificial condition, beta_artificial = 0.223, inner_iter = 2888, iter = 12950 or force_restart
+[ Info: omega:41.49091445653525, x_diff_norm:0.0005296081702864368, y_diff_norm:0.02566629281301565
+[ Info: iter:13000 rel_p_res(inf):1.786e-08 rel_d_res(inf):6.924e-07 primal_obj:6.64052e+00 dual_obj:6.64048e+00 rel_pd_gap:5.773e-06 time:1115.70 restart_used:4, restart_trigger_mean:0, restart_trigger_ergodic:3, diff_nrm_x_recovered:1.553e-05 diff_nrm_y_recovered:5.038e-04 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.212e+00 dual_gap_ergodic:6.503e-04, dual_gap_mean:2.499e-03, dual_gap_restart_threshold:1.401e-03, dual_gap_r:2.039e-05, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.616e-02, sigma:5.261e+01
+[ Info: iter:14000 rel_p_res(inf):1.133e-09 rel_d_res(inf):1.165e-07 primal_obj:6.64047e+00 dual_obj:6.64046e+00 rel_pd_gap:7.886e-07 time:1200.13 restart_used:4, restart_trigger_mean:0, restart_trigger_ergodic:3, diff_nrm_x_recovered:2.609e-05 diff_nrm_y_recovered:9.583e-04 nrm2_x_recovered:5.245e+00 nrm2_y_recovered:3.719e+02, nrmInf_x_recovered:3.106e+00 nrmInf_y_recovered:6.212e+00 dual_gap_ergodic:6.503e-04, dual_gap_mean:2.499e-03, dual_gap_restart_threshold:1.401e-03, dual_gap_r:2.039e-05, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:2.405e-02, sigma:4.836e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     14000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           5.3472e-07
+[ Info: l_2_rel_primal_res:           2.0746e-10
+[ Info: l_inf_abs_primal_res:         4.4229e-09
+[ Info: l_inf_rel_primal_res:         1.1331e-09
+[ Info: l_2_abs_dual_res:             3.5219e-06
+[ Info: l_2_rel_dual_res:             2.6531e-12
+[ Info: l_inf_abs_dual_res:           3.4944e-07
+[ Info: l_inf_rel_dual_res:           1.1648e-07
+[ Info: rel_gap:                      7.8861e-07
+[ Info: abs_gap:                      6.0253e-06
+[ Info: primal_obj:                   6.6405e+00
+[ Info: dual_obj:                     6.6405e+00
+[ Info: time:                         1200.1273
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 3.1060041760241095
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 6.212006065402243
+[ Info: time for projection: 3.7024545669555664
+[ Info: time for iterative: 1163.5731184482574
+[ Info: time for restart check: 3.88830304145813
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 1.3351826667785645
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m400000-n7000000-r04 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=14000 objective=6.640465194837564 optimize_wall_seconds=2433.277892112732
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m400000-n7000000-r04 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m400000-n7000000-r04/attempt_20260729T212629Z_gpu2/result.toml

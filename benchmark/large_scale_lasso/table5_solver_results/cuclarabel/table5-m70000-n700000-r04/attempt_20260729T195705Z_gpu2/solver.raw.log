@@ -1,0 +1,49 @@
+TABLE5_SOLVE_START solver=cuclarabel instance=table5-m70000-n700000-r04 m=70000 n=700000 density=0.0001 seed=5050833866237992834 tolerance=1.0e-6 time_limit=600.0
+TABLE5_INSTANCE_READY instance=table5-m70000-n700000-r04 nnz=4899939 lambda=0.0484942417627286 numerical_digest=aa0b5ec27bb5a37bbbef284f9f87437232cc609678d1b5351c5737423b955507 model_digest=e3d5739ac60fe5d0804eb578582b555218396798d7177a3381e0426274738d26 generation_seconds=2.948941946029663
+-------------------------------------------------------------
+           Clarabel.jl v0.11.0  -  Clever Acronym              
+
+                   (c) Paul Goulart                          
+                University of Oxford, 2022                   
+-------------------------------------------------------------
+
+problem:
+  variables     = 1470004
+  constraints   = 1540005
+  nnz(P)        = 0
+  nnz(A)        = 11339887
+  cones (total) = 3
+    : Zero        = 1,  numel = 70003
+    : Nonnegative = 1,  numel = 1400000
+    : SecondOrder = 1,  numel = 70002
+
+settings:
+  linear algebra: direct / cudss, precision: 64 bit 
+  max iter = 200, time limit = 600.000000,  max step = 0.990
+  tol_feas = 1.0e-06, tol_gap_abs = 1.0e-06, tol_gap_rel = 1.0e-06,
+  static reg : on, ϵ1 = 1.0e-08, ϵ2 = 4.9e-32
+  dynamic reg: on, ϵ = 1.0e-13, δ = 2.0e-07
+  iter refine: on, reltol = 1.0e-12, abstol = 1.0e-12, 
+               max iter = 10, stop ratio = 5.0
+  equilibrate: on, min_scale = 1.0e-04, max_scale = 1.0e+04
+               max iter = 10
+
+iter    pcost        dcost       gap       pres      dres      k/t        μ       step      
+---------------------------------------------------------------------------------------------
+  0   1.3010e-18  -4.0688e-16  4.08e-16  9.98e-01  9.51e-01  1.00e+00  1.05e+00   ------   
+  1  -5.6388e+00  -8.6773e-01  4.77e+00  9.87e-01  8.17e-01  5.00e+00  9.12e-01  9.90e-01  
+  2  -4.6743e+01  -5.9884e+00  6.81e+00  7.36e-01  3.97e-01  4.08e+01  5.21e-01  9.90e-01  
+  3  -1.9576e+01  -2.1535e+00  8.09e+00  2.21e-01  4.26e-02  1.74e+01  5.44e-02  9.90e-01  
+  4  -1.6840e+00   3.4277e-01  2.03e+00  8.81e-02  5.77e-03  2.03e+00  6.79e-03  8.81e-01  
+  5   4.1480e-01   8.8922e-01  4.74e-01  2.10e-02  1.40e-03  4.74e-01  1.66e-03  7.65e-01  
+  6   8.3470e-01   1.0457e+00  2.11e-01  1.22e-02  8.32e-04  2.11e-01  9.97e-04  5.55e-01  
+  7   1.0687e+00   1.1326e+00  5.97e-02  5.42e-03  3.76e-04  6.38e-02  4.55e-04  6.97e-01  
+  8   1.1538e+00   1.1626e+00  7.65e-03  1.20e-03  8.42e-05  8.83e-03  1.02e-04  8.62e-01  
+  9   1.1665e+00   1.1667e+00  1.26e-04  6.30e-05  4.46e-06  1.47e-04  5.43e-06  9.83e-01  
+ 10   1.1667e+00   1.1667e+00  3.21e-06  1.62e-06  1.14e-07  3.75e-06  1.39e-07  9.74e-01  
+ 11   1.1667e+00   1.1667e+00  2.67e-07  1.40e-07  9.90e-09  3.12e-07  1.20e-08  9.17e-01  
+---------------------------------------------------------------------------------------------
+Terminated with status = solved
+total time =   262s (setup time =   149s, solve time =  97.0s)
+TABLE5_SOLVE_RESULT solver=cuclarabel instance=table5-m70000-n700000-r04 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=11 objective=1.1667224736920676 optimize_wall_seconds=279.29448986053467
+TABLE5_SOLVE_FINISH solver=cuclarabel instance=table5-m70000-n700000-r04 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cuclarabel/table5-m70000-n700000-r04/attempt_20260729T195705Z_gpu2/result.toml

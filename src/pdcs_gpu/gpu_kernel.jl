@@ -273,8 +273,7 @@ warpWise_block_proj(args...) = sufficient_block_proj(args...)
 # We need to create and manage cuBLAS handles for performing linear algebra
 # operations on the GPU (e.g., matrix-vector products, norms).
 
-# cuBLAS library path and type definitions
-const libcublas_path = CUDA.CUBLAS.libcublas  # Path to cuBLAS library
+# cuBLAS type definitions
 const cublasStatus_t = Cint                    # cuBLAS status code type
 const CUBLAS_STATUS_SUCCESS = 0                # Success status code
 const cublasHandle_t = Ptr{Cvoid}              # cuBLAS handle type (opaque pointer)

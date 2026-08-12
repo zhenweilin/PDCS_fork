@@ -1,0 +1,46 @@
+Precompiling packages...
+    Pkg Being precompiled by another process (pid: 2239852, pidfile: /tmp/pdcs_scs_gpu_depot/compiled/v1.12/Pkg/tUTdb_ZeWUM.ji.pidfile)
+  27685.7 ms  ✓ Pkg
+    LazyArtifacts Being precompiled by another process (pid: 2239852, pidfile: /tmp/pdcs_scs_gpu_depot/compiled/v1.12/LazyArtifacts/MRP8l_ZeWUM.ji.pidfile)
+   1084.4 ms  ✓ LazyArtifacts
+    CUDA_Runtime_jll Being precompiled by another process (pid: 2239852, pidfile: /tmp/pdcs_scs_gpu_depot/compiled/v1.12/CUDA_Runtime_jll/Hs50y_ZeWUM.ji.pidfile)
+   4582.6 ms  ✓ CUDA_Runtime_jll
+    SCS_GPU_jll Being precompiled by another process (pid: 2239852, pidfile: /tmp/pdcs_scs_gpu_depot/compiled/v1.12/SCS_GPU_jll/OtXgE_ZeWUM.ji.pidfile)
+   2770.6 ms  ✓ SCS_GPU_jll
+  4 dependencies successfully precompiled in 36 seconds. 28 already precompiled.
+Precompiling packages...
+    SCS → SCSSCS_GPU_jllExt Being precompiled by another process (pid: 2239852, pidfile: /tmp/pdcs_scs_gpu_depot/compiled/v1.12/SCSSCS_GPU_jllExt/ZKon3_ZeWUM.ji.pidfile)
+   2903.7 ms  ✓ SCS → SCSSCS_GPU_jllExt
+  1 dependency successfully precompiled in 3 seconds. 66 already precompiled.
+TABLE5_SOLVE_START solver=scs_gpu instance=table5-m10000-n100000-r03 m=10000 n=100000 density=0.0001 seed=7352328007339572649 tolerance=1.0e-6 time_limit=600.0
+TABLE5_INSTANCE_READY instance=table5-m10000-n100000-r03 nnz=99988 lambda=0.027201017342407076 numerical_digest=321f8cd91391a75d2bc191369ca8e5c9c76a8849e1494fc63dfb1e0f7dbda3c7 model_digest=ea96e34d082b0d29a060eae7abb137276dc34e521d8814d76782ea126e1e58c4 generation_seconds=1.469007968902588
+------------------------------------------------------------------
+	       SCS v3.2.11 - Splitting Conic Solver
+	(c) Brendan O'Donoghue, Stanford University, 2012
+------------------------------------------------------------------
+problem:  variables n: 210004, constraints m: 220005
+cones: 	  z: primal zero / dual free vars: 10003
+	  l: linear vars: 200000
+	  q: soc vars: 10002, qsize: 1
+settings: eps_abs: 1.0e-06, eps_rel: 1.0e-06, eps_infeas: 1.0e-07
+	  alpha: 1.50, scale: 1.00e-01, adaptive_scale: 1
+	  max_iters: 100000, normalize: 1, rho_x: 1.00e-06
+	  acceleration_lookback: 10, acceleration_interval: 10
+	  time_limit_secs: 6.00e+02
+	  compiled with openmp parallelization enabled
+lin-sys:  sparse-indirect GPU
+	  nnz(A): 419985, nnz(P): 0
+------------------------------------------------------------------
+ iter | pri res | dua res |   gap   |   obj   |  scale  | time (s)
+------------------------------------------------------------------
+     0| 2.83e+01  2.00e+00  3.04e+03 -1.52e+03  1.00e-01  3.23e+01 
+   250| 5.40e-04  1.25e-04  2.05e-03  1.61e-01  3.30e-01  6.37e+02 
+------------------------------------------------------------------
+status:  solved (inaccurate - reached time_limit_secs)
+timings: total: 6.37e+02s = setup: 1.66e+00s + solve: 6.36e+02s
+	 lin-sys: 5.76e+02s, cones: 3.61e-01s, accel: 2.72e-01s
+------------------------------------------------------------------
+objective = 0.161136 (inaccurate)
+------------------------------------------------------------------
+TABLE5_SOLVE_RESULT solver=scs_gpu instance=table5-m10000-n100000-r03 termination=TIME_LIMIT primal_status=FEASIBLE_POINT iterations=250 objective=0.16010979587736618 optimize_wall_seconds=640.395514011383
+TABLE5_SOLVE_FINISH solver=scs_gpu instance=table5-m10000-n100000-r03 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/scs_gpu/table5-m10000-n100000-r03/attempt_20260729T195705Z_gpu2/result.toml

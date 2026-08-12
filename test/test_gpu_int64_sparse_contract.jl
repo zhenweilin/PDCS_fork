@@ -1,5 +1,6 @@
 using Test
 using SparseArrays
+using TOML
 
 include(joinpath(@__DIR__, "..", "src", "pdcs_gpu", "csc_to_csr.jl"))
 
@@ -31,6 +32,8 @@ const README_SOURCE = read(
     joinpath(@__DIR__, "..", "README.md"),
     String,
 )
+const INSTALL_SOURCE = read(joinpath(@__DIR__, "install.jl"), String)
+const PROJECT_CONFIG = TOML.parsefile(joinpath(@__DIR__, "..", "Project.toml"))
 
 @testset "GPU CSC upload preserves Int64 sparse indices" begin
     @test !occursin(
@@ -115,6 +118,24 @@ end
     )
 end
 
+@testset "GPU extension dependency and install entry points" begin
+    cuda_uuid = "052768ef-5323-5732-b1bb-66c8b64840ba"
+    @test !haskey(PROJECT_CONFIG["deps"], "CUDA")
+    @test PROJECT_CONFIG["weakdeps"]["CUDA"] == cuda_uuid
+    @test PROJECT_CONFIG["extensions"]["PDCSGPUExt"] == "CUDA"
+    @test occursin("Pkg.add(\"CUDA\")", README_SOURCE)
+    @test occursin("Pkg.add(\"CUDA\")", INSTALL_SOURCE)
+    @test findfirst("using CUDA", INSTALL_SOURCE) <
+          findfirst("using PDCS: PDCS_CPU, PDCS_GPU", INSTALL_SOURCE)
+end
+
 @testset "GPU max wrappers document their reset behavior" begin
     @test !occursin("Should be initialized to 1.0 before calling", GPU_KERNEL_SOURCE)
+end
+
+@testset "cuBLAS loading remains lazy without changing handle operations" begin
+    @test !occursin("CUDA.CUBLAS.libcublas", GPU_KERNEL_SOURCE)
+    @test occursin("CUDA.CUBLAS.cublasCreate()", GPU_KERNEL_SOURCE)
+    @test occursin("CUDA.CUBLAS.cublasDestroy_v2(ch.handle)", GPU_KERNEL_SOURCE)
+    @test occursin("get_gridWise_cublas_handle()", GPU_KERNEL_SOURCE)
 end

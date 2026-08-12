@@ -51,6 +51,13 @@ using Pkg
 Pkg.develop(path="PDCS")
 ```
 
+GPU users must also add CUDA to their active environment:
+
+```julia
+using Pkg
+Pkg.add("CUDA")
+```
+
 Note: The installation process will execute a small demonstration for precompilation purposes. Verbose logging will only occur during the initial installation.
 
 ### Usage
@@ -75,6 +82,8 @@ For JuMP models, GPU sparse indices default to automatic width selection. The
 same behavior can be requested explicitly with a raw optimizer attribute:
 
 ```julia
+using JuMP
+
 model = Model(PDCS_GPU.Optimizer)
 set_optimizer_attribute(model, "sparse_index_type", :auto)
 ```

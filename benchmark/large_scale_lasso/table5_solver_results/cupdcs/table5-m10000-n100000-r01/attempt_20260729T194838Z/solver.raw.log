@@ -1,0 +1,350 @@
+Precompiling packages...
+   1055.3 ms  ✓ Unicode
+    516.9 ms  ✓ Printf
+   3812.2 ms  ✓ Dates
+  3 dependencies successfully precompiled in 5 seconds
+Precompiling packages...
+    413.8 ms  ✓ UUIDs
+    416.1 ms  ✓ Logging
+    441.0 ms  ✓ OpenLibm_jll
+    509.4 ms  ✓ TOML
+    535.0 ms  ✓ Zlib_jll
+    631.7 ms  ✓ Serialization
+    626.9 ms  ✓ SuiteSparse_jll
+    672.6 ms  ✓ CompilerSupportLibraries_jll
+    646.9 ms  ✓ StaticArraysCore
+    671.8 ms  ✓ Base64
+    742.6 ms  ✓ DocStringExtensions
+    816.4 ms  ✓ TranscodingStreams
+    535.2 ms  ✓ DiffResults
+    899.3 ms  ✓ Preferences
+    660.3 ms  ✓ CodecZlib
+   1642.2 ms  ✓ OrderedCollections
+    555.6 ms  ✓ PrecompileTools
+    712.4 ms  ✓ JLLWrappers
+   2360.5 ms  ✓ IrrationalConstants
+   2020.8 ms  ✓ NaNMath
+   2101.4 ms  ✓ StructUtils
+   2919.9 ms  ✓ MacroTools
+    529.5 ms  ✓ StructUtils → StructUtilsStaticArraysCoreExt
+    881.2 ms  ✓ Bzip2_jll
+    878.2 ms  ✓ OpenSpecFun_jll
+    777.5 ms  ✓ LogExpFunctions
+    752.5 ms  ✓ CommonSubexpressions
+    643.0 ms  ✓ CodecBzip2
+   4985.5 ms  ✓ SparseArrays
+   2584.4 ms  ✓ SpecialFunctions
+    785.3 ms  ✓ DiffRules
+   6194.3 ms  ✓ Parsers
+   8182.5 ms  ✓ StyledStrings
+   2848.9 ms  ✓ JuliaSyntaxHighlighting
+   5229.9 ms  ✓ ForwardDiff
+   4396.3 ms  ✓ JSON
+   5029.5 ms  ✓ Markdown
+   3420.6 ms  ✓ InteractiveUtils
+   4683.6 ms  ✓ Test
+   5415.7 ms  ✓ MutableArithmetics
+  30962.8 ms  ✓ MathOptInterface
+  19206.7 ms  ✓ JuMP
+  42 dependencies successfully precompiled in 80 seconds. 3 already precompiled.
+Precompiling packages...
+    496.5 ms  ✓ p7zip_jll
+    518.4 ms  ✓ IteratorInterfaceExtensions
+    528.9 ms  ✓ LLVMLoopInfo
+    535.0 ms  ✓ MozillaCACerts_jll
+    547.2 ms  ✓ nghttp2_jll
+    570.2 ms  ✓ OpenSSL_jll
+    584.7 ms  ✓ LaTeXStrings
+    622.5 ms  ✓ ExprTools
+    663.1 ms  ✓ NetworkOptions
+    753.8 ms  ✓ AbstractFFTs
+    757.3 ms  ✓ Statistics
+    463.8 ms  ✓ DataValueInterfaces
+   1018.9 ms  ✓ Requires
+    536.4 ms  ✓ Reexport
+    567.5 ms  ✓ DataAPI
+    620.7 ms  ✓ HashArrayMappedTries
+    616.5 ms  ✓ Adapt
+   1204.0 ms  ✓ RandomNumbers
+    619.0 ms  ✓ Scratch
+    519.0 ms  ✓ TableTraits
+    858.7 ms  ✓ NVTX_jll
+    553.6 ms  ✓ LibSSH2_jll
+    836.9 ms  ✓ demumble_jll
+    876.9 ms  ✓ LibTracyClient_jll
+    838.1 ms  ✓ NVPTX_LLVM_Backend_jll
+   1978.0 ms  ✓ CEnum
+   2251.8 ms  ✓ ArgTools
+   1773.1 ms  ✓ CUDA_Runtime_Discovery
+    718.2 ms  ✓ ScopedValues
+    826.3 ms  ✓ Statistics → SparseArraysExt
+    583.1 ms  ✓ LibGit2_jll
+    799.3 ms  ✓ Adapt → AdaptSparseArraysExt
+    752.3 ms  ✓ GPUArraysCore
+    570.1 ms  ✓ LibCURL_jll
+   2269.4 ms  ✓ BFloat16s
+   2894.4 ms  ✓ UnsafeAtomics
+   1215.7 ms  ✓ Random123
+   1100.7 ms  ✓ Tracy
+    851.5 ms  ✓ Tar
+   2241.1 ms  ✓ StringManipulation
+   2823.9 ms  ✓ CUDA_Driver_jll
+    700.3 ms  ✓ Atomix
+   3095.2 ms  ✓ Crayons
+    867.5 ms  ✓ LibCURL
+   2634.6 ms  ✓ Tables
+   4170.6 ms  ✓ LibGit2
+   4009.5 ms  ✓ Downloads
+   7275.4 ms  ✓ StaticArrays
+    928.7 ms  ✓ StaticArrays → StaticArraysStatisticsExt
+    779.0 ms  ✓ Adapt → AdaptStaticArraysExt
+   5269.9 ms  ✓ KernelAbstractions
+    897.0 ms  ✓ KernelAbstractions → LinearAlgebraExt
+   1370.6 ms  ✓ KernelAbstractions → SparseArraysExt
+  22866.9 ms  ✓ REPL
+  15658.2 ms  ✓ PrettyTables
+  43220.0 ms  ✓ Pkg
+    828.1 ms  ✓ JuliaNVTXCallbacks_jll
+   1100.9 ms  ✓ LazyArtifacts
+   1176.3 ms  ✓ NVTX
+   1771.8 ms  ✓ LLVMExtra_jll
+   4458.2 ms  ✓ CUDA_Runtime_jll
+   6174.4 ms  ✓ Pkg → REPLExt
+   2638.7 ms  ✓ CUDA_Compiler_jll
+   9206.1 ms  ✓ LLVM
+    924.4 ms  ✓ LLVM → BFloat16sExt
+   1195.3 ms  ✓ GPUToolbox
+   2249.5 ms  ✓ UnsafeAtomics → UnsafeAtomicsLLVM
+   6261.5 ms  ✓ GPUArrays
+  21033.4 ms  ✓ GPUCompiler
+  34599.9 ms  ✓ CUDACore
+  10261.5 ms  ✓ cuFFT
+  10356.6 ms  ✓ NVML
+  10910.0 ms  ✓ cuRAND
+  13508.3 ms  ✓ CUPTI
+  13993.5 ms  ✓ cuSPARSE
+  14165.7 ms  ✓ cuBLAS
+  10690.0 ms  ✓ cuSOLVER
+  16466.1 ms  ✓ CUDATools
+   8329.0 ms  ✓ CUDA
+   7900.8 ms  ✓ Atomix → AtomixCUDAExt
+  80 dependencies successfully precompiled in 165 seconds. 22 already precompiled.
+Precompiling packages...
+    971.0 ms  ✓ ForwardDiff → ForwardDiffStaticArraysExt
+  1 dependency successfully precompiled in 1 seconds. 22 already precompiled.
+Precompiling packages...
+   4768.4 ms  ✓ CUDACore → SpecialFunctionsExt
+  1 dependency successfully precompiled in 5 seconds. 83 already precompiled.
+Precompiling packages...
+    577.1 ms  ✓ StructUtils → StructUtilsTablesExt
+  1 dependency successfully precompiled in 1 seconds. 11 already precompiled.
+Precompiling packages...
+   1993.4 ms  ✓ AbstractFFTs → AbstractFFTsTestExt
+  1 dependency successfully precompiled in 2 seconds. 9 already precompiled.
+Precompiling packages...
+    445.2 ms  ✓ SIMDTypes
+    536.8 ms  ✓ Future
+    543.0 ms  ✓ IfElse
+    600.7 ms  ✓ UnsafePointers
+    628.5 ms  ✓ ManualMemory
+    617.9 ms  ✓ SciMLPublic
+    647.7 ms  ✓ CommonWorldInvalidations
+    787.2 ms  ✓ SuiteSparse
+   1005.6 ms  ✓ CpuId
+   1072.8 ms  ✓ AMD
+   1094.0 ms  ✓ GenericLinearAlgebra
+    628.1 ms  ✓ SnoopPrecompile
+   1207.4 ms  ✓ Match
+    673.3 ms  ✓ Pidfile
+    899.7 ms  ✓ LLVMOpenMP_jll
+    947.7 ms  ✓ OpenBLAS32_jll
+    870.7 ms  ✓ QDLDL
+   1448.6 ms  ✓ micromamba_jll
+   2135.1 ms  ✓ ConstructionBase
+   2139.2 ms  ✓ ArrayInterface
+   1454.6 ms  ✓ pixi_jll
+   2332.3 ms  ✓ DataStructures
+    935.5 ms  ✓ SCS_jll
+   2180.5 ms  ✓ Compat
+    538.0 ms  ✓ ArrayInterface → ArrayInterfaceStaticArraysCoreExt
+    551.2 ms  ✓ ConstructionBase → ConstructionBaseLinearAlgebraExt
+    551.0 ms  ✓ ArrayInterface → ArrayInterfaceGPUArraysCoreExt
+    796.7 ms  ✓ ArrayInterface → ArrayInterfaceSparseArraysExt
+    807.3 ms  ✓ ConstructionBase → ConstructionBaseStaticArraysExt
+    596.6 ms  ✓ Compat → CompatLinearAlgebraExt
+   2556.9 ms  ✓ ThreadingUtilities
+   1576.1 ms  ✓ MicroMamba
+   1237.2 ms  ✓ Setfield
+   4422.2 ms  ✓ TimerOutputs
+   2981.7 ms  ✓ CondaPkg
+   6972.1 ms  ✓ Mosek
+   6302.0 ms  ✓ ArrayInterface → ArrayInterfaceCUDAExt
+   8688.0 ms  ✓ Static
+   2420.3 ms  ✓ MosekTools
+    648.5 ms  ✓ BitTwiddlingConvenienceFunctions
+   1426.3 ms  ✓ CPUSummary
+   1892.2 ms  ✓ StaticArrayInterface
+    908.3 ms  ✓ PolyesterWeave
+    676.3 ms  ✓ StaticArrayInterface → StaticArrayInterfaceStaticArraysExt
+    714.7 ms  ✓ CloseOpenIntervals
+    854.7 ms  ✓ LayoutPointers
+    820.0 ms  ✓ StrideArraysCore
+    717.4 ms  ✓ Polyester
+   1416.6 ms  ✓ SparseMatricesCSR
+  17579.1 ms  ✓ SCS
+   4575.2 ms  ✓ cuSPARSE → SparseMatricesCSRExt
+  16274.9 ms  ✓ Polynomials
+   1688.3 ms  ✓ Polynomials → PolynomialsMutableArithmeticsExt
+  17379.5 ms  ✓ PythonCall
+  50469.4 ms  ✓ Clarabel
+Info Given PDCS was explicitly requested, output will be shown live [0K
+[0K    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/PythonCall/5WGSP/CondaPkg.toml
+[0K    CondaPkg Found dependencies: /home/zhenwei/PDCS_fork/.julia-depot/packages/CondaPkg/lKlVY/CondaPkg.toml
+[0K    CondaPkg Resolving changes
+[0K             ~ libstdcxx
+[0K             ~ libstdcxx-ng
+[0K             ~ openssl
+[0K             ~ python
+[0K    CondaPkg Initialising pixi
+[0K             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+[0K             │ init
+[0K             │ --format pixi
+[0K             └ /home/zhenwei/PDCS_fork/.CondaPkg
+[0K✔ Created /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+[0K    CondaPkg Wrote /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+[0K             │ [dependencies]
+[0K             │ openssl = ">=3, <3.6"
+[0K             │ libstdcxx = ">=3.4,<15.0"
+[0K             │ libstdcxx-ng = ">=3.4,<15.0"
+[0K             │ 
+[0K             │     [dependencies.python]
+[0K             │     channel = "conda-forge"
+[0K             │     build = "*cp*"
+[0K             │     version = ">=3.10,!=3.14.0,!=3.14.1,<4"
+[0K             │ 
+[0K             │ [workspace]
+[0K             │ name = ".CondaPkg"
+[0K             │ platforms = ["linux-64"]
+[0K             │ channels = ["conda-forge"]
+[0K             │ channel-priority = "strict"
+[0K             └ description = "automatically generated by CondaPkg.jl"
+[0K    CondaPkg Installing packages
+[0K             │ /home/zhenwei/PDCS_fork/.julia-depot/artifacts/4ae17cee0bd922f66b2c72bf2f01c22481a5ec19/bin/pixi
+[0K             │ install
+[0K             └ --manifest-path /home/zhenwei/PDCS_fork/.CondaPkg/pixi.toml
+[0K✔ The default environment has been installed.
+[0K[ Info: ============ PDCS_GPU need cuda to precompile ============
+[0K[ Info: ============precompile PDCS_CPU============
+[0K[ Info: ============precompile PDCS_CPU done============
+  70735.2 ms  ✓ PDCS
+  56 dependencies successfully precompiled in 126 seconds. 129 already precompiled.
+  1 dependency had output during precompilation:
+┌ PDCS
+│  [Output was shown above]
+└  
+TABLE5_SOLVE_START solver=cupdcs instance=table5-m10000-n100000-r01 m=10000 n=100000 density=0.0001 seed=1456099608458829617 tolerance=1.0e-6 time_limit=600.0
+TABLE5_INSTANCE_READY instance=table5-m10000-n100000-r01 nnz=99523 lambda=0.038178808507492834 numerical_digest=60b7d0f81293233bb4cffcef86c912b54254ee96633cca9f024863c07eed12b8 model_digest=bd7229415aabcf655af6204a50ffb8bf969bd64cb85d52e8da5828eb069ba497 generation_seconds=1.1416280269622803
+rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.
+kkt_restart_freq is not set, using default value: 500.
+duality_gap_restart_freq is not set, using default value: 2000.
+[ Info: logfile is set to nothing
+[ Info: ---------------------------------------------------
+[ Info: ------------- Parameter Info Summary --------------
+[ Info: ---------------------------------------------------
+[ Info: time limit: 600.0
+[ Info: use_preconditioner: true
+[ Info: use_adaptive_restart: true
+[ Info: use_adaptive_step_size_weight: true
+[ Info: use_aggressive: true
+[ Info: use_restart: true
+[ Info: use_adaptive_step: true
+[ Info: use_reflection: true
+[ Info: use_halpern: true
+[ Info: use_resolving: true
+[ Info: use_duality_gap_restart: true
+[ Info: duality_gap_restart_freq: 2000
+[ Info: use_kkt_restart: false
+[ Info: kkt_restart_freq: 2000
+[ Info: abs_tol: 1.0e-6
+[ Info: rel_tol: 1.0e-6
+[ Info: eps_primal_infeasible_low_acc: 1.0e-12
+[ Info: eps_dual_infeasible_low_acc: 1.0e-12
+[ Info: eps_primal_infeasible_high_acc: 1.0e-16
+[ Info: eps_dual_infeasible_high_acc: 1.0e-16
+[ Info: print_freq: 1000
+[ Info: check_terminate_freq: 1000
+[ Info: ---------------------------------------------------
+[ Info: ------------- Model Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: variable number: 210004
+[ Info: constraint number: 220005
+[ Info: non-zero elements in G: 419055
+[ Info: Number of box constraints: 210004
+[ Info: Number of equal constraints: 10003
+[ Info: Number of nonnegative constraints: 200000
+[ Info: Number of soc cone constraints: 1
+[ Info: Number of rsoc cone constraints: 0
+[ Info: Number of exp cone constraints: 0
+[ Info: Number of dual exp cone constraints: 0
+[ Info: Number of soc cone variables: 0
+[ Info: Number of rsoc cone variables: 0
+[ Info: Number of exp cone variables: 0
+[ Info: Number of dual exp cone variables: 0
+[ Info: ---------------------------------------------------
+[ Info: Using preconditioner
+[ Info: Warm start not enabled. Ignoring warm start values.
+[ Info: Initializing primal and dual variables to zero.
+[ Info: initial nrm1G: 319559.8744953733, initial nrmInfG: 1.0
+[ Info: initial nrm1c: 7637.761701498566
+[ Info: initial nrm1h: 32.081657022182284
+[ Info: initial nrmInfc: 2.0
+[ Info: max Dr_product:2.4910180401251374
+[ Info: norm Dr_product:565.2959053631283
+[ Info: max Dl_product:5.258209761233698
+[ Info: norm Dl_product:565.2967889569371
+[ Info: after scaling, norm1 c: 6535.726789007139
+[ Info: after scaling, normInf c: 1.9996615778638578
+[ Info: after scaling, norm1 G: 201091.19788345209
+[ Info: after scaling, normInf G: 1.0
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:0.00 restart_used:0
+[ Info: ==================================================
+[ Info: Start unified diagonal GPU loop for the ablation-compatible production path.
+[ Info: iter:0 rel_p_res(inf):5.000e-01 rel_d_res(inf):6.667e-01 primal_obj:0.000e+00 dual_obj:0.000e+00 rel_pd_gap:0.000e+00 time:2.73 restart_used:0
+[ Info: iter:1000 rel_p_res(inf):3.301e-04 rel_d_res(inf):7.284e-03 primal_obj:1.52514e-01 dual_obj:2.14000e-01 rel_pd_gap:5.065e-02 time:3.89 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:1.476e+00 diff_nrm_y_recovered:1.753e+01 nrm2_x_recovered:1.476e+00 nrm2_y_recovered:1.753e+01, nrmInf_x_recovered:9.993e-01 nrmInf_y_recovered:1.535e+00 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:8.321e-02, sigma:1.829e+01
+[ Info: iter:2000 rel_p_res(inf):2.419e-04 rel_d_res(inf):5.204e-03 primal_obj:1.72898e-01 dual_obj:2.01116e-01 rel_pd_gap:2.349e-02 time:4.82 restart_used:0, restart_trigger_mean:0, restart_trigger_ergodic:0, diff_nrm_x_recovered:1.880e-03 diff_nrm_y_recovered:3.507e-02 nrm2_x_recovered:1.476e+00 nrm2_y_recovered:1.751e+01, nrmInf_x_recovered:9.995e-01 nrmInf_y_recovered:1.533e+00 dual_gap_ergodic:1.000e+30, dual_gap_mean:1.000e+30, dual_gap_restart_threshold:Inf, dual_gap_r:0.000e+00, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:6.179e-02, sigma:1.358e+01
+[ Info: restart due to condition 1
+[ Info: omega:14.825902477402515, x_diff_norm:2.181752691132996, y_diff_norm:17.905505271449808
+[ Info: iter:3000 rel_p_res(inf):7.547e-07 rel_d_res(inf):1.867e-06 primal_obj:1.70116e-01 dual_obj:1.70133e-01 rel_pd_gap:1.508e-05 time:5.18 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:1.673e-03 diff_nrm_y_recovered:3.600e-02 nrm2_x_recovered:1.477e+00 nrm2_y_recovered:1.751e+01, nrmInf_x_recovered:1.000e+00 nrmInf_y_recovered:1.532e+00 dual_gap_ergodic:1.428e-03, dual_gap_mean:4.247e-03, dual_gap_restart_threshold:1.428e-03, dual_gap_r:1.002e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:9.992e-02, sigma:1.216e+01
+[ Info: iter:4000 rel_p_res(inf):3.716e-07 rel_d_res(inf):1.011e-06 primal_obj:1.70119e-01 dual_obj:1.70128e-01 rel_pd_gap:7.673e-06 time:5.47 restart_used:1, restart_trigger_mean:0, restart_trigger_ergodic:1, diff_nrm_x_recovered:5.139e-06 diff_nrm_y_recovered:3.142e-05 nrm2_x_recovered:1.477e+00 nrm2_y_recovered:1.751e+01, nrmInf_x_recovered:1.000e+00 nrmInf_y_recovered:1.532e+00 dual_gap_ergodic:1.428e-03, dual_gap_mean:4.247e-03, dual_gap_restart_threshold:1.428e-03, dual_gap_r:1.002e+02, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:1.154e-01, sigma:1.404e+01
+[ Info: restart due to condition 1
+[ Info: omega:11.030649873449653, x_diff_norm:0.002938896610198877, y_diff_norm:0.04744520514223141
+[ Info: iter:5000 rel_p_res(inf):5.256e-10 rel_d_res(inf):6.105e-09 primal_obj:1.70123e-01 dual_obj:1.70123e-01 rel_pd_gap:3.681e-08 time:5.80 restart_used:2, restart_trigger_mean:0, restart_trigger_ergodic:2, diff_nrm_x_recovered:4.500e-06 diff_nrm_y_recovered:2.880e-05 nrm2_x_recovered:1.477e+00 nrm2_y_recovered:1.751e+01, nrmInf_x_recovered:1.000e+00 nrmInf_y_recovered:1.532e+00 dual_gap_ergodic:4.639e-04, dual_gap_mean:3.038e-03, dual_gap_restart_threshold:4.639e-04, dual_gap_r:3.619e-04, kkt_error_ergodic:1.000e+30, kkt_error_mean:1.000e+30, kkt_error_restart_threshold:0.000e+00, tau:8.882e-02, sigma:1.582e+01
+[ Info: ===============================================
+[ Info: ---------------------------------------------------
+[ Info: ------------- Solver Info Summary -----------------
+[ Info: ---------------------------------------------------
+[ Info: iter_num:                     5000
+[ Info: exit_status:                  optimal
+[ Info: l_2_abs_primal_res:           6.0559e-09
+[ Info: l_2_rel_primal_res:           9.2529e-11
+[ Info: l_inf_abs_primal_res:         1.0513e-09
+[ Info: l_inf_rel_primal_res:         5.2563e-10
+[ Info: l_2_abs_dual_res:             8.4994e-08
+[ Info: l_2_rel_dual_res:             1.1127e-11
+[ Info: l_inf_abs_dual_res:           1.8314e-08
+[ Info: l_inf_rel_dual_res:           6.1047e-09
+[ Info: rel_gap:                      3.6808e-08
+[ Info: abs_gap:                      4.3070e-08
+[ Info: primal_obj:                   1.7012e-01
+[ Info: dual_obj:                     1.7012e-01
+[ Info: time:                         5.7959
+[ Info: ---------------------------------------------------
+[ Info:  norm(sol.x.recovered_primal.primal_sol.x, Inf): 1.0000000007245327
+[ Info:  norm(sol.y.recovered_dual.dual_sol.y, Inf): 1.5322361196102536
+[ Info: time for projection: 0.27124905586242676
+[ Info: time for iterative: 1.3346374034881592
+[ Info: time for restart check: 0.1828160285949707
+[ Info: time for exit check: 0.0
+[ Info: time for print info calculation: 0.5466132164001465
+TABLE5_SOLVE_RESULT solver=cupdcs instance=table5-m10000-n100000-r01 termination=OPTIMAL primal_status=FEASIBLE_POINT iterations=5000 objective=0.17012275434271934 optimize_wall_seconds=37.50271010398865
+TABLE5_SOLVE_FINISH solver=cupdcs instance=table5-m10000-n100000-r01 status=completed result=/home/zhenwei/PDCS_fork/benchmark/large_scale_lasso/table5_solver_results/cupdcs/table5-m10000-n100000-r01/attempt_20260729T194838Z/result.toml

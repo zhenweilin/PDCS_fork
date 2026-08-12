@@ -5,6 +5,7 @@ using CUDA
 using JuMP
 import PDCS
 import MathOptInterface as MOI
+using PDCS: PDCS_GPU
 
 const CHECKOUT_ROOT = realpath(joinpath(@__DIR__, ".."))
 
@@ -12,12 +13,20 @@ const CHECKOUT_ROOT = realpath(joinpath(@__DIR__, ".."))
     @test realpath(pkgdir(PDCS)) == CHECKOUT_ROOT
 end
 
+@testset "PDCS GPU extension loads before hardware gating" begin
+    extension = Base.get_extension(PDCS, :PDCSGPUExt)
+    @test extension !== nothing
+    @test isdefined(PDCS, :PDCS_GPU)
+    @test PDCS_GPU === PDCS.PDCS_GPU
+    @test !isdefined(PDCS_GPU, :libcublas_path)
+    @test isdefined(PDCS_GPU, :create_cublas_handle)
+    @test PDCS_GPU._gridWise_cublas_handle[] === nothing
+end
+
 @testset "PDCS GPU sparse index runtime" begin
     if !CUDA.functional()
         @test_skip CUDA.functional()
     else
-        @eval using PDCS: PDCS_GPU
-
         G = SparseMatrixCSC{Float64,Int64}(sparse(
             [1, 3, 2, 1, 3],
             [1, 1, 2, 3, 3],
@@ -28,11 +37,12 @@ end
         x = [1.0, 2.0, 3.0]
         expected_row_max = [2.0, 3.0, 5.0]
         expected_col_max = [5.0, 3.0, 4.0]
-        expected_row_norm = [sqrt(5.0), 3.0, sqrt(41.0)]
-        expected_col_norm = [sqrt(29.0), 3.0, sqrt(17.0)]
+        expected_row_alpha_sum = [5.0, 9.0, 41.0]
+        expected_col_alpha_sum = [29.0, 9.0, 17.0]
         row_scaling = [2.0, 3.0, 4.0]
         col_scaling = [5.0, 6.0, 7.0]
-        expected_rescaled = Diagonal(row_scaling) * G * Diagonal(col_scaling)
+        expected_rescaled =
+            Diagonal(1.0 ./ row_scaling) * G * Diagonal(1.0 ./ col_scaling)
 
         for Ti in (Int32, Int64)
             coeff = PDCS_GPU.coeffUnion(
@@ -62,11 +72,11 @@ end
 
             row_norm = CUDA.zeros(Float64, size(G, 1))
             PDCS_GPU.alpha_norm_row(d_G, 2.0, row_norm)
-            @test Array(row_norm) ≈ expected_row_norm
+            @test Array(row_norm) ≈ expected_row_alpha_sum
 
             col_norm = CUDA.zeros(Float64, size(G, 2))
             PDCS_GPU.alpha_norm_col(d_G, 2.0, col_norm)
-            @test Array(col_norm) ≈ expected_col_norm
+            @test Array(col_norm) ≈ expected_col_alpha_sum
 
             csr_scaled = PDCS_GPU.coeffUnion(
                 G=G,
@@ -136,7 +146,7 @@ end
             )
             @test direct.info.exit_status in (:optimal, :max_iter, :time_limit)
             @test isfinite(direct.info.pObj)
-            @test all(isfinite, Array(direct.x.recovered_primal.primal_sol.x))
+            @test all(isfinite, Array(direct.x.primal_sol.x))
 
             for use_scaling in (true, false)
                 model = JuMP.Model(PDCS_GPU.Optimizer)
@@ -150,7 +160,7 @@ end
                 JuMP.set_optimizer_attribute(model, "verbose", 0)
                 JuMP.@variable(model, variable >= 0.0)
                 JuMP.@objective(model, Min, variable)
-                JuMP.@constraint(model, variable >= 1.0)
+                JuMP.@constraint(model, 2.0 * variable >= 2.0)
                 JuMP.optimize!(model)
 
                 @test JuMP.termination_status(model) in (
