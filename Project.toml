@@ -1,14 +1,15 @@
 name = "PDCS"
 uuid = "00000000-0000-0000-0000-000000000001"
-version = "0.1.0"
 authors = ["PDCS Contributors"]
+version = "0.1.0"
 
 [deps]
-Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
-JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+JumpRW = "c9d8e70c-4b1f-4c62-8046-e3fe515d840d"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
@@ -33,12 +34,11 @@ CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 PDCSGPUExt = "CUDA"
 
 [compat]
-Clarabel = "0.11.1"
+CUDA = "5, 6"
+MathOptInterface = "1.49"
 MosekTools = "0.15.10"
 SCS = "2.6.4"
 julia = "1.10"
-CUDA = "5, 6"
-MathOptInterface = "1.49"
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"

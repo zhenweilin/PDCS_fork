@@ -1,5 +1,5 @@
 generator_version = 1
-julia_version = "1.12.5"
+julia_version = "1.10.4"
 manifest_sha256 = "415d61ce8040e252e968c785d14f304e62dfebec5dabcead98970e70916b096c"
 master_seed = "20260728"
 preset = "table5"
@@ -15,7 +15,7 @@ m = 10000
 n = 100000
 preset = "table5"
 replicate = 1
-seed = "1456099608458829617"
+seed = "8782944895477668240"
 [[instances]]
 density = 0.0001
 id = "table5-m10000-n100000-r02"
@@ -23,7 +23,7 @@ m = 10000
 n = 100000
 preset = "table5"
 replicate = 2
-seed = "3774683599633055197"
+seed = "1249746771018452967"
 [[instances]]
 density = 0.0001
 id = "table5-m10000-n100000-r03"
@@ -31,7 +31,7 @@ m = 10000
 n = 100000
 preset = "table5"
 replicate = 3
-seed = "7352328007339572649"
+seed = "1438812174955774462"
 [[instances]]
 density = 0.0001
 id = "table5-m10000-n100000-r04"
@@ -39,7 +39,7 @@ m = 10000
 n = 100000
 preset = "table5"
 replicate = 4
-seed = "8539239721064585772"
+seed = "4658943319686759222"
 [[instances]]
 density = 0.0001
 id = "table5-m10000-n100000-r05"
@@ -47,7 +47,7 @@ m = 10000
 n = 100000
 preset = "table5"
 replicate = 5
-seed = "2682075302358372869"
+seed = "1864092913968872062"
 [[instances]]
 density = 0.0001
 id = "table5-m70000-n700000-r01"
@@ -55,7 +55,7 @@ m = 70000
 n = 700000
 preset = "table5"
 replicate = 1
-seed = "6866308190711936842"
+seed = "2110689635453156452"
 [[instances]]
 density = 0.0001
 id = "table5-m70000-n700000-r02"
@@ -63,7 +63,7 @@ m = 70000
 n = 700000
 preset = "table5"
 replicate = 2
-seed = "3717777317041247579"
+seed = "5807501844550647914"
 [[instances]]
 density = 0.0001
 id = "table5-m70000-n700000-r03"
@@ -71,7 +71,7 @@ m = 70000
 n = 700000
 preset = "table5"
 replicate = 3
-seed = "6230819915418504357"
+seed = "889649792271315939"
 [[instances]]
 density = 0.0001
 id = "table5-m70000-n700000-r04"
@@ -79,7 +79,7 @@ m = 70000
 n = 700000
 preset = "table5"
 replicate = 4
-seed = "5050833866237992834"
+seed = "27676336226125997"
 [[instances]]
 density = 0.0001
 id = "table5-m70000-n700000-r05"
@@ -87,7 +87,7 @@ m = 70000
 n = 700000
 preset = "table5"
 replicate = 5
-seed = "3478211357477831271"
+seed = "1394289439065080689"
 [[instances]]
 density = 0.0001
 id = "table5-m400000-n7000000-r01"
@@ -95,7 +95,7 @@ m = 400000
 n = 7000000
 preset = "table5"
 replicate = 1
-seed = "2810953517340410803"
+seed = "3733591950880413111"
 [[instances]]
 density = 0.0001
 id = "table5-m400000-n7000000-r02"
@@ -103,7 +103,7 @@ m = 400000
 n = 7000000
 preset = "table5"
 replicate = 2
-seed = "6916851584803374380"
+seed = "5271808775333973418"
 [[instances]]
 density = 0.0001
 id = "table5-m400000-n7000000-r03"
@@ -111,7 +111,7 @@ m = 400000
 n = 7000000
 preset = "table5"
 replicate = 3
-seed = "2252237519727520935"
+seed = "3228079761134368164"
 [[instances]]
 density = 0.0001
 id = "table5-m400000-n7000000-r04"
@@ -119,7 +119,7 @@ m = 400000
 n = 7000000
 preset = "table5"
 replicate = 4
-seed = "9202490041639810005"
+seed = "1967448528256475835"
 [[instances]]
 density = 0.0001
 id = "table5-m400000-n7000000-r05"
@@ -127,7 +127,7 @@ m = 400000
 n = 7000000
 preset = "table5"
 replicate = 5
-seed = "1459784771767232267"
+seed = "3770887090435520361"
 [[instances]]
 density = 0.0001
 id = "table5-m700000-n7000000-r01"
@@ -135,7 +135,7 @@ m = 700000
 n = 7000000
 preset = "table5"
 replicate = 1
-seed = "2694979877904449328"
+seed = "170465554952891631"
 [[instances]]
 density = 0.0001
 id = "table5-m700000-n7000000-r02"
@@ -143,7 +143,7 @@ m = 700000
 n = 7000000
 preset = "table5"
 replicate = 2
-seed = "706412229318414900"
+seed = "8938992808659545059"
 [[instances]]
 density = 0.0001
 id = "table5-m700000-n7000000-r03"
@@ -151,7 +151,7 @@ m = 700000
 n = 7000000
 preset = "table5"
 replicate = 3
-seed = "2776373863867649000"
+seed = "2039004724833415370"
 [[instances]]
 density = 0.0001
 id = "table5-m700000-n7000000-r04"
@@ -159,7 +159,7 @@ m = 700000
 n = 7000000
 preset = "table5"
 replicate = 4
-seed = "780990368380045832"
+seed = "6279752056213273899"
 [[instances]]
 density = 0.0001
 id = "table5-m700000-n7000000-r05"
@@ -167,7 +167,7 @@ m = 700000
 n = 7000000
 preset = "table5"
 replicate = 5
-seed = "6974796360093007817"
+seed = "6783410239708014420"
 [[instances]]
 density = 0.0001
 id = "table5-m750000-n7500000-r01"
@@ -175,7 +175,7 @@ m = 750000
 n = 7500000
 preset = "table5"
 replicate = 1
-seed = "3464449634565370456"
+seed = "6220465467556560458"
 [[instances]]
 density = 0.0001
 id = "table5-m750000-n7500000-r02"
@@ -183,7 +183,7 @@ m = 750000
 n = 7500000
 preset = "table5"
 replicate = 2
-seed = "7063733435616014003"
+seed = "5440886567746600567"
 [[instances]]
 density = 0.0001
 id = "table5-m750000-n7500000-r03"
@@ -191,7 +191,7 @@ m = 750000
 n = 7500000
 preset = "table5"
 replicate = 3
-seed = "7306719367855031537"
+seed = "2261606697660433670"
 [[instances]]
 density = 0.0001
 id = "table5-m750000-n7500000-r04"
@@ -199,7 +199,7 @@ m = 750000
 n = 7500000
 preset = "table5"
 replicate = 4
-seed = "66351557481754279"
+seed = "1149474611536685577"
 [[instances]]
 density = 0.0001
 id = "table5-m750000-n7500000-r05"
@@ -207,4 +207,4 @@ m = 750000
 n = 7500000
 preset = "table5"
 replicate = 5
-seed = "7133432016813647455"
+seed = "7140695647002483535"
