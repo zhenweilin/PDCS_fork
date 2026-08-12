@@ -541,6 +541,10 @@ function main()
         result["setup_seconds"] = time() - setup_started
         A = b = nothing
         GC.gc()
+        println(
+            "TABLE5_MODEL_BUILT instance=$(OPTIONS.instance_id) " *
+            "setup_seconds=$(result["setup_seconds"])",
+        )
 
         optimize_started = time()
         optimize!(model)

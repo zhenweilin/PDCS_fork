@@ -393,7 +393,7 @@ solve_phase() {
 
     local instance_id case_dir attempt result_path raw_log
     local project depot return_code timeout_seconds
-    timeout_seconds=$(( TIME_LIMIT + 7200 ))
+    timeout_seconds=$(( TIME_LIMIT + ${TABLE5_MARGIN_SECONDS:-7200} ))
     for instance_id in "${instance_ids[@]}"; do
         for solver in "${solver_names[@]}"; do
             case_dir="${SOLVER_DIR}/${solver}/${instance_id}"
