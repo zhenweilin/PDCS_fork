@@ -810,6 +810,7 @@ mutable struct PDHGCLPParameters
     use_reflection::Bool
     use_halpern::Bool
     use_inline_halpern::Bool
+    use_current_restart_candidate::Bool
     use_mean_restart_candidate::Bool
     use_resolving::Bool
     use_kkt_restart::Bool
@@ -835,12 +836,19 @@ mutable struct PDHGCLPParameters
          sigma, tau, theta,
          use_restart, use_adaptive_step, use_adaptive_step_size_weight,
          use_reflection, use_halpern, use_inline_halpern, use_resolving,
+         use_current_restart_candidate = true,
          use_mean_restart_candidate = true,
          use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit)
          use_halpern && use_inline_halpern && throw(ArgumentError(
              "use_halpern (restart candidate) and use_inline_halpern " *
              "(legacy inline trajectory) cannot both be true",
          ))
+         use_restart &&
+             !(use_current_restart_candidate ||
+               use_mean_restart_candidate || use_halpern) &&
+             throw(ArgumentError(
+                 "at least one restart candidate must be enabled when use_restart=true",
+             ))
          beta_suff = 0.4
          beta_necessary = 0.8
          beta_suff_kkt = 0.4
@@ -855,7 +863,8 @@ mutable struct PDHGCLPParameters
         sigma, tau, theta,
         use_restart, use_adaptive_step, use_adaptive_step_size_weight,
         use_reflection, use_halpern, use_inline_halpern,
-        use_mean_restart_candidate, use_resolving,
+        use_current_restart_candidate, use_mean_restart_candidate,
+        use_resolving,
         use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit,
         beta_suff, beta_necessary, beta_suff_kkt, beta_necessary_kkt, beta_artificial, proj_base_tol, proj_abs_tol, proj_rel_tol)
     end
@@ -1092,6 +1101,40 @@ mutable struct rpdhgSolver
     end
 end
 
+"""
+    resolve_inline_halpern(requested, use_halpern; cone data...)
+
+Resolve the public `use_inline_halpern` option. An explicit Boolean is always
+preserved. If the user leaves the option unspecified (`nothing`), enable the
+inline Halpern trajectory for a pure SOC/rotated-SOC model and disable it for
+models containing a primal or dual exponential cone. Models without any SOC
+also keep it disabled. An explicitly enabled restart-candidate Halpern mode
+takes precedence over the automatic inline mode because the two modes are
+mutually exclusive.
+"""
+function resolve_inline_halpern(
+    requested::Union{Nothing,Bool},
+    use_halpern::Bool;
+    socG,
+    rsocG,
+    expG::Integer,
+    dual_expG::Integer,
+    soc_x,
+    rsoc_x,
+    exp_x::Integer,
+    dual_exp_x::Integer,
+)
+    requested !== nothing && return requested
+    use_halpern && return false
+
+    has_exponential_cone =
+        expG > 0 || dual_expG > 0 || exp_x > 0 || dual_exp_x > 0
+    has_soc_cone =
+        !isempty(socG) || !isempty(rsocG) || !isempty(soc_x) || !isempty(rsoc_x)
+    return has_soc_cone && !has_exponential_cone
+end
+
+
 mutable struct PDCS_GPU_Solver
     n::Integer
     m::Integer
@@ -1124,6 +1167,7 @@ mutable struct PDCS_GPU_Solver
     use_reflection::Bool
     use_halpern::Bool
     use_inline_halpern::Bool
+    use_current_restart_candidate::Bool
     use_mean_restart_candidate::Bool
     primal_sol::Union{Vector{rpdhg_float}, CuArray}
     dual_sol::Union{Vector{rpdhg_float}, CuArray}
@@ -1178,7 +1222,8 @@ mutable struct PDCS_GPU_Solver
         use_adaptive_step::Bool = true,
         use_reflection::Bool = use_aggressive,
         use_halpern::Bool = false,
-        use_inline_halpern::Bool = false,
+        use_inline_halpern::Union{Nothing,Bool} = nothing,
+        use_current_restart_candidate::Bool = true,
         use_mean_restart_candidate::Bool = true,
         primal_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(n),
         dual_sol::Union{Vector{rpdhg_float}, CuArray} = zeros(m),
@@ -1202,10 +1247,28 @@ mutable struct PDCS_GPU_Solver
         use_duality_gap_restart::Bool = true,
         duality_gap_restart_freq::Integer = 2000
     )
+        use_inline_halpern = resolve_inline_halpern(
+            use_inline_halpern,
+            use_halpern;
+            socG = socG,
+            rsocG = rsocG,
+            expG = expG,
+            dual_expG = dual_expG,
+            soc_x = soc_x,
+            rsoc_x = rsoc_x,
+            exp_x = exp_x,
+            dual_exp_x = dual_exp_x,
+        )
         use_halpern && use_inline_halpern && throw(ArgumentError(
             "use_halpern (restart candidate) and use_inline_halpern " *
             "(legacy inline trajectory) cannot both be true",
         ))
+        use_restart &&
+            !(use_current_restart_candidate ||
+              use_mean_restart_candidate || use_halpern) &&
+            throw(ArgumentError(
+                "at least one restart candidate must be enabled when use_restart=true",
+            ))
         if c isa CuArray
             if isa(Dl, Vector{rpdhg_float})
                 Dl = CuArray(Dl)
@@ -1252,6 +1315,7 @@ mutable struct PDCS_GPU_Solver
             use_reflection,
             use_halpern,
             use_inline_halpern,
+            use_current_restart_candidate,
             use_mean_restart_candidate,
             primal_sol,
             dual_sol,

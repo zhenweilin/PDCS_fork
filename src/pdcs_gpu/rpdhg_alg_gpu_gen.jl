@@ -416,7 +416,8 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
-    use_inline_halpern::Bool = false,
+    use_inline_halpern::Union{Nothing,Bool} = nothing,
+    use_current_restart_candidate::Bool = true,
     use_mean_restart_candidate::Bool = true,
     primal_sol::CuArray{rpdhg_float} = CuArray(zeros(n)),
     dual_sol::CuArray{rpdhg_float} = CuArray(zeros(m)),
@@ -446,6 +447,18 @@ dGType<:Union{
     CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64},
     Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int64}}
 }}
+    use_inline_halpern = resolve_inline_halpern(
+        use_inline_halpern,
+        use_halpern;
+        socG = socG,
+        rsocG = rsocG,
+        expG = expG,
+        dual_expG = dual_expG,
+        soc_x = soc_x,
+        rsoc_x = rsoc_x,
+        exp_x = exp_x,
+        dual_exp_x = dual_exp_x,
+    )
     use_halpern && use_inline_halpern && throw(ArgumentError(
         "use_halpern (restart candidate) and use_inline_halpern " *
         "(legacy inline trajectory) cannot both be true",
@@ -485,6 +498,7 @@ dGType<:Union{
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
         @info ("use_inline_halpern: $use_inline_halpern")
+        @info ("use_current_restart_candidate: $use_current_restart_candidate")
         @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
@@ -925,6 +939,7 @@ dGType<:Union{
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
                                 use_inline_halpern = use_inline_halpern,
+                                use_current_restart_candidate = use_current_restart_candidate,
                                 use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
@@ -1281,7 +1296,8 @@ function rpdhg_gpu_solve(;
     use_adaptive_step::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
-    use_inline_halpern::Bool = false,
+    use_inline_halpern::Union{Nothing,Bool} = nothing,
+    use_current_restart_candidate::Bool = true,
     use_mean_restart_candidate::Bool = true,
     primal_sol::Vector{rpdhg_float} = zeros(n),
     dual_sol::Vector{rpdhg_float} = zeros(m),
@@ -1307,6 +1323,18 @@ function rpdhg_gpu_solve(;
     sparse_index_type = :auto,
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
+    use_inline_halpern = resolve_inline_halpern(
+        use_inline_halpern,
+        use_halpern;
+        socG = socG,
+        rsocG = rsocG,
+        expG = expG,
+        dual_expG = dual_expG,
+        soc_x = soc_x,
+        rsoc_x = rsoc_x,
+        exp_x = exp_x,
+        dual_exp_x = dual_exp_x,
+    )
     use_halpern && use_inline_halpern && throw(ArgumentError(
         "use_halpern (restart candidate) and use_inline_halpern " *
         "(legacy inline trajectory) cannot both be true",
@@ -1345,6 +1373,7 @@ function rpdhg_gpu_solve(;
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
         @info ("use_inline_halpern: $use_inline_halpern")
+        @info ("use_current_restart_candidate: $use_current_restart_candidate")
         @info ("use_mean_restart_candidate: $use_mean_restart_candidate")
         @info ("use_resolving: $use_resolving")
         @info ("use_duality_gap_restart: $use_duality_gap_restart")
@@ -1787,6 +1816,7 @@ function rpdhg_gpu_solve(;
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
                                 use_inline_halpern = use_inline_halpern,
+                                use_current_restart_candidate = use_current_restart_candidate,
                                 use_mean_restart_candidate = use_mean_restart_candidate,
                                 use_resolving = use_resolving,
                                 verbose = verbose,
@@ -2057,6 +2087,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
             use_inline_halpern = solver.use_inline_halpern,
+            use_current_restart_candidate = solver.use_current_restart_candidate,
             use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,
@@ -2108,6 +2139,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
             use_inline_halpern = solver.use_inline_halpern,
+            use_current_restart_candidate = solver.use_current_restart_candidate,
             use_mean_restart_candidate = solver.use_mean_restart_candidate,
             primal_sol = solver.primal_sol,
             dual_sol = solver.dual_sol,

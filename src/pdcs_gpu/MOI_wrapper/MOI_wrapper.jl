@@ -688,12 +688,12 @@ function MOI.optimize!(
         end
     end
     if !haskey(options, :use_inline_halpern)
-        options[:use_inline_halpern] = false
+        options[:use_inline_halpern] = nothing
         if options[:verbose] > 0
-            println("use_inline_halpern is not set, using default value: false.")
+            println("use_inline_halpern is not set; selecting it automatically from the cone types.")
         end
     end
-    options[:use_halpern] && options[:use_inline_halpern] && throw(ArgumentError(
+    options[:use_halpern] && options[:use_inline_halpern] === true && throw(ArgumentError(
         "use_halpern (restart candidate) and use_inline_halpern " *
         "(legacy inline trajectory) cannot both be true",
     ))
@@ -701,6 +701,12 @@ function MOI.optimize!(
         options[:use_mean_restart_candidate] = true
         if options[:verbose] > 0
             println("use_mean_restart_candidate is not set, using default value: true.")
+        end
+    end
+    if !haskey(options, :use_current_restart_candidate)
+        options[:use_current_restart_candidate] = true
+        if options[:verbose] > 0
+            println("use_current_restart_candidate is not set, using default value: true.")
         end
     end
     if !haskey(options, :kkt_restart_freq)
@@ -777,6 +783,8 @@ function MOI.optimize!(
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
             use_inline_halpern = options[:use_inline_halpern],
+            use_current_restart_candidate =
+                options[:use_current_restart_candidate],
             use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],
@@ -846,6 +854,8 @@ function MOI.optimize!(
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
             use_inline_halpern = options[:use_inline_halpern],
+            use_current_restart_candidate =
+                options[:use_current_restart_candidate],
             use_mean_restart_candidate = options[:use_mean_restart_candidate],
             max_outer_iter = options[:max_outer_iter],
             max_inner_iter = options[:max_inner_iter],

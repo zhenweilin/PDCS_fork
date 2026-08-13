@@ -459,8 +459,8 @@ end
 """
 Return the restart candidate index using the legacy tie policy: when enabled,
 the running mean wins a tie with the current point, while Halpern must be
-strictly better. If `use_mean=false`, the mean is ineligible and current is the
-fallback candidate.
+strictly better. Candidate switches are eligibility masks; at least one of
+current, mean, and Halpern must be enabled.
 
 Indices are current=1, mean=2, and Halpern=3.
 """
@@ -471,22 +471,28 @@ function restart_candidate_index(
     use_halpern::Bool,
     use_mean::Bool = true,
     force_mean::Bool = false,
+    use_current::Bool = true,
 )
     # For EXP problems, paper-era artificial/force restarts kept the running
     # mean as the next epoch's starting point. This override is intentionally
-    # independent of the candidates enabled for ordinary merit-based restarts.
-    force_mean && return 2
-    current = restart_merit(current_merit)
-    if use_mean
-        selected = 2
-        best = restart_merit(mean_merit)
-    else
+    # independent of the other candidates only when mean itself is enabled.
+    force_mean && use_mean && return 2
+    !(use_current || use_mean || use_halpern) && throw(ArgumentError(
+        "at least one restart candidate must be enabled",
+    ))
+    selected = 0
+    best = Inf
+    if use_current
         selected = 1
-        best = current
+        best = restart_merit(current_merit)
     end
-    if use_mean && current < best
-        selected = 1
-        best = current
+    if use_mean
+        mean = restart_merit(mean_merit)
+        # Preserve the legacy current-vs-mean tie rule.
+        if selected == 0 || mean <= best
+            selected = 2
+            best = mean
+        end
     end
     halpern = use_halpern ? restart_merit(halpern_merit) : Inf
     if halpern < best
@@ -518,6 +524,7 @@ function install_restart_candidate!(
         halpern_enabled,
         sol.params.use_mean_restart_candidate,
         force_mean,
+        sol.params.use_current_restart_candidate,
     )
     if selected == 1
         sol.info.restart_trigger_ergodic += 1
@@ -536,9 +543,25 @@ function install_restart_candidate!(
     if force_mean
         @info "restart candidate selected" reason selected_name forced_mean=true
     else
-        @info "restart candidate selected" reason selected_name current_merit=merits[1] mean_merit=merits[2] mean_enabled=sol.params.use_mean_restart_candidate halpern_merit=(halpern_enabled ? merits[3] : Inf)
+        @info "restart candidate selected" reason selected_name current_merit=merits[1] current_enabled=sol.params.use_current_restart_candidate mean_merit=merits[2] mean_enabled=sol.params.use_mean_restart_candidate halpern_merit=(halpern_enabled ? merits[3] : Inf) halpern_enabled
     end
     return selected
+end
+
+function enabled_restart_candidate_indices(sol::Solution, use_halpern::Bool)
+    indices = Int[]
+    sol.params.use_current_restart_candidate && push!(indices, 1)
+    sol.params.use_mean_restart_candidate && push!(indices, 2)
+    use_halpern && push!(indices, 3)
+    isempty(indices) && throw(ArgumentError(
+        "no enabled restart candidate is available in this solver path",
+    ))
+    return indices
+end
+
+function enabled_restart_merit(sol::Solution, merits, use_halpern::Bool)
+    indices = enabled_restart_candidate_indices(sol, use_halpern)
+    return minimum(restart_merit(merits[index]) for index in indices)
 end
 
 """
@@ -703,24 +726,23 @@ function restart_condition_check_diagonal!(;
         sol.info.normalized_duality_gap[2] = rhoVal_left_mean
         sol.info.normalized_duality_gap[3] = Inf
         merits = sol.info.normalized_duality_gap
+        if use_halpern
+            merits[3] = binary_search_duality_gap_diagonal!(
+                solver = solver,
+                r = Mnorm_restart_left,
+                primal = halpern_primal,
+                dual = halpern_dual,
+                slack = sol.y.slack,
+                dual_sol_temp = dual_sol_temp,
+                tau = sol.params.tau,
+                sigma = sol.params.sigma,
+            )
+        end
+        candidate_merit = enabled_restart_merit(sol, merits, use_halpern)
         # condition 1
-        enabled_mean_merit = sol.params.use_mean_restart_candidate ?
-            restart_merit(merits[2]) : Inf
-        if min(restart_merit(merits[1]), enabled_mean_merit) <
+        if candidate_merit <
            sol.params.beta_suff * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            if use_halpern
-                merits[3] = binary_search_duality_gap_diagonal!(
-                    solver = solver,
-                    r = Mnorm_restart_left,
-                    primal = halpern_primal,
-                    dual = halpern_dual,
-                    slack = sol.y.slack,
-                    dual_sol_temp = dual_sol_temp,
-                    tau = sol.params.tau,
-                    sigma = sol.params.sigma,
-                )
-            end
             install_restart_candidate!(
                 sol,
                 halpern_primal,
@@ -733,21 +755,9 @@ function restart_condition_check_diagonal!(;
             return true
         end # end if rhoVal_left
         # condition 2
-        if min(restart_merit(merits[1]), enabled_mean_merit) <
+        if candidate_merit <
            sol.params.beta_necessary * sol.info.normalized_duality_gap_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            if use_halpern
-                merits[3] = binary_search_duality_gap_diagonal!(
-                    solver = solver,
-                    r = Mnorm_restart_left,
-                    primal = halpern_primal,
-                    dual = halpern_dual,
-                    slack = sol.y.slack,
-                    dual_sol_temp = dual_sol_temp,
-                    tau = sol.params.tau,
-                    sigma = sol.params.sigma,
-                )
-            end
             install_restart_candidate!(
                 sol,
                 halpern_primal,
@@ -769,23 +779,13 @@ function restart_condition_check_diagonal!(;
             halpern_dual,
             halpern_converge_info,
             use_halpern,
-            false,
+            use_halpern,
         )
+        candidate_merit = enabled_restart_merit(sol, merits, use_halpern)
         # condition 1
-        enabled_mean_merit = sol.params.use_mean_restart_candidate ?
-            restart_merit(merits[2]) : Inf
-        if min(restart_merit(merits[1]), enabled_mean_merit) <
+        if candidate_merit <
            sol.params.beta_suff_kkt * sol.info.kkt_error_restart_threshold
             sol.info.restart_used = sol.info.restart_used + 1
-            evaluate_halpern_restart_kkt_candidate!(
-                sol,
-                solver,
-                dual_sol_temp,
-                halpern_primal,
-                halpern_dual,
-                halpern_converge_info,
-                use_halpern,
-            )
             install_restart_candidate!(
                 sol,
                 halpern_primal,
@@ -798,11 +798,7 @@ function restart_condition_check_diagonal!(;
             return true
         end # end if rhoVal_left
         # condition 2
-        enabled_indices = if sol.params.use_mean_restart_candidate
-            use_halpern ? (1, 2, 3) : (1, 2)
-        else
-            use_halpern ? (1, 3) : (1,)
-        end
+        enabled_indices = enabled_restart_candidate_indices(sol, use_halpern)
         if any(
             restart_merit(merits[index]) <
                 sol.params.beta_necessary_kkt *
@@ -812,15 +808,6 @@ function restart_condition_check_diagonal!(;
             for index in enabled_indices
         )
             sol.info.restart_used = sol.info.restart_used + 1
-            evaluate_halpern_restart_kkt_candidate!(
-                sol,
-                solver,
-                dual_sol_temp,
-                halpern_primal,
-                halpern_dual,
-                halpern_converge_info,
-                use_halpern,
-            )
             install_restart_candidate!(
                 sol,
                 halpern_primal,
@@ -837,7 +824,8 @@ function restart_condition_check_diagonal!(;
     if inner_iter >= sol.info.iter * sol.params.beta_artificial && sol.info.iter > 100000
         @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter)")
         sol.info.restart_used = sol.info.restart_used + 1
-        if contains_exponential_cones(sol)
+        if contains_exponential_cones(sol) &&
+           sol.params.use_mean_restart_candidate
             install_restart_candidate!(
                 sol,
                 nothing,
@@ -906,7 +894,11 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
     primal_sol_0::primalVector, dual_sol_0::dualVector,
     primal_sol_0_lag::CuArray, dual_sol_0_lag::CuArray,
     dual_sol_temp::solVecDual, primal_sol_change::primalVector,
-    dual_sol_change::dualVector, primal_sol_diff::primalVector, dual_sol_diff::dualVector, random_check::Bool)
+    dual_sol_change::dualVector, primal_sol_diff::primalVector,
+    dual_sol_diff::dualVector, random_check::Bool,
+    halpern_primal::Union{primalVector,Nothing} = nothing,
+    halpern_dual::Union{dualVector,Nothing} = nothing,
+    halpern_converge_info::Union{PDHGCLPConvergeInfo,Nothing} = nothing)
     # pdhg + adaptive restart+adaptive stepsize
     sol = solver.sol
     if sol.params.verbose > 0
@@ -956,14 +948,42 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
                          y = sol.y, tau = sol.params.tau / sol.info.omega,
                          sigma = sol.params.sigma * sol.info.omega, slack = sol.y.slack,
                          dual_sol_temp = dual_sol_temp)
-            # average update
-            # sol.x.primal_sol_mean.x .= (sol.x.primal_sol_mean.x * inner_iter .+ sol.x.primal_sol.x) / (inner_iter + 1)
-            # sol.y.dual_sol_mean.y .= (sol.y.dual_sol_mean.y * inner_iter .+ sol.y.dual_sol.y) / (inner_iter + 1)
-            average_seq(primal_sol_mean = sol.x.primal_sol_mean.x, primal_sol = sol.x.primal_sol.x, primal_n = solver.data.n, dual_sol_mean = sol.y.dual_sol_mean.y, dual_sol = sol.y.dual_sol.y, dual_n = solver.data.m, inner_iter = inner_iter)
+            if sol.params.use_halpern
+                halpern_primal === nothing &&
+                    error("Halpern-only restart requires a primal candidate buffer")
+                halpern_dual === nothing &&
+                    error("Halpern-only restart requires a dual candidate buffer")
+                # The resolving path has no extrapolation. Reuse the fused
+                # update to preserve its legacy arithmetic mean while also
+                # forming the anchored restart-only Halpern candidate.
+                reflection_update(
+                    sol.x.primal_sol.x,
+                    sol.x.primal_sol_lag.x,
+                    sol.x.primal_sol_mean.x,
+                    halpern_primal.x,
+                    primal_sol_0.x,
+                    sol.y.dual_sol.y,
+                    sol.y.dual_sol_lag.y,
+                    sol.y.dual_sol_mean.y,
+                    halpern_dual.y,
+                    dual_sol_0.y,
+                    0.0,
+                    solver.data.n,
+                    solver.data.m,
+                    inner_iter,
+                    Float64(inner_iter),
+                    1.0,
+                    false,
+                    true,
+                    false,
+                )
+            else
+                average_seq(primal_sol_mean = sol.x.primal_sol_mean.x, primal_sol = sol.x.primal_sol.x, primal_n = solver.data.n, dual_sol_mean = sol.y.dual_sol_mean.y, dual_sol = sol.y.dual_sol.y, dual_n = solver.data.m, inner_iter = inner_iter)
+            end
             global time_iterative += time() - time_start
             if sol.info.iter %  sol.params.kkt_restart_freq == 0 && sol.params.use_kkt_restart
                 time_start = time()
-                if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false)
+                if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false, halpern_primal = halpern_primal, halpern_dual = halpern_dual, halpern_converge_info = halpern_converge_info)
                     break
                 end
                 if outer_iter == 1
@@ -975,11 +995,11 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
             if sol.info.iter %  sol.params.duality_gap_restart_freq == 0 && sol.params.use_duality_gap_restart
                 time_start = time()
                 if sol.info.restart_duality_gap_flag
-                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = true)
+                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = true, halpern_primal = halpern_primal, halpern_dual = halpern_dual, halpern_converge_info = halpern_converge_info)
                         break
                     end
                 else
-                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false)
+                    if restart_condition_check_diagonal!(sol = sol, solver = solver, primal_sol_0 = primal_sol_0, dual_sol_0 = dual_sol_0, dual_sol_temp = dual_sol_temp, inner_iter = inner_iter, restart_duality_gap_flag = false, halpern_primal = halpern_primal, halpern_dual = halpern_dual, halpern_converge_info = halpern_converge_info)
                         break
                     end
                 end
@@ -1260,7 +1280,10 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 dual_sol_temp = dual_sol_temp,
                 primal_sol_change = primal_sol_change, dual_sol_change = dual_sol_change,
                 primal_sol_diff = primal_sol_diff, dual_sol_diff = dual_sol_diff,
-                random_check = random_check)
+                random_check = random_check,
+                halpern_primal = halpern_primal,
+                halpern_dual = halpern_dual,
+                halpern_converge_info = halpern_converge_info)
             if sol.info.exit_status != :continue
                 return
             end
@@ -1314,7 +1337,8 @@ function pdhg_main_iter_average_diagonal_rescaling_restarts_adaptive_weight_reso
                 (force_restart && inner_iter > 100))
                 @info ("restart due to artificial condition, beta_artificial = $(sol.params.beta_artificial), inner_iter = $inner_iter, iter = $(sol.info.iter) or force_restart")
                 sol.info.restart_used = sol.info.restart_used + 1
-                if contains_exponential_cones(sol)
+                if contains_exponential_cones(sol) &&
+                   sol.params.use_mean_restart_candidate
                     install_restart_candidate!(
                         sol,
                         nothing,
