@@ -101,7 +101,7 @@ mutable struct primalVector
                 end
                 baseIndex += 1
             else
-                xbox = CuArray([])
+                xbox = CuArray{rpdhg_float}([])
             end
             if length(soc_cone_indices_start) > 0
                 for (start_idx, end_idx) in zip(soc_cone_indices_start, soc_cone_indices_end)
@@ -507,7 +507,13 @@ mutable struct Diagonal_preconditioner
     function Diagonal_preconditioner(; Dl, Dr, m, n, len_soc_x, len_rsoc_x, Dl_product = deepCopyDualVector(Dl), Dr_product = deepCopyPrimalVector(Dr), Dl_temp = deepCopyDualVector(Dl),
         Dl_product_inv_normalized = deepCopyDualVector(Dl), Dl_product_inv_normalized_squared = deepCopyDualVector(Dl))
 
-        if len_soc_x > 0 || len_rsoc_x > 0
+        Dr_temp = deepCopyPrimalVector(Dr)
+        has_primal_structured_cone =
+            len_soc_x > 0 ||
+            len_rsoc_x > 0 ||
+            !isempty(Dr.exp_cone_indices_start) ||
+            !isempty(Dr.dual_exp_cone_indices_start)
+        if has_primal_structured_cone
             Dr_product_inv_normalized = deepCopyPrimalVector(Dr)
             Dr_product_normalized = deepCopyPrimalVector(Dr)
             Dr_product_inv_normalized_squared = deepCopyPrimalVector(Dr)
@@ -524,7 +530,6 @@ mutable struct Diagonal_preconditioner
             Dr_product_inv_normalized_squared = deepCopyPrimalVector_null(Dr)
             Dr_product_normalized_squared = deepCopyPrimalVector_null(Dr)
         end
-        Dr_temp = deepCopyPrimalVector(Dr)
         Dl_product.y .= 1.0
         Dr_product.x .= 1.0
         Dl_product_inv_normalized.y .= 1.0
@@ -791,6 +796,65 @@ end
 
 
 
+"""
+    projection_tolerance_defaults(adaptive_projection_tolerance)
+
+Return `(base_tolerance, initial_tolerance)` for the projection-tolerance
+policy. `nothing` deliberately preserves the historical settings.
+"""
+function projection_tolerance_defaults(
+    adaptive_projection_tolerance::Union{Nothing,Bool},
+)
+    if adaptive_projection_tolerance === true
+        return 1e-7, 1e-7
+    elseif adaptive_projection_tolerance === false
+        return 1e-12, 1e-12
+    end
+    return 1e-9, 1e-11
+end
+
+"""
+    next_projection_tolerance(current_tolerance, average_kkt_error,
+                              adaptive_projection_tolerance)
+
+Update a projection tolerance after a KKT check. The explicit adaptive mode
+tracks the average KKT error from `1e-7` down to `1e-14`; fixed mode does not
+change the tolerance; and `nothing` reproduces the historical update exactly.
+"""
+function next_projection_tolerance(
+    current_tolerance::rpdhg_float,
+    average_kkt_error::rpdhg_float,
+    adaptive_projection_tolerance::Union{Nothing,Bool},
+    base_tolerance::rpdhg_float =
+        first(projection_tolerance_defaults(adaptive_projection_tolerance)),
+)
+    if adaptive_projection_tolerance === true
+        return max(
+            min(current_tolerance, average_kkt_error * base_tolerance, 1e-7),
+            1e-14,
+        )
+    elseif adaptive_projection_tolerance === false
+        return current_tolerance
+    end
+    return max(
+        min(current_tolerance, min(average_kkt_error * base_tolerance, 1e-7)),
+        5e-16,
+    )
+end
+
+"""Tighten after the legacy step-size-loop safeguard fires."""
+function stalled_projection_tolerance(
+    current_tolerance::rpdhg_float,
+    adaptive_projection_tolerance::Union{Nothing,Bool},
+)
+    if adaptive_projection_tolerance === true
+        return max(current_tolerance * 0.1, 1e-14)
+    elseif adaptive_projection_tolerance === false
+        return current_tolerance
+    end
+    return max(current_tolerance * 0.1, 1e-22)
+end
+
 mutable struct PDHGCLPParameters
     # parameters
     max_outer_iter::Integer
@@ -827,6 +891,7 @@ mutable struct PDHGCLPParameters
     beta_suff_kkt::rpdhg_float
     beta_necessary_kkt::rpdhg_float
     beta_artificial::rpdhg_float
+    adaptive_projection_tolerance::Union{Nothing,Bool}
     proj_base_tol::rpdhg_float
     proj_abs_tol::rpdhg_float
     proj_rel_tol::rpdhg_float
@@ -837,6 +902,7 @@ mutable struct PDHGCLPParameters
          sigma, tau, theta,
          use_restart, use_adaptive_step, use_adaptive_step_size_weight,
          use_weighted_average = true,
+         adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
          use_reflection, use_halpern, use_inline_halpern, use_resolving,
          use_current_restart_candidate = true,
          use_mean_restart_candidate = true,
@@ -856,9 +922,10 @@ mutable struct PDHGCLPParameters
          beta_suff_kkt = 0.4
          beta_necessary_kkt = 0.8
          beta_artificial = 0.223
-         proj_base_tol = 1e-9
-         proj_abs_tol = 1e-11
-         proj_rel_tol = 1e-11
+         proj_base_tol, initial_projection_tolerance =
+             projection_tolerance_defaults(adaptive_projection_tolerance)
+         proj_abs_tol = initial_projection_tolerance
+         proj_rel_tol = initial_projection_tolerance
         new(max_outer_iter, max_inner_iter, rel_tol, abs_tol,
         eps_primal_infeasible_low_acc, eps_dual_infeasible_low_acc,
         eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
@@ -869,7 +936,8 @@ mutable struct PDHGCLPParameters
         use_current_restart_candidate, use_mean_restart_candidate,
         use_resolving,
         use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit,
-        beta_suff, beta_necessary, beta_suff_kkt, beta_necessary_kkt, beta_artificial, proj_base_tol, proj_abs_tol, proj_rel_tol)
+        beta_suff, beta_necessary, beta_suff_kkt, beta_necessary_kkt, beta_artificial,
+        adaptive_projection_tolerance, proj_base_tol, proj_abs_tol, proj_rel_tol)
     end
 end
 
@@ -1160,6 +1228,7 @@ mutable struct PDCS_GPU_Solver
     Dl::Union{Vector{rpdhg_float}, CuArray}
     Dr::Union{Vector{rpdhg_float}, CuArray}
     rescaling_method::Symbol
+    scalar_cone_rescaling::Bool
     use_preconditioner::Bool
     use_adaptive_restart::Bool
     use_adaptive_step_size_weight::Bool
@@ -1167,6 +1236,7 @@ mutable struct PDCS_GPU_Solver
     use_resolving::Bool
     use_restart::Bool
     use_adaptive_step::Bool
+    adaptive_projection_tolerance::Union{Nothing,Bool}
     use_weighted_average::Bool
     use_reflection::Bool
     use_halpern::Bool
@@ -1216,6 +1286,7 @@ mutable struct PDCS_GPU_Solver
         Dl::Union{Vector{rpdhg_float}, CuArray} = ones(m),
         Dr::Union{Vector{rpdhg_float}, CuArray} = ones(n),
         rescaling_method::Symbol = :ruiz_pock_chambolle,
+        scalar_cone_rescaling::Bool = false,
         use_preconditioner::Bool = true,
         use_adaptive_restart::Bool = true,
         use_adaptive_step_size_weight::Bool = true,
@@ -1224,6 +1295,7 @@ mutable struct PDCS_GPU_Solver
         use_resolving::Bool = true,
         use_restart::Bool = use_adaptive_restart,
         use_adaptive_step::Bool = true,
+        adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
         use_weighted_average::Bool = true,
         use_reflection::Bool = use_aggressive,
         use_halpern::Bool = false,
@@ -1309,7 +1381,8 @@ mutable struct PDCS_GPU_Solver
             dual_exp_x,
             Dl,
             Dr,
-            rescaling_method,   
+            rescaling_method,
+            scalar_cone_rescaling,
             use_preconditioner,
             use_adaptive_restart,
             use_adaptive_step_size_weight,
@@ -1317,6 +1390,7 @@ mutable struct PDCS_GPU_Solver
             use_resolving,
             use_restart,
             use_adaptive_step,
+            adaptive_projection_tolerance,
             use_weighted_average,
             use_reflection,
             use_halpern,

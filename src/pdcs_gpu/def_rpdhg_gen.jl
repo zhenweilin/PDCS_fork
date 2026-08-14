@@ -49,9 +49,19 @@ function EXP_proj_diagonal!(x::T, dummy1::T, dummy2::T, dummy3::T, dummy5::T, du
     exponent_proj_diagonal!(x, D)
 end
 
+function EXP_proj_const_scale_diagonal!(x::T, dummy1::T, dummy2::T, dummy3::T, dummy5::T, dummy6::T, dummy7::T, D::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
+    # A positive scalar does not change the exponential cone.
+    exponent_proj!(x)
+end
+
 function DUALEXPonent_proj_diagonal!(x::T,  dummy1::T, Dinv::T, dummy2::T, dummy4::T, temp::T, dummy5::T, dummy6::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 29
     dualExponent_proj_diagonal!(x, Dinv, temp)
+end
+
+function DUALEXP_proj_const_scale_diagonal!(x::T, dummy1::T, Dinv::T, dummy2::T, dummy4::T, temp::T, dummy5::T, dummy6::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
+    # A positive scalar does not change the dual exponential cone.
+    dualExponent_proj!(x)
 end
 
 function massive_primal_proj_diagonal!(x::primalVector, sol::solVecPrimal, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
@@ -340,15 +350,25 @@ function setFunctionPointerPrimal!(sol::solVecPrimal, primalConstScale::Vector{B
         elseif sol.primal_sol.x_slice_func_symbol[i] == :proj_exp_cone!
             sol.primal_sol.x_slice_proj![i] = EXP_proj!
             sol.primal_sol.x_slice_proj_kernel[i] = 26
-            sol.primal_sol.x_slice_proj_diagonal![i] = EXP_proj_diagonal!
-            sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 27
+            if primalConstScale[i]
+                sol.primal_sol.x_slice_proj_diagonal![i] = EXP_proj_const_scale_diagonal!
+                sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 26
+            else
+                sol.primal_sol.x_slice_proj_diagonal![i] = EXP_proj_diagonal!
+                sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 27
+            end
             sol.primal_sol.x_slice_proj_slack![i] = DUALEXP_proj!
             sol.primal_sol.x_slice_proj_kernel_slack[i] = 28
         elseif sol.primal_sol.x_slice_func_symbol[i] == :proj_dual_exp_cone!
             sol.primal_sol.x_slice_proj![i] = DUALEXP_proj!
             sol.primal_sol.x_slice_proj_kernel[i] = 28
-            sol.primal_sol.x_slice_proj_diagonal![i] = DUALEXPonent_proj_diagonal!
-            sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 29
+            if primalConstScale[i]
+                sol.primal_sol.x_slice_proj_diagonal![i] = DUALEXP_proj_const_scale_diagonal!
+                sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 28
+            else
+                sol.primal_sol.x_slice_proj_diagonal![i] = DUALEXPonent_proj_diagonal!
+                sol.primal_sol.x_slice_proj_kernel_diagonal[i] = 29
+            end
             sol.primal_sol.x_slice_proj_slack![i] = EXP_proj!
             sol.primal_sol.x_slice_proj_kernel_slack[i] = 26
         end
@@ -424,9 +444,17 @@ function dual_EXP_proj_diagonal!(y::T, dummy::T, D_scaled::T, dummy2::T, dummy3:
     dualExponent_proj_diagonal!(y, D_scaled, temp)
 end
 
+function dual_EXP_proj_const_scale_diagonal!(y::T, dummy::T, D_scaled::T, dummy2::T, dummy3::T, dummy4::T, temp::T, dummy5::T, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
+    dualExponent_proj!(y)
+end
+
 function dual_DUALEXP_proj_diagonal!(y::T, dummy::T, dummy1::T, dummy2::T, dummy3::T, dummy4::T, dummy5::T, Dl_product::T, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 15
     exponent_proj_diagonal!(y, Dl_product)
+end
+
+function dual_DUALEXP_proj_const_scale_diagonal!(y::T, dummy::T, dummy1::T, dummy2::T, dummy3::T, dummy4::T, dummy5::T, Dl_product::T, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
+    exponent_proj!(y)
 end
 
 function massive_dual_proj_diagonal!(y::dualVector, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
@@ -813,14 +841,25 @@ function setFunctionPointerDual!(dualSol::solVecDual, primalConstScale::Vector{B
             dualSol.dual_sol_lag.y_slice_proj_kernel[i] = 11
             dualSol.dual_sol_mean.y_slice_proj_kernel[i] = 11
             dualSol.dual_sol_temp.y_slice_proj_kernel[i] = 11
-            dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
-            dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
-            dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
-            dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
-            dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 12
-            dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 12
-            dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 12
-            dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 12
+            if dualConstScale[i]
+                dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_EXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_EXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_EXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_EXP_proj_const_scale_diagonal!
+                dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 11
+                dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 11
+                dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 11
+                dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 11
+            else
+                dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
+                dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
+                dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
+                dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_EXP_proj_diagonal!
+                dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 12
+                dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 12
+                dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 12
+                dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 12
+            end
             dualSol.dual_sol.y_slice_con_proj![i] = con_EXP_proj!
             dualSol.dual_sol_lag.y_slice_con_proj![i] = con_EXP_proj!
             dualSol.dual_sol_mean.y_slice_con_proj![i] = con_EXP_proj!
@@ -838,14 +877,25 @@ function setFunctionPointerDual!(dualSol::solVecDual, primalConstScale::Vector{B
             dualSol.dual_sol_lag.y_slice_proj_kernel[i] = 14
             dualSol.dual_sol_mean.y_slice_proj_kernel[i] = 14
             dualSol.dual_sol_temp.y_slice_proj_kernel[i] = 14
-            dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
-            dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
-            dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
-            dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
-            dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 15
-            dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 15
-            dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 15
-            dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 15
+            if dualConstScale[i]
+                dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_const_scale_diagonal!
+                dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_const_scale_diagonal!
+                dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 14
+                dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 14
+                dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 14
+                dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 14
+            else
+                dualSol.dual_sol.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
+                dualSol.dual_sol_lag.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
+                dualSol.dual_sol_mean.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
+                dualSol.dual_sol_temp.y_slice_proj_diagonal![i] = dual_DUALEXP_proj_diagonal!
+                dualSol.dual_sol.y_slice_proj_kernel_diagonal[i] = 15
+                dualSol.dual_sol_lag.y_slice_proj_kernel_diagonal[i] = 15
+                dualSol.dual_sol_mean.y_slice_proj_kernel_diagonal[i] = 15
+                dualSol.dual_sol_temp.y_slice_proj_kernel_diagonal[i] = 15
+            end
             dualSol.dual_sol.y_slice_con_proj![i] = con_DUALEXP_proj!
             dualSol.dual_sol_lag.y_slice_con_proj![i] = con_DUALEXP_proj!
             dualSol.dual_sol_mean.y_slice_con_proj![i] = con_DUALEXP_proj!

@@ -5,6 +5,7 @@
 #define PDCS_PROFILE_BISECTION() ((void)0)
 #define PDCS_PROFILE_EXPANSION() ((void)0)
 #define PDCS_PROFILE_ORACLE() ((void)0)
+#define PDCS_PROFILE_VV_REDUCTION() ((void)0)
 #define PDCS_PROFILE_NEWTON_ATTEMPT() ((void)0)
 #define PDCS_PROFILE_NEWTON_ACCEPT() ((void)0)
 #define PDCS_PROFILE_MAX_ITER() ((void)0)
@@ -65,6 +66,7 @@ __device__ void primal_heuristic(double *r, double *s, double *t, double *vpr, d
     vpr[0] = fmin(r[0],0.0);
     vps[0] = 0.0;
     vpt[0] = fmax(t[0],0.0);
+    PDCS_PROFILE_VV_REDUCTION();
     dist[0] = sqrt((vpt[0]-t[0])*(vpt[0]-t[0]) + (vps[0]-s[0])*(vps[0]-s[0]) + (vpr[0]-r[0])*(vpr[0]-r[0]));
     // perspective interior
     if (s[0] > 0.0){
@@ -83,6 +85,7 @@ __device__ void primal_heuristic_diagonal(double *r, double *s, double *t, doubl
     vpr[0] = fmin(r[0],0.0);
     vps[0] = 0.0;
     vpt[0] = fmax(t[0],0.0);
+    PDCS_PROFILE_VV_REDUCTION();
     dist[0] = sqrt((vpt[0]-t[0]) * (vpt[0]-t[0]) + (vps[0]-s[0]) * (vps[0]-s[0]) + (vpr[0]-r[0]) * (vpr[0]-r[0]));
     if (s[0] > 0.0){
         double tp = fmax(t[0], dt_div_ds[0] * s[0] * exp(a3[0]));
@@ -100,6 +103,7 @@ __device__ void dual_heuristic(double *r, double *s, double *t, double *vd1, dou
     vd1[0] = 0.0;
     vd2[0] = fmin(s[0],0.0);
     vd3[0] = fmin(t[0],0.0);
+    PDCS_PROFILE_VV_REDUCTION();
     dist[0] = sqrt((vd1[0]-r[0])*(vd1[0]-r[0]) + (vd2[0]-s[0])*(vd2[0]-s[0]) + (vd3[0]-t[0])*(vd3[0]-t[0]));
 
     // perspective interior
@@ -120,6 +124,7 @@ __device__ void dual_heuristic_diagonal(double *r, double *s, double *t, double 
     vdr[0] = 0.0;
     vds[0] = fmin(s[0],0.0);
     vdt[0] = fmin(t[0],0.0);
+    PDCS_PROFILE_VV_REDUCTION();
     dist[0] = sqrt((vdt[0]-t[0])*(vdt[0]-t[0]) + (vds[0]-s[0])*(vds[0]-s[0]) + (vdr[0]-r[0])*(vdr[0]-r[0]));
 
     // perspective interior
@@ -700,6 +705,7 @@ __device__ void projsol_primalexpcone(double *r0, double *s0, double *t0, double
         *vpr = rho[0] * temp;
         *vps = temp;
         *vpt = exprho * temp;
+        PDCS_PROFILE_VV_REDUCTION();
         *dist = sqrt((*vpt-t0[0]) * (*vpt-t0[0]) + (*vps-s0[0]) * (*vps-s0[0]) + (*vpr-r0[0]) * (*vpr-r0[0]));
     } else {
         *vpr = 0;
@@ -718,6 +724,7 @@ __device__ void projsol_primalexpcone_diagonal(double *r0, double *s0, double *t
         *vpr = dr[0] * rho[0] * temp;
         *vps = ds[0] * temp;
         *vpt = dt[0] * exprho * temp;
+        PDCS_PROFILE_VV_REDUCTION();
         *dist = sqrt((*vpt-t0[0]) * (*vpt-t0[0]) + (*vps-s0[0]) * (*vps-s0[0]) + (*vpr-r0[0]) * (*vpr-r0[0]));
     } else {
         *vpr = 0;
@@ -750,6 +757,7 @@ __device__ void exponent_proj(double *v, double *t_warm_start, double abs_tol, d
     inf_norm_vp_vd = fmax(fabs(vpr + vdr - r0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vps + vds - s0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vpt + vdt - t0), inf_norm_vp_vd);
+    PDCS_PROFILE_VV_REDUCTION();
     double dot_vp_vd = vpr*vdr + vps*vds + vpt*vdt;
     bool case1 = (s0 <= 0 && r0 <= 0);
     bool case2 = (min_dist <= abs_tol);
@@ -830,6 +838,7 @@ __device__ void exponent_proj_diagonal(double *v, double *D, double *t_warm_star
     inf_norm_vp_vd = fmax(fabs(vpr + vdr - r0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vps + vds - s0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vpt + vdt - t0), inf_norm_vp_vd);
+    PDCS_PROFILE_VV_REDUCTION();
     double dot_vp_vd = vpr*vdr + vps*vds + vpt*vdt;
     double rho = 0.0;
     double rho0 = 0.0;
@@ -929,6 +938,7 @@ __device__ void exponent_proj_diagonal_initial(double *v, double *D, double *t_w
     inf_norm_vp_vd = fmax(fabs(vpr + vdr - r0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vps + vds - s0), inf_norm_vp_vd);
     inf_norm_vp_vd = fmax(fabs(vpt + vdt - t0), inf_norm_vp_vd);
+    PDCS_PROFILE_VV_REDUCTION();
     double dot_vp_vd = vpr*vdr + vps*vds + vpt*vdt;
     double rho = 0.0;
     double rho0 = 0.0;

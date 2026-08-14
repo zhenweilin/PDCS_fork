@@ -23,6 +23,333 @@ kernels are loaded only once, even in multi-threaded environments.
 # The kernels are loaded from PTX files and use lazy initialization.
 
 # ----------------------------------------------------------------------------
+# Optional projection-work profiler (rebuttal experiment 1)
+# ----------------------------------------------------------------------------
+
+"""Host mirror of `cuda/root_profile.h::RootProfileRecord` (80-byte ABI)."""
+struct ProjectionProfileRecord
+    branch_code::Int32
+    interval_expansion_iterations::Int32
+    newton_attempts::Int32
+    newton_accepts::Int32
+    bisection_iterations::Int32
+    oracle_evaluations::Int32
+    warm_start_attempted::Int32
+    warm_start_accepted::Int32
+    max_iter_reached::Int32
+    termination_reason::Int32
+    output_finite::Int32
+    vector_vector_reductions::Int32
+    final_residual::Float64
+    final_bracket_left::Float64
+    final_bracket_right::Float64
+    normalized_bracket_width::Float64
+end
+
+@assert isbitstype(ProjectionProfileRecord)
+@assert sizeof(ProjectionProfileRecord) == 80
+
+mutable struct ProjectionWorkCount
+    projection_events::Int64
+    vector_vector_reductions::Int64
+    oracle_evaluations::Int64
+    bisection_iterations::Int64
+    newton_attempts::Int64
+end
+
+mutable struct ProjectionProfileKernelState
+    module_handle::CuModule
+    projection_kernel::CuFunction
+    initialize_kernel::CuFunction
+    records::CuArray{ProjectionProfileRecord,1,CUDA.DeviceMemory}
+end
+
+const _projection_work_profile_enabled = Ref(false)
+const _projection_work_profile_scope = Ref{Symbol}(:all)
+const _projection_work_profile_iteration_active = Ref(false)
+const _projection_work_profile_counts =
+    Dict{Tuple{Symbol,Int64,Bool},ProjectionWorkCount}()
+const _projection_work_profile_lock = ReentrantLock()
+const _projection_profile_states = Dict{Symbol,ProjectionProfileKernelState}()
+
+const _projection_profile_paths = Dict(
+    :threadWise => joinpath(MODULE_DIR, "cuda/massive_block_proj_profile.ptx"),
+    :blockWise => joinpath(MODULE_DIR, "cuda/moderate_block_proj_profile.ptx"),
+    :warpWise => joinpath(MODULE_DIR, "cuda/sufficient_block_proj_profile.ptx"),
+)
+const _projection_profile_kernel_names = Dict(
+    :threadWise => "massive_block_proj",
+    :blockWise => "moderate_block_proj",
+    :warpWise => "sufficient_block_proj",
+)
+
+@inline function _projection_profile_cone(code::Int64)
+    code in (5, 6, 7, 20, 21, 22) && return :soc
+    code in (8, 9, 10, 23, 24, 25) && return :rsoc
+    code in (13, 14, 15, 26, 27) && return :exp
+    code in (11, 12, 16, 28, 29) && return :dual_exp
+    return nothing
+end
+
+@inline _projection_profile_is_diagonal(code::Int64) =
+    code in (6, 9, 12, 15, 22, 25, 27, 29)
+
+@inline _projection_work_profile_should_record() =
+    _projection_work_profile_enabled[] &&
+    (_projection_work_profile_scope[] === :all ||
+     _projection_work_profile_iteration_active[])
+
+@inline function _begin_projection_work_iteration!()
+    if _projection_work_profile_enabled[] &&
+       _projection_work_profile_scope[] === :pdhg_iterations
+        _projection_work_profile_iteration_active[] = true
+    end
+    return
+end
+
+@inline function _end_projection_work_iteration!()
+    if _projection_work_profile_scope[] === :pdhg_iterations
+        _projection_work_profile_iteration_active[] = false
+    end
+    return
+end
+
+function _get_projection_profile_state(strategy::Symbol)
+    haskey(_projection_profile_paths, strategy) ||
+        throw(ArgumentError("unsupported projection profiling strategy: $strategy"))
+    lock(_projection_work_profile_lock)
+    try
+        haskey(_projection_profile_states, strategy) &&
+            return _projection_profile_states[strategy]
+
+        CUDA.functional() || error("CUDA is not functional")
+        profile_path = _projection_profile_paths[strategy]
+        isfile(profile_path) || error(
+            "missing $profile_path; run `make rebuild-profile` in src/pdcs_gpu/cuda",
+        )
+        profile_sources = (
+            joinpath(MODULE_DIR, "cuda/root_profile.h"),
+            joinpath(MODULE_DIR, "cuda/exp_proj.cu"),
+            joinpath(MODULE_DIR, "cuda/massive_block_proj.cu"),
+            joinpath(MODULE_DIR, "cuda/moderate_block_proj.cu"),
+            joinpath(MODULE_DIR, "cuda/sufficient_block_proj.cu"),
+        )
+        mtime(profile_path) >= maximum(mtime, profile_sources) || error(
+            "stale projection profile PTX; run `make rebuild-profile` in src/pdcs_gpu/cuda",
+        )
+
+        module_handle = CuModule(read(profile_path))
+        state = ProjectionProfileKernelState(
+            module_handle,
+            CuFunction(module_handle, _projection_profile_kernel_names[strategy]),
+            CuFunction(module_handle, "pdcs_root_profile_initialize"),
+            CuArray{ProjectionProfileRecord}(undef, 0),
+        )
+        _projection_profile_states[strategy] = state
+        return state
+    finally
+        unlock(_projection_work_profile_lock)
+    end
+end
+
+function _ensure_projection_profile_capacity!(
+    state::ProjectionProfileKernelState,
+    record_count::Int,
+)
+    if length(state.records) < record_count
+        state.records = CuArray{ProjectionProfileRecord}(undef, record_count)
+    end
+    return state
+end
+
+function _accumulate_projection_work!(
+    records::Vector{ProjectionProfileRecord},
+    cone_sizes::Vector{Int64},
+    projection_codes::Vector{Int64},
+    block_count::Int64,
+)
+    count = min(Int(block_count), length(records), length(cone_sizes), length(projection_codes))
+    lock(_projection_work_profile_lock)
+    try
+        for i in 1:count
+            code = projection_codes[i]
+            cone = _projection_profile_cone(code)
+            cone === nothing && continue
+            key = (cone, cone_sizes[i], _projection_profile_is_diagonal(code))
+            work = get!(_projection_work_profile_counts, key) do
+                ProjectionWorkCount(0, 0, 0, 0, 0)
+            end
+            record = records[i]
+            work.projection_events += 1
+            work.vector_vector_reductions += record.vector_vector_reductions
+            work.oracle_evaluations += record.oracle_evaluations
+            work.bisection_iterations += record.bisection_iterations
+            work.newton_attempts += record.newton_attempts
+        end
+    finally
+        unlock(_projection_work_profile_lock)
+    end
+    return
+end
+
+function _profile_block_projection!(
+    strategy::Symbol,
+    vec,
+    bl,
+    bu,
+    D_scaled,
+    D_scaled_squared,
+    D_scaled_mul_x,
+    temp,
+    t_warm_start,
+    gpu_head_start,
+    gpu_ns,
+    blkNum::Int64,
+    proj_type,
+    abs_tol::Float64,
+    rel_tol::Float64;
+    blocks::Int,
+    threads::Int,
+    record_count::Int,
+)
+    state = _ensure_projection_profile_capacity!(
+        _get_projection_profile_state(strategy),
+        record_count,
+    )
+    CUDA.@sync begin
+        CUDA.cudacall(
+            state.initialize_kernel,
+            (CuPtr{ProjectionProfileRecord}, Int64),
+            state.records,
+            Int64(record_count);
+            blocks = cld(record_count, ThreadPerBlock),
+            threads = ThreadPerBlock,
+        )
+        CUDA.cudacall(
+            state.projection_kernel,
+            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+             CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+             CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+            vec,
+            bl,
+            bu,
+            D_scaled,
+            D_scaled_squared,
+            D_scaled_mul_x,
+            temp,
+            t_warm_start,
+            gpu_head_start,
+            gpu_ns,
+            blkNum,
+            proj_type,
+            abs_tol,
+            rel_tol;
+            blocks = blocks,
+            threads = threads,
+        )
+    end
+    _accumulate_projection_work!(
+        Array(@view state.records[1:record_count]),
+        Array(gpu_ns),
+        Array(proj_type),
+        blkNum,
+    )
+    return
+end
+
+"""
+    enable_projection_work_profile!(; scope=:all)
+
+Enable the diagnostic projection kernels and reset their host counters. The
+counter records one full-cone elementwise product followed by a scalar
+reduction. This mode adds synchronization and device-to-host copies and must
+not be used for runtime measurements.
+
+With `scope=:pdhg_iterations`, only the primal/dual projection pair in each
+PDHG step is recorded, matching the `M*T` denominator in R3.5. `scope=:all`
+also includes termination, restart, and infeasibility-check projections.
+"""
+function enable_projection_work_profile!(; scope::Symbol = :all)
+    scope in (:all, :pdhg_iterations) || throw(ArgumentError(
+        "projection profile scope must be :all or :pdhg_iterations",
+    ))
+    reset_projection_work_profile!()
+    _projection_work_profile_scope[] = scope
+    _projection_work_profile_iteration_active[] = false
+    _projection_work_profile_enabled[] = true
+    return
+end
+
+"""Disable diagnostic kernels without discarding the accumulated summary."""
+function disable_projection_work_profile!()
+    _projection_work_profile_enabled[] = false
+    _projection_work_profile_iteration_active[] = false
+    return projection_work_profile_summary()
+end
+
+"""Clear the accumulated projection-work counters."""
+function reset_projection_work_profile!()
+    lock(_projection_work_profile_lock)
+    try
+        empty!(_projection_work_profile_counts)
+    finally
+        unlock(_projection_work_profile_lock)
+    end
+    return
+end
+
+"""Return total and per-cone projection-work counts collected so far."""
+function projection_work_profile_summary()
+    lock(_projection_work_profile_lock)
+    try
+        by_cone = [
+            (
+                cone_type = key[1],
+                cone_dimension = key[2],
+                diagonal = key[3],
+                projection_events = count.projection_events,
+                vector_vector_reductions = count.vector_vector_reductions,
+                average_vector_vector_reductions = count.projection_events == 0 ?
+                    0.0 : count.vector_vector_reductions / count.projection_events,
+                oracle_evaluations = count.oracle_evaluations,
+                bisection_iterations = count.bisection_iterations,
+                newton_attempts = count.newton_attempts,
+            ) for (key, count) in sort!(
+                collect(_projection_work_profile_counts);
+                by = pair -> (
+                    string(pair.first[1]),
+                    pair.first[2],
+                    pair.first[3],
+                ),
+            )
+        ]
+        total_events = mapreduce(
+            row -> row.projection_events,
+            +,
+            by_cone;
+            init = 0,
+        )
+        total_reductions = mapreduce(
+            row -> row.vector_vector_reductions,
+            +,
+            by_cone;
+            init = 0,
+        )
+        return (
+            enabled = _projection_work_profile_enabled[],
+            scope = _projection_work_profile_scope[],
+            projection_events = total_events,
+            vector_vector_reductions = total_reductions,
+            average_vector_vector_reductions = total_events == 0 ?
+                0.0 : total_reductions / total_events,
+            by_cone = by_cone,
+        )
+    finally
+        unlock(_projection_work_profile_lock)
+    end
+end
+
+# ----------------------------------------------------------------------------
 # Massive Block Projection Kernel
 # ----------------------------------------------------------------------------
 # Used for large blocks. Loads the PTX file and provides thread-safe access.
@@ -115,6 +442,17 @@ function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared:
     # Calculate number of thread blocks needed
     # cld(x, y) = ceil(x/y) = smallest integer >= x/y
     nBlock = cld(blkNum + ThreadPerBlock, ThreadPerBlock)
+    if _projection_work_profile_should_record()
+        return _profile_block_projection!(
+            :threadWise,
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+            t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+            abs_tol, rel_tol;
+            blocks = nBlock,
+            threads = ThreadPerBlock,
+            record_count = nBlock * ThreadPerBlock,
+        )
+    end
     
     # Launch kernel and wait for completion
     CUDA.@sync begin
@@ -186,6 +524,17 @@ nBlock = blkNum + 1 (one block per constraint block plus one extra).
 function moderate_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
     # For moderate blocks, use one block per constraint block plus one
     nBlock = blkNum + 1
+    if _projection_work_profile_should_record()
+        return _profile_block_projection!(
+            :blockWise,
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+            t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+            abs_tol, rel_tol;
+            blocks = nBlock,
+            threads = ThreadPerBlock,
+            record_count = nBlock,
+        )
+    end
     CUDA.@sync begin
         CUDA.cudacall(
         get_moderate_block_proj_kernel(),
@@ -253,6 +602,17 @@ which provides more blocks for better GPU utilization.
 function sufficient_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
     # Calculate blocks: (blkNum + 1) * 32 elements distributed across thread blocks
     nBlock = cld((blkNum + 1) * 32, ThreadPerBlock)
+    if _projection_work_profile_should_record()
+        return _profile_block_projection!(
+            :warpWise,
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+            t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+            abs_tol, rel_tol;
+            blocks = nBlock,
+            threads = ThreadPerBlock,
+            record_count = nBlock * cld(ThreadPerBlock, 32),
+        )
+    end
     CUDA.@sync begin
         CUDA.cudacall(
         get_sufficient_block_proj_kernel(),
@@ -425,6 +785,27 @@ The native function pointer is initialized by the module's `__init__()` method.
 The cuBLAS handle is initialized lazily on the first grid-wise projection.
 """
 function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, cpu_head_start::Vector{Int64}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, cpu_ns::Vector{Int64}, blkNum::Int64, cpu_proj_type::Vector{Int64}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
+    if _projection_work_profile_should_record()
+        # The grid-wise implementation lives in a shared library rather than
+        # profile PTX. In diagnostic mode only, execute the same projection
+        # formulas through the instrumented block-wise kernel.
+        return moderate_block_proj(
+            vec,
+            bl,
+            bu,
+            D_scaled,
+            D_scaled_squared,
+            D_scaled_mul_x,
+            temp,
+            t_warm_start,
+            CuArray(cpu_head_start),
+            gpu_ns,
+            blkNum,
+            CuArray(cpu_proj_type),
+            abs_tol,
+            rel_tol,
+        )
+    end
     # Calculate number of thread blocks based on maximum block size
     nThread = Int64(ThreadPerBlock)
     nBlock = cld(maximum(cpu_ns) + ThreadPerBlock + 1, ThreadPerBlock)

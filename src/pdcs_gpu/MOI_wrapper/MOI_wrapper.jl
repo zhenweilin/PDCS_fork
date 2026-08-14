@@ -615,6 +615,12 @@ function MOI.optimize!(
             println("rescaling_method is not set, using default value: :ruiz_pock_chambolle. Note that if :use_scaling is false, this option is ignored.")
         end
     end
+    if !haskey(options, :scalar_cone_rescaling)
+        options[:scalar_cone_rescaling] = false
+        if options[:verbose] > 0
+            println("scalar_cone_rescaling is not set, using default value: false.")
+        end
+    end
     if !haskey(options, :use_adaptive_restart)
         options[:use_adaptive_restart] = true
         if options[:verbose] > 0
@@ -631,6 +637,12 @@ function MOI.optimize!(
         options[:use_adaptive_step] = true
         if options[:verbose] > 0
             println("use_adaptive_step is not set, using default value: true.")
+        end
+    end
+    if !haskey(options, :adaptive_projection_tolerance)
+        options[:adaptive_projection_tolerance] = nothing
+        if options[:verbose] > 0
+            println("adaptive_projection_tolerance is not set, preserving the legacy projection-tolerance policy.")
         end
     end
     if !haskey(options, :use_adaptive_step_size_weight)
@@ -778,6 +790,7 @@ function MOI.optimize!(
             check_terminate_freq = options[:check_terminate_freq],
             use_preconditioner = true,
             rescaling_method = options[:rescaling_method],
+            scalar_cone_rescaling = options[:scalar_cone_rescaling],
             method = :average,
             time_limit = options[:time_limit_secs],
             use_adaptive_restart = options[:use_adaptive_restart],
@@ -786,6 +799,8 @@ function MOI.optimize!(
             use_aggressive = options[:use_aggressive],
             use_restart = options[:use_restart],
             use_adaptive_step = options[:use_adaptive_step],
+            adaptive_projection_tolerance =
+                options[:adaptive_projection_tolerance],
             use_weighted_average = options[:use_weighted_average],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
@@ -850,6 +865,7 @@ function MOI.optimize!(
             check_terminate_freq = options[:check_terminate_freq],
             use_preconditioner = true,
             rescaling_method = :none,
+            scalar_cone_rescaling = options[:scalar_cone_rescaling],
             method = :average,
             time_limit = options[:time_limit_secs],
             use_adaptive_restart = options[:use_adaptive_restart],
@@ -858,6 +874,8 @@ function MOI.optimize!(
             use_aggressive = options[:use_aggressive],
             use_restart = options[:use_restart],
             use_adaptive_step = options[:use_adaptive_step],
+            adaptive_projection_tolerance =
+                options[:adaptive_projection_tolerance],
             use_weighted_average = options[:use_weighted_average],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],

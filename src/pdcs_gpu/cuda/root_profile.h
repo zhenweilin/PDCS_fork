@@ -15,7 +15,9 @@ struct RootProfileRecord {
   int32_t max_iter_reached;
   int32_t termination_reason; // 1 residual, 2 bracket width, 3 cap, -1 unknown
   int32_t output_finite;
-  int32_t reserved;
+  // One full-cone elementwise product followed by a scalar reduction.
+  // This field deliberately reuses the former reserved ABI slot.
+  int32_t vector_vector_reductions;
   double final_residual;
   double final_bracket_left;
   double final_bracket_right;
@@ -60,6 +62,7 @@ __device__ inline bool pdcs_root_profile_leader() {
 #define PDCS_PROFILE_BISECTION() PDCS_PROFILE_ADD(bisection_iterations, 1)
 #define PDCS_PROFILE_EXPANSION() PDCS_PROFILE_ADD(interval_expansion_iterations, 1)
 #define PDCS_PROFILE_ORACLE() PDCS_PROFILE_ADD(oracle_evaluations, 1)
+#define PDCS_PROFILE_VV_REDUCTION() PDCS_PROFILE_ADD(vector_vector_reductions, 1)
 #define PDCS_PROFILE_NEWTON_ATTEMPT() PDCS_PROFILE_ADD(newton_attempts, 1)
 #define PDCS_PROFILE_NEWTON_ACCEPT() PDCS_PROFILE_ADD(newton_accepts, 1)
 #define PDCS_PROFILE_MAX_ITER() do { \
@@ -130,7 +133,7 @@ __device__ inline RootProfileRecord pdcs_empty_root_record() {
   r.max_iter_reached = 0;
   r.termination_reason = -1;
   r.output_finite = -1;
-  r.reserved = 0;
+  r.vector_vector_reductions = 0;
   r.final_residual = 0.0/0.0;
   r.final_bracket_left = 0.0/0.0;
   r.final_bracket_right = 0.0/0.0;

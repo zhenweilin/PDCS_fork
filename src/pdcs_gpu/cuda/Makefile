@@ -5,7 +5,7 @@
 #
 #   make rebuild-gpu CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
 #
-# Root-finding diagnostic build (separate *_profile.ptx files):
+# Root-finding/projection-work diagnostic build (separate *_profile.ptx files):
 #
 #   make rebuild-profile CUDA_HOME=/usr/local/cuda-12.6 ARCH=sm_90
 #
@@ -22,7 +22,7 @@
 # Diagnostic PTX performs extra global-memory/atomic counter writes and MUST
 # NOT be used for publication runtime measurements. Use `rebuild-gpu` and the
 # normal projection API for timings; use `rebuild-profile` only with
-# benchmark/rebuttal/diagnostic_root_profile.jl for iteration/divergence data.
+# benchmark/R3.5_projection_work_profile.jl for projection-work statistics.
 #
 # Override CUDA_HOME to select a toolkit independently of the system-wide
 # /usr/local/cuda symlink. ARCH=sm_90 is H100; ARCH=sm_80 is A100.

@@ -106,7 +106,9 @@ redirect_stdout(devnull) do;
     end
 end
 
-export rpdhg_gpu_solve, conic_cache_from_data, model_from_conic_data;
+export rpdhg_gpu_solve, conic_cache_from_data, model_from_conic_data
+export enable_projection_work_profile!, disable_projection_work_profile!
+export reset_projection_work_profile!, projection_work_profile_summary
 
 
 end

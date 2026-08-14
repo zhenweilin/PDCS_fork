@@ -323,6 +323,7 @@ function infeasibility_info_calculation(; solver::rpdhgSolver,
 end
 
 function pdhg_one_iter!(; solver::rpdhgSolver, x::solVecPrimal, y::solVecDual, tau::rpdhg_float, sigma::rpdhg_float, slack::solVecPrimal, dual_sol_temp::solVecDual)
+    _begin_projection_work_iteration!()
     x.primal_sol_lag.x .= x.primal_sol.x
     solver.adjointMV!(solver.data.coeffTrans, y.dual_sol, slack.primal_sol_lag.x)
     x.primal_sol.x .-= tau * (solver.data.c .- slack.primal_sol_lag.x)
@@ -333,6 +334,7 @@ function pdhg_one_iter!(; solver::rpdhgSolver, x::solVecPrimal, y::solVecDual, t
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_lag, -1.0)
     y.dual_sol.y .-= sigma * dual_sol_temp.dual_sol_lag.y
     y.proj!(y.dual_sol)
+    _end_projection_work_iteration!()
 end
 
 
@@ -406,6 +408,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     Dl::CuArray{rpdhg_float} = CuArray(ones(m)),
     Dr::CuArray{rpdhg_float} = CuArray(ones(n)),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
+    scalar_cone_rescaling::Bool = false,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
@@ -414,6 +417,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
     use_adaptive_step::Bool = true,
+    adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
     use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
@@ -491,11 +495,14 @@ dGType<:Union{
         @info ("---------------------------------------------------")
         @info ("time limit: $time_limit")
         @info ("use_preconditioner: $use_preconditioner")
+        @info ("rescaling_method: $rescaling_method")
+        @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
         @info ("use_restart: $use_restart")
         @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("adaptive_projection_tolerance: $adaptive_projection_tolerance")
         @info ("use_weighted_average: $use_weighted_average")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
@@ -938,6 +945,7 @@ dGType<:Union{
                                 use_restart = use_restart,
                                 use_adaptive_step = use_adaptive_step,
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                adaptive_projection_tolerance = adaptive_projection_tolerance,
                                 use_weighted_average = use_weighted_average,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
@@ -984,6 +992,8 @@ dGType<:Union{
         # @info ("initial nrm1c: $(norm(solver.data.d_c, 1))")
         # @info ("initial nrm1h: $(norm(solver.data.coeff.d_h, 1))")
         # @info ("initial nrmInfc: $(norm(solver.data.d_c, Inf))")
+        use_scalar_cone_rescaling = scalar_cone_rescaling ||
+            rescaling_method == :ruiz_pock_chambolle_scalar_cone
         if rescaling_method == :ruiz
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
@@ -992,7 +1002,10 @@ dGType<:Union{
                 Dr_product = solver.data.diagonal_scale.Dr_product.x,
                 Dl_product = solver.data.diagonal_scale.Dl_product.y,
                 sol = solver.sol.x,
-                dual_sol = solver.sol.y
+                dual_sol = solver.sol.y,
+                variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
         elseif rescaling_method == :pock_chambolle
             rescale_problem!(
@@ -1002,9 +1015,15 @@ dGType<:Union{
                 Dr_product = solver.data.diagonal_scale.Dr_product.x,
                 Dl_product = solver.data.diagonal_scale.Dl_product.y,
                 sol = solver.sol.x,
-                dual_sol = solver.sol.y
+                dual_sol = solver.sol.y,
+                variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
-        elseif rescaling_method == :ruiz_pock_chambolle
+        elseif rescaling_method in (
+            :ruiz_pock_chambolle,
+            :ruiz_pock_chambolle_scalar_cone,
+        )
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
                 pock_chambolle_alpha = 1.0,
@@ -1014,14 +1033,15 @@ dGType<:Union{
                 sol = solver.sol.x,
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
-                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
         elseif rescaling_method == :none
             if verbose > 0
                 @info "Diagonal rescaling disabled; using identity scaling vectors."
             end
         else
-            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, or :ruiz_pock_chambolle"))
+            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, :ruiz_pock_chambolle, or :ruiz_pock_chambolle_scalar_cone"))
         end
         scale_preconditioner!(
             Dr_product = solver.data.diagonal_scale.Dr_product.x,
@@ -1222,8 +1242,19 @@ end # end rpdhg_cpu_solve
     - `dual_exp_x`: the number of dual exponential cones
     - `Dl`: the `Vector` of length `m` to scale the constraints
     - `Dr`: the `Vector` of length `n` to scale the variables
-    - `rescaling_method`: the method to rescale the data, `:none`, `:ruiz_pock_chambolle` or `:ruiz_pock_more`
+    - `rescaling_method`: the rescaling pipeline: `:none`, `:ruiz`,
+      `:pock_chambolle`, `:ruiz_pock_chambolle`, or
+      `:ruiz_pock_chambolle_scalar_cone`.
+    - `scalar_cone_rescaling`: if true, use one common Ruiz/Pock--Chambolle
+      factor inside each SOC, rotated SOC, exponential, and dual exponential
+      cone. The default `false` preserves coordinate-wise diagonal rescaling.
+      `rescaling_method=:ruiz_pock_chambolle_scalar_cone` is an equivalent
+      explicit method for the combined rescaling pipeline.
     - `use_preconditioner`: whether to use the preconditioner
+    - `adaptive_projection_tolerance`: projection root-search tolerance policy.
+      `true` starts at `1e-7` and tightens with the average KKT error down to
+      `1e-14`; `false` uses a fixed `1e-12`; `nothing` preserves the legacy
+      policy and is the default.
     - `primal_sol`: a `Vector` to warmstart the primal variables,
     - `dual_sol`: a `Vector` to warmstart the dual variables,
     - `warm_start`: a `Bool` to enable warm start
@@ -1289,6 +1320,7 @@ function rpdhg_gpu_solve(;
     Dl::Vector{rpdhg_float} = ones(m),
     Dr::Vector{rpdhg_float} = ones(n),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
+    scalar_cone_rescaling::Bool = false,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
@@ -1297,6 +1329,7 @@ function rpdhg_gpu_solve(;
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
     use_adaptive_step::Bool = true,
+    adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
     use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
@@ -1369,11 +1402,14 @@ function rpdhg_gpu_solve(;
         @info ("---------------------------------------------------")
         @info ("time limit: $time_limit")
         @info ("use_preconditioner: $use_preconditioner")
+        @info ("rescaling_method: $rescaling_method")
+        @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
         @info ("use_restart: $use_restart")
         @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("adaptive_projection_tolerance: $adaptive_projection_tolerance")
         @info ("use_weighted_average: $use_weighted_average")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
@@ -1818,6 +1854,7 @@ function rpdhg_gpu_solve(;
                                 use_restart = use_restart,
                                 use_adaptive_step = use_adaptive_step,
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                adaptive_projection_tolerance = adaptive_projection_tolerance,
                                 use_weighted_average = use_weighted_average,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
@@ -1864,6 +1901,8 @@ function rpdhg_gpu_solve(;
         @info ("initial nrm1c: $(norm(solver.data.d_c, 1))")
         @info ("initial nrm1h: $(norm(solver.data.coeff.d_h, 1))")
         @info ("initial nrmInfc: $(norm(solver.data.d_c, Inf))")
+        use_scalar_cone_rescaling = scalar_cone_rescaling ||
+            rescaling_method == :ruiz_pock_chambolle_scalar_cone
         if rescaling_method == :ruiz
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
@@ -1872,7 +1911,10 @@ function rpdhg_gpu_solve(;
                 Dr_product = solver.data.diagonal_scale.Dr_product.x,
                 Dl_product = solver.data.diagonal_scale.Dl_product.y,
                 sol = solver.sol.x,
-                dual_sol = solver.sol.y
+                dual_sol = solver.sol.y,
+                variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
         elseif rescaling_method == :pock_chambolle
             rescale_problem!(
@@ -1882,9 +1924,15 @@ function rpdhg_gpu_solve(;
                 Dr_product = solver.data.diagonal_scale.Dr_product.x,
                 Dl_product = solver.data.diagonal_scale.Dl_product.y,
                 sol = solver.sol.x,
-                dual_sol = solver.sol.y
+                dual_sol = solver.sol.y,
+                variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
-        elseif rescaling_method == :ruiz_pock_chambolle
+        elseif rescaling_method in (
+            :ruiz_pock_chambolle,
+            :ruiz_pock_chambolle_scalar_cone,
+        )
             rescale_problem!(
                 l_inf_ruiz_iterations = 10,
                 pock_chambolle_alpha = 1.0,
@@ -1894,14 +1942,15 @@ function rpdhg_gpu_solve(;
                 sol = solver.sol.x,
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
-                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y
+                constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
+                scalar_cone_rescaling = use_scalar_cone_rescaling
             )
         elseif rescaling_method == :none
             if verbose > 0
                 @info "Diagonal rescaling disabled; using identity scaling vectors."
             end
         else
-            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, or :ruiz_pock_chambolle"))
+            throw(ArgumentError("The rescaling method must be :none, :ruiz, :pock_chambolle, :ruiz_pock_chambolle, or :ruiz_pock_chambolle_scalar_cone"))
         end
         # println("scale_preconditioner")
         scale_preconditioner!(
@@ -2083,6 +2132,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             dual_exp_x = solver.dual_exp_x,
             Dl = solver.Dl,
             rescaling_method = solver.rescaling_method,
+            scalar_cone_rescaling = solver.scalar_cone_rescaling,
             use_preconditioner = solver.use_preconditioner,
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
@@ -2090,6 +2140,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_resolving = solver.use_resolving,
             use_restart = solver.use_restart,
             use_adaptive_step = solver.use_adaptive_step,
+            adaptive_projection_tolerance = solver.adaptive_projection_tolerance,
             use_weighted_average = solver.use_weighted_average,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
@@ -2136,6 +2187,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             dual_exp_x = solver.dual_exp_x,
             Dl = solver.Dl,
             rescaling_method = solver.rescaling_method,
+            scalar_cone_rescaling = solver.scalar_cone_rescaling,
             use_preconditioner = solver.use_preconditioner,
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
@@ -2143,6 +2195,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_resolving = solver.use_resolving,
             use_restart = solver.use_restart,
             use_adaptive_step = solver.use_adaptive_step,
+            adaptive_projection_tolerance = solver.adaptive_projection_tolerance,
             use_weighted_average = solver.use_weighted_average,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,

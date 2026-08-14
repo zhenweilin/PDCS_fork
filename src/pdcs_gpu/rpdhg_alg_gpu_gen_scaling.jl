@@ -248,16 +248,29 @@ end
 
 
 function pdhg_one_iter_diagonal_rescaling!(; solver::rpdhgSolver, x::solVecPrimal, y::solVecDual, tau::rpdhg_float, sigma::rpdhg_float, slack::solVecPrimal, dual_sol_temp::solVecDual)
+    _begin_projection_work_iteration!()
     x.primal_sol_lag.x .= x.primal_sol.x
     solver.adjointMV!(solver.data.coeff, y.dual_sol, slack.primal_sol_lag.x)
     x.primal_sol.x .-= tau .* solver.data.d_c
     x.primal_sol.x .+= tau .* slack.primal_sol_lag.x
-    x.proj_diagonal!(x.primal_sol, x, solver.data.diagonal_scale, abs_tol = 1e-16, rel_tol = 1e-12)
+    x.proj_diagonal!(
+        x.primal_sol,
+        x,
+        solver.data.diagonal_scale,
+        abs_tol = solver.sol.params.proj_abs_tol,
+        rel_tol = solver.sol.params.proj_rel_tol,
+    )
     x.primal_sol_lag.x .= 2 .* x.primal_sol.x .- x.primal_sol_lag.x
     solver.primalMV!(solver.data.coeff, x.primal_sol_lag.x, dual_sol_temp.dual_sol_lag)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_lag, -1.0)
     y.dual_sol.y .-= sigma .* dual_sol_temp.dual_sol_lag.y
-    y.proj_diagonal!(y.dual_sol, solver.data.diagonal_scale, abs_tol = 1e-16, rel_tol = 1e-12)
+    y.proj_diagonal!(
+        y.dual_sol,
+        solver.data.diagonal_scale,
+        abs_tol = solver.sol.params.proj_abs_tol,
+        rel_tol = solver.sol.params.proj_rel_tol,
+    )
+    _end_projection_work_iteration!()
     return;
 end
 
@@ -1013,6 +1026,26 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
             if sol.info.iter %  sol.params.check_terminate_freq == 0 || (sol.params.verbose > 0 && sol.info.iter % sol.params.print_freq == 0) || (random_check && Int(ceil(sol.info.time)) % 3179 == 0)
                 time_start = time()
                 exit_condition_check_diagonal!(; sol = sol, solver = solver, dual_sol_temp = dual_sol_temp)
+                if sol.params.adaptive_projection_tolerance !== nothing
+                    convergence = sol.info.convergeInfo[1]
+                    average_kkt_error = (
+                        convergence.l_2_rel_primal_res +
+                        convergence.l_2_rel_dual_res +
+                        convergence.rel_gap
+                    ) / 3
+                    sol.params.proj_abs_tol = next_projection_tolerance(
+                        sol.params.proj_abs_tol,
+                        average_kkt_error,
+                        sol.params.adaptive_projection_tolerance,
+                        sol.params.proj_base_tol,
+                    )
+                    sol.params.proj_rel_tol = next_projection_tolerance(
+                        sol.params.proj_rel_tol,
+                        average_kkt_error,
+                        sol.params.adaptive_projection_tolerance,
+                        sol.params.proj_base_tol,
+                    )
+                end
                 global time_exit_check += time() - time_start
                 if sol.params.verbose > 0   
                     time_start = time()
@@ -1096,6 +1129,7 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
     # decay_step_size_ratio = 1.0
     count = 0
     while true
+        _begin_projection_work_iteration!()
         info.iter += 1
         info.iter_stepsize += 1
         ## primal step
@@ -1121,6 +1155,7 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
         dual_update(y.dual_sol.y, y.dual_sol_lag.y, dual_sol_diff.y, solver.data.coeff.d_h, dual_step_size, solver.data.m)
         global time_iterative += time() - time_start
         y.proj_diagonal!(y.dual_sol, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
+        _end_projection_work_iteration!()
         eta_bar = eta
         eta_prime = eta
         if use_adaptive_step
@@ -1141,8 +1176,18 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
             exit_condition_check_diagonal!(; sol = sol, solver = solver, dual_sol_temp = dual_sol_temp)
             sol.info.max_kkt_error = max(max(sol.info.convergeInfo[1].l_2_rel_primal_res, sol.info.convergeInfo[1].l_2_rel_dual_res), sol.info.convergeInfo[1].rel_gap)
             average_kkt_error = (sol.info.convergeInfo[1].l_2_rel_primal_res + sol.info.convergeInfo[1].l_2_rel_dual_res + sol.info.convergeInfo[1].rel_gap) / 3
-            solver.sol.params.proj_abs_tol = max(min(solver.sol.params.proj_abs_tol, min(average_kkt_error * solver.sol.params.proj_base_tol, 1e-7)), 5e-16)
-            solver.sol.params.proj_rel_tol = max(min(solver.sol.params.proj_rel_tol, min(average_kkt_error * solver.sol.params.proj_base_tol, 1e-7)), 5e-16)
+            solver.sol.params.proj_abs_tol = next_projection_tolerance(
+                solver.sol.params.proj_abs_tol,
+                average_kkt_error,
+                solver.sol.params.adaptive_projection_tolerance,
+                solver.sol.params.proj_base_tol,
+            )
+            solver.sol.params.proj_rel_tol = next_projection_tolerance(
+                solver.sol.params.proj_rel_tol,
+                average_kkt_error,
+                solver.sol.params.adaptive_projection_tolerance,
+                solver.sol.params.proj_base_tol,
+            )
             # @info ("proj_abs_tol: $(solver.sol.params.proj_abs_tol), proj_rel_tol: $(solver.sol.params.proj_rel_tol)")
             if sol.params.verbose > 0
                 time_start = time()
@@ -1180,10 +1225,14 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
         eta = eta_prime
         count += 1
         if count > 1000000
-            solver.sol.params.proj_abs_tol *= 0.1
-            solver.sol.params.proj_rel_tol *= 0.1
-            solver.sol.params.proj_abs_tol = max(solver.sol.params.proj_abs_tol, 1e-22)
-            solver.sol.params.proj_rel_tol = max(solver.sol.params.proj_rel_tol, 1e-22)
+            solver.sol.params.proj_abs_tol = stalled_projection_tolerance(
+                solver.sol.params.proj_abs_tol,
+                solver.sol.params.adaptive_projection_tolerance,
+            )
+            solver.sol.params.proj_rel_tol = stalled_projection_tolerance(
+                solver.sol.params.proj_rel_tol,
+                solver.sol.params.adaptive_projection_tolerance,
+            )
             @info ("proj_abs_tol: $(solver.sol.params.proj_abs_tol), proj_rel_tol: $(solver.sol.params.proj_rel_tol)")
             return eta, eta_prime, true
         end

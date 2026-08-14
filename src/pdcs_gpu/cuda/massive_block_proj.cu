@@ -17,6 +17,7 @@
 // BLAS functions
 __device__ double nrm2(const long* __restrict__ n, const double* __restrict__ x)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   // calculate the norm of the vector x
   double norm = 0.0;
   double val = 0.0;
@@ -31,6 +32,7 @@ __device__ double nrm2(const long* __restrict__ n, const double* __restrict__ x)
 
 __device__ double nrm2_squared(const long* __restrict__ n, const double* __restrict__ x)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   // calculate the norm of the vector x
   double norm = 0.0;
   double val = 0.0;
@@ -141,6 +143,7 @@ __device__ void vvrscl_inplace(const long* __restrict__ n, const double* __restr
 
 __device__ double diff_norm(const long* __restrict__ n, const double* __restrict__ x, const double* __restrict__ y)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   // y = x - y
   double norm = 0.0;
   double diff = 0.0;

@@ -222,14 +222,38 @@ function scale_preconditioner!(;
 
     if length(primal_sol.exp_cone_indices_start) > 0
         for (start_idx, end_idx) in zip(primal_sol.exp_cone_indices_start, primal_sol.exp_cone_indices_end)
-            CUDA.@allowscalar Dr_product_inv_normalized[start_idx:end_idx] = 1.0 ./ Dr_product[start_idx:end_idx]
+            CUDA.@allowscalar Dr_product_inv_normalized[start_idx:end_idx] .= 1.0 ./ Dr_product[start_idx:end_idx]
+            reference_scale = CUDA.@allowscalar Dr_product[start_idx]
+            if all(
+                value -> isapprox(
+                    value,
+                    reference_scale;
+                    atol = 1e-20,
+                    rtol = 0.0,
+                ),
+                view(Dr_product, start_idx:end_idx),
+            )
+                primalConstScale[blkCountPrimal] = true
+            end
             blkCountPrimal += 1
         end
     end
 
     if length(primal_sol.dual_exp_cone_indices_start) > 0
         for (start_idx, end_idx) in zip(primal_sol.dual_exp_cone_indices_start, primal_sol.dual_exp_cone_indices_end)
-            CUDA.@allowscalar Dr_product_inv_normalized[start_idx:end_idx] = 1.0 ./ Dr_product[start_idx:end_idx]
+            CUDA.@allowscalar Dr_product_inv_normalized[start_idx:end_idx] .= 1.0 ./ Dr_product[start_idx:end_idx]
+            reference_scale = CUDA.@allowscalar Dr_product[start_idx]
+            if all(
+                value -> isapprox(
+                    value,
+                    reference_scale;
+                    atol = 1e-20,
+                    rtol = 0.0,
+                ),
+                view(Dr_product, start_idx:end_idx),
+            )
+                primalConstScale[blkCountPrimal] = true
+            end
             blkCountPrimal += 1
         end
     end
@@ -259,6 +283,18 @@ function scale_preconditioner!(;
     if length(dual_sol.exp_cone_indices_start) > 0
         for (start_idx, end_idx) in zip(dual_sol.exp_cone_indices_start, dual_sol.exp_cone_indices_end)
             CUDA.@allowscalar Dl_product_inv_normalized[start_idx:end_idx] .= 1.0 ./ Dl_product[start_idx:end_idx]
+            reference_scale = CUDA.@allowscalar Dl_product[start_idx]
+            if all(
+                value -> isapprox(
+                    value,
+                    reference_scale;
+                    atol = 1e-20,
+                    rtol = 0.0,
+                ),
+                view(Dl_product, start_idx:end_idx),
+            )
+                dualConstScale[blkCountDual] = true
+            end
             blkCountDual += 1
         end
     end # if length(dual_sol.exp_cone_indices_start) > 0
@@ -266,6 +302,18 @@ function scale_preconditioner!(;
     if length(dual_sol.dual_exp_cone_indices_start) > 0
         for (start_idx, end_idx) in zip(dual_sol.dual_exp_cone_indices_start, dual_sol.dual_exp_cone_indices_end)
             CUDA.@allowscalar Dl_product_inv_normalized[start_idx:end_idx] .= 1.0 ./ Dl_product[start_idx:end_idx]
+            reference_scale = CUDA.@allowscalar Dl_product[start_idx]
+            if all(
+                value -> isapprox(
+                    value,
+                    reference_scale;
+                    atol = 1e-20,
+                    rtol = 0.0,
+                ),
+                view(Dl_product, start_idx:end_idx),
+            )
+                dualConstScale[blkCountDual] = true
+            end
             blkCountDual += 1
         end
     end # if length(dual_sol.dual_exp_cone_indices_start) > 0
@@ -339,6 +387,89 @@ function scale_data!(;
 end
 
 
+"""Collect the inclusive ranges of all non-polyhedral cone blocks."""
+function structured_cone_ranges(sol::Union{solVecPrimal,solVecDual})
+    starts = Int64[]
+    ends = Int64[]
+    for cone_name in (:soc_cone, :rsoc_cone, :exp_cone, :dual_exp_cone)
+        start_field = Symbol(string(cone_name), "_indices_start")
+        end_field = Symbol(string(cone_name), "_indices_end")
+        append!(starts, Int64.(getproperty(sol, start_field)))
+        append!(ends, Int64.(getproperty(sol, end_field)))
+    end
+    return starts, ends
+end
+
+
+function scalarize_cone_rescaling_kernel!(
+    scaling,
+    cone_starts,
+    cone_ends,
+)
+    cone_index = Int64(CUDA.blockIdx().x)
+    lane = Int64(CUDA.threadIdx().x)
+    lanes = Int64(CUDA.blockDim().x)
+    start_index = cone_starts[cone_index]
+    end_index = cone_ends[cone_index]
+
+    local_max = 0.0
+    element_index = start_index + lane - 1
+    while element_index <= end_index
+        local_max = max(local_max, scaling[element_index])
+        element_index += lanes
+    end
+
+    shared_max = CUDA.@cuStaticSharedMem(Float64, ThreadPerBlock)
+    shared_max[lane] = local_max
+    CUDA.sync_threads()
+
+    offset = lanes >> 1
+    while offset > 0
+        if lane <= offset
+            shared_max[lane] = max(shared_max[lane], shared_max[lane + offset])
+        end
+        CUDA.sync_threads()
+        offset >>= 1
+    end
+
+    block_max = shared_max[1]
+    element_index = start_index + lane - 1
+    while element_index <= end_index
+        scaling[element_index] = block_max
+        element_index += lanes
+    end
+    return
+end
+
+
+"""
+    scalarize_cone_rescaling!(scaling, cone_starts, cone_ends)
+
+Replace every candidate rescaling factor in each structured cone block by the
+maximum factor in that block. One CUDA block handles one cone, so this remains
+usable for both many three-dimensional exponential cones and high-dimensional
+SOC blocks without host round trips.
+"""
+function scalarize_cone_rescaling!(
+    scaling::CuArray{Float64},
+    cone_starts::CuArray{Int64},
+    cone_ends::CuArray{Int64},
+)
+    cone_count = length(cone_starts)
+    cone_count == length(cone_ends) ||
+        throw(DimensionMismatch("cone start/end arrays must have equal length"))
+    cone_count == 0 && return scaling
+    CUDA.@sync begin
+        CUDA.@cuda threads = ThreadPerBlock blocks = cone_count scalarize_cone_rescaling_kernel!(
+            scaling,
+            cone_starts,
+            cone_ends,
+        )
+    end
+    return scaling
+end
+
+
 """Preprocesses the original problem, and returns a ScaledQpProblem struct.
 Applies L_inf Ruiz rescaling for `l_inf_ruiz_iterations` iterations. If
 `l2_norm_rescaling` is true, applies L2 norm rescaling. `problem` is not
@@ -354,10 +485,23 @@ function rescale_problem!(;
   sol::solVecPrimal,
   dual_sol::solVecDual,
   variable_rescaling::CuArray{Float64},
-  constraint_rescaling_G::CuArray{Float64}
+  constraint_rescaling_G::CuArray{Float64},
+  scalar_cone_rescaling::Bool = false
 )
     row_idx = similar(data.coeff.d_G.colVal, nnz(data.coeff.d_G))
     get_row_index(data.coeff.d_G, row_idx)
+    primal_cone_starts = nothing
+    primal_cone_ends = nothing
+    dual_cone_starts = nothing
+    dual_cone_ends = nothing
+    if scalar_cone_rescaling
+        primal_cone_starts_cpu, primal_cone_ends_cpu = structured_cone_ranges(sol)
+        dual_cone_starts_cpu, dual_cone_ends_cpu = structured_cone_ranges(dual_sol)
+        primal_cone_starts = CuArray(primal_cone_starts_cpu)
+        primal_cone_ends = CuArray(primal_cone_ends_cpu)
+        dual_cone_starts = CuArray(dual_cone_starts_cpu)
+        dual_cone_ends = CuArray(dual_cone_ends_cpu)
+    end
     variable_rescaling .= 1.0
     constraint_rescaling_G .= 1.0
     if l_inf_ruiz_iterations > 0
@@ -369,7 +513,12 @@ function rescale_problem!(;
             DGl_product = Dl_product,
             sol = sol, dual_sol = dual_sol, row_idx = row_idx,
             variable_rescaling = variable_rescaling,
-            constraint_rescaling_G = constraint_rescaling_G
+            constraint_rescaling_G = constraint_rescaling_G,
+            scalar_cone_rescaling = scalar_cone_rescaling,
+            primal_cone_starts = primal_cone_starts,
+            primal_cone_ends = primal_cone_ends,
+            dual_cone_starts = dual_cone_starts,
+            dual_cone_ends = dual_cone_ends
         )
     end
 
@@ -383,11 +532,20 @@ function rescale_problem!(;
             DGl_product = Dl_product,
             sol = sol, dual_sol = dual_sol, row_idx = row_idx,
             variable_rescaling = variable_rescaling,
-            constraint_rescaling_G = constraint_rescaling_G
+            constraint_rescaling_G = constraint_rescaling_G,
+            scalar_cone_rescaling = scalar_cone_rescaling,
+            primal_cone_starts = primal_cone_starts,
+            primal_cone_ends = primal_cone_ends,
+            dual_cone_starts = dual_cone_starts,
+            dual_cone_ends = dual_cone_ends
         )
     end
     # @info("complete pock_chambolle_rescaling!")
     CUDA.unsafe_free!(row_idx)
+    primal_cone_starts === nothing || CUDA.unsafe_free!(primal_cone_starts)
+    primal_cone_ends === nothing || CUDA.unsafe_free!(primal_cone_ends)
+    dual_cone_starts === nothing || CUDA.unsafe_free!(dual_cone_starts)
+    dual_cone_ends === nothing || CUDA.unsafe_free!(dual_cone_ends)
 end
 
 
@@ -430,7 +588,12 @@ function pock_chambolle_rescaling!(;
     dual_sol::solVecDual,
     row_idx::CuArray,
     variable_rescaling::CuArray{Float64},
-    constraint_rescaling_G::CuArray{Float64}
+    constraint_rescaling_G::CuArray{Float64},
+    scalar_cone_rescaling::Bool = false,
+    primal_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
+    primal_cone_ends::Union{Nothing,CuArray{Int64}} = nothing,
+    dual_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
+    dual_cone_ends::Union{Nothing,CuArray{Int64}} = nothing
 )
     @assert 0 <= alpha <= 2
     variable_rescaling .= 1.0
@@ -466,6 +629,24 @@ function pock_chambolle_rescaling!(;
     # println("constraint_rescaling_G[1:10]: ", constraint_rescaling_G[1:10])
     constraint_rescaling_G[iszero.(constraint_rescaling_G)] .= 1.0
     variable_rescaling[iszero.(variable_rescaling)] .= 1.0
+    if scalar_cone_rescaling
+        any(isnothing, (
+            primal_cone_starts,
+            primal_cone_ends,
+            dual_cone_starts,
+            dual_cone_ends,
+        )) && error("scalar cone rescaling requires cone range arrays")
+        scalarize_cone_rescaling!(
+            variable_rescaling,
+            primal_cone_starts,
+            primal_cone_ends,
+        )
+        scalarize_cone_rescaling!(
+            constraint_rescaling_G,
+            dual_cone_starts,
+            dual_cone_ends,
+        )
+    end
     ## debugging
     # variable_rescaling .= 1.0
     # constraint_rescaling_G .= 1.0
@@ -528,7 +709,12 @@ function ruiz_rescaling!(;
     dual_sol::solVecDual,
     row_idx::CuArray,
     variable_rescaling::CuArray{Float64},
-    constraint_rescaling_G::CuArray{Float64}
+    constraint_rescaling_G::CuArray{Float64},
+    scalar_cone_rescaling::Bool = false,
+    primal_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
+    primal_cone_ends::Union{Nothing,CuArray{Int64}} = nothing,
+    dual_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
+    dual_cone_ends::Union{Nothing,CuArray{Int64}} = nothing
 )
     num_constraints = problem.m
     for i in 1:num_iterations
@@ -577,6 +763,24 @@ function ruiz_rescaling!(;
             #     constraint_rescaling_G = norm_of_G / target_row_norm
             end
             constraint_rescaling_G[iszero.(constraint_rescaling_G)] .= 1.0
+        end
+        if scalar_cone_rescaling
+            any(isnothing, (
+                primal_cone_starts,
+                primal_cone_ends,
+                dual_cone_starts,
+                dual_cone_ends,
+            )) && error("scalar cone rescaling requires cone range arrays")
+            scalarize_cone_rescaling!(
+                variable_rescaling,
+                primal_cone_starts,
+                primal_cone_ends,
+            )
+            scalarize_cone_rescaling!(
+                constraint_rescaling_G,
+                dual_cone_starts,
+                dual_cone_ends,
+            )
         end
         scale_data!(
             data = problem,

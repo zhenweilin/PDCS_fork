@@ -17,6 +17,7 @@
 // BLAS functions
 __device__ double nrm2(const long* __restrict__ n, const double* __restrict__ x, long *thread_idx, long *blk_dim)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   __shared__ double partial_norm[1024];
   partial_norm[*thread_idx] = 0.0;
   // calculate the norm of the vector x
@@ -41,6 +42,7 @@ __device__ double nrm2(const long* __restrict__ n, const double* __restrict__ x,
 
 __device__ double nrm2_squared(const long* __restrict__ n, const double* __restrict__ x, long* __restrict__ thread_idx, long* __restrict__ blk_dim)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   // calculate the norm of the vector x
   __shared__ double partial_norm[1024];
   partial_norm[*thread_idx] = 0.0;
@@ -178,6 +180,7 @@ __device__ void vvrscl_inplace(const long* __restrict__ n, const double* __restr
 
 __device__ double diff_norm(const long* __restrict__ n, const double* __restrict__ x, const double* __restrict__ y, long* __restrict__ thread_idx, long* __restrict__ blk_dim)
 {
+  PDCS_PROFILE_VV_REDUCTION();
   // y = x - y
   __shared__ double partial_diff[1024];
   partial_diff[*thread_idx] = 0.0;
