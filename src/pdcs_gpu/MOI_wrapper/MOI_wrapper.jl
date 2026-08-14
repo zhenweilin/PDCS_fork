@@ -639,6 +639,12 @@ function MOI.optimize!(
             println("use_adaptive_step_size_weight is not set, using default value: true.")
         end
     end
+    if !haskey(options, :use_weighted_average)
+        options[:use_weighted_average] = true
+        if options[:verbose] > 0
+            println("use_weighted_average is not set, using default value: true.")
+        end
+    end
     if !haskey(options, :use_resolving)
         options[:use_resolving] = true
         if options[:verbose] > 0
@@ -780,6 +786,7 @@ function MOI.optimize!(
             use_aggressive = options[:use_aggressive],
             use_restart = options[:use_restart],
             use_adaptive_step = options[:use_adaptive_step],
+            use_weighted_average = options[:use_weighted_average],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
             use_inline_halpern = options[:use_inline_halpern],
@@ -851,6 +858,7 @@ function MOI.optimize!(
             use_aggressive = options[:use_aggressive],
             use_restart = options[:use_restart],
             use_adaptive_step = options[:use_adaptive_step],
+            use_weighted_average = options[:use_weighted_average],
             use_reflection = options[:use_reflection],
             use_halpern = options[:use_halpern],
             use_inline_halpern = options[:use_inline_halpern],

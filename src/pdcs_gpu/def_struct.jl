@@ -807,6 +807,7 @@ mutable struct PDHGCLPParameters
     use_restart::Bool
     use_adaptive_step::Bool
     use_adaptive_step_size_weight::Bool
+    use_weighted_average::Bool
     use_reflection::Bool
     use_halpern::Bool
     use_inline_halpern::Bool
@@ -835,6 +836,7 @@ mutable struct PDHGCLPParameters
          eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
          sigma, tau, theta,
          use_restart, use_adaptive_step, use_adaptive_step_size_weight,
+         use_weighted_average = true,
          use_reflection, use_halpern, use_inline_halpern, use_resolving,
          use_current_restart_candidate = true,
          use_mean_restart_candidate = true,
@@ -862,6 +864,7 @@ mutable struct PDHGCLPParameters
         eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
         sigma, tau, theta,
         use_restart, use_adaptive_step, use_adaptive_step_size_weight,
+        use_weighted_average,
         use_reflection, use_halpern, use_inline_halpern,
         use_current_restart_candidate, use_mean_restart_candidate,
         use_resolving,
@@ -1164,6 +1167,7 @@ mutable struct PDCS_GPU_Solver
     use_resolving::Bool
     use_restart::Bool
     use_adaptive_step::Bool
+    use_weighted_average::Bool
     use_reflection::Bool
     use_halpern::Bool
     use_inline_halpern::Bool
@@ -1220,6 +1224,7 @@ mutable struct PDCS_GPU_Solver
         use_resolving::Bool = true,
         use_restart::Bool = use_adaptive_restart,
         use_adaptive_step::Bool = true,
+        use_weighted_average::Bool = true,
         use_reflection::Bool = use_aggressive,
         use_halpern::Bool = false,
         use_inline_halpern::Union{Nothing,Bool} = nothing,
@@ -1312,6 +1317,7 @@ mutable struct PDCS_GPU_Solver
             use_resolving,
             use_restart,
             use_adaptive_step,
+            use_weighted_average,
             use_reflection,
             use_halpern,
             use_inline_halpern,

@@ -414,6 +414,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
     use_adaptive_step::Bool = true,
+    use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
     use_inline_halpern::Union{Nothing,Bool} = nothing,
@@ -495,6 +496,7 @@ dGType<:Union{
         @info ("use_aggressive: $use_aggressive")
         @info ("use_restart: $use_restart")
         @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("use_weighted_average: $use_weighted_average")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
         @info ("use_inline_halpern: $use_inline_halpern")
@@ -936,6 +938,7 @@ dGType<:Union{
                                 use_restart = use_restart,
                                 use_adaptive_step = use_adaptive_step,
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                use_weighted_average = use_weighted_average,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
                                 use_inline_halpern = use_inline_halpern,
@@ -1294,6 +1297,7 @@ function rpdhg_gpu_solve(;
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
     use_adaptive_step::Bool = true,
+    use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,
     use_halpern::Bool = false,
     use_inline_halpern::Union{Nothing,Bool} = nothing,
@@ -1370,6 +1374,7 @@ function rpdhg_gpu_solve(;
         @info ("use_aggressive: $use_aggressive")
         @info ("use_restart: $use_restart")
         @info ("use_adaptive_step: $use_adaptive_step")
+        @info ("use_weighted_average: $use_weighted_average")
         @info ("use_reflection: $use_reflection")
         @info ("use_halpern: $use_halpern")
         @info ("use_inline_halpern: $use_inline_halpern")
@@ -1813,6 +1818,7 @@ function rpdhg_gpu_solve(;
                                 use_restart = use_restart,
                                 use_adaptive_step = use_adaptive_step,
                                 use_adaptive_step_size_weight = use_adaptive_step_size_weight,
+                                use_weighted_average = use_weighted_average,
                                 use_reflection = use_reflection,
                                 use_halpern = use_halpern,
                                 use_inline_halpern = use_inline_halpern,
@@ -2084,6 +2090,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_resolving = solver.use_resolving,
             use_restart = solver.use_restart,
             use_adaptive_step = solver.use_adaptive_step,
+            use_weighted_average = solver.use_weighted_average,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
             use_inline_halpern = solver.use_inline_halpern,
@@ -2136,6 +2143,7 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             use_resolving = solver.use_resolving,
             use_restart = solver.use_restart,
             use_adaptive_step = solver.use_adaptive_step,
+            use_weighted_average = solver.use_weighted_average,
             use_reflection = solver.use_reflection,
             use_halpern = solver.use_halpern,
             use_inline_halpern = solver.use_inline_halpern,

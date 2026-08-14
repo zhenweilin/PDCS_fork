@@ -52,6 +52,7 @@ reflection_update(
     long inner_iter,
     double eta_cum,
     double eta,
+    int use_weighted_average,
     int use_reflection,
     int use_halpern,
     int use_inline_halpern)
@@ -90,9 +91,14 @@ reflection_update(
             ? alpha * reflected + anchor_weight * base_point
             : reflected;
         primal_sol[global_thread_idx] = main_point;
+        double previous_weight = use_weighted_average
+            ? eta_cum
+            : double_inner_iter - 1.0;
+        double current_weight = use_weighted_average ? eta : 1.0;
         primal_sol_mean[global_thread_idx] =
-            (primal_sol_mean[global_thread_idx] * eta_cum + main_point * eta)
-            / (eta_cum + eta);
+            (primal_sol_mean[global_thread_idx] * previous_weight
+             + main_point * current_weight)
+            / (previous_weight + current_weight);
     }
     if (global_thread_idx < dual_n) {
         double base_point = dual_sol[global_thread_idx];
@@ -111,9 +117,14 @@ reflection_update(
             ? alpha * reflected + anchor_weight * base_point
             : reflected;
         dual_sol[global_thread_idx] = main_point;
+        double previous_weight = use_weighted_average
+            ? eta_cum
+            : double_inner_iter - 1.0;
+        double current_weight = use_weighted_average ? eta : 1.0;
         dual_sol_mean[global_thread_idx] =
-            (dual_sol_mean[global_thread_idx] * eta_cum + main_point * eta)
-            / (eta_cum + eta);
+            (dual_sol_mean[global_thread_idx] * previous_weight
+             + main_point * current_weight)
+            / (previous_weight + current_weight);
     }
 }
 

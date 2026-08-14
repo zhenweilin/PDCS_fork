@@ -710,6 +710,8 @@ Arguments:
 - inner_iter: Current inner iteration number
 - eta_cum: Cumulative extrapolation coefficient
 - eta: Current extrapolation coefficient
+- use_weighted_average: Use step-size weights for the running mean; when false,
+  use a uniform arithmetic mean over the inner iterations
 - use_reflection: Whether to apply the reflection/extrapolation term
 - use_halpern: Whether to form the auxiliary restart-only Halpern candidate.
 - use_inline_halpern: Whether to apply the legacy inline update to the main
@@ -733,6 +735,7 @@ function reflection_update(
     inner_iter::Int64,
     eta_cum::Float64,
     eta::Float64,
+    use_weighted_average::Bool,
     use_reflection::Bool,
     use_halpern::Bool,
     use_inline_halpern::Bool,
@@ -762,6 +765,7 @@ function reflection_update(
                 Int32,
                 Int32,
                 Int32,
+                Int32,
             ),
             primal_sol,
             primal_sol_lag,
@@ -779,6 +783,7 @@ function reflection_update(
             inner_iter,
             eta_cum,
             eta,
+            Int32(use_weighted_average),
             Int32(use_reflection),
             Int32(use_halpern),
             Int32(use_inline_halpern);
