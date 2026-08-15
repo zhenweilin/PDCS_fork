@@ -7,10 +7,14 @@ function approximate_cal_diagonal!(; solver::rpdhgSolver, h1::primalVector, h2::
     # slack.primal_sol.x .= primal.x .+ (t * tau / 2) * h1.x
     axpyz(slack.primal_sol.x, (t * tau / 2), h1.x, primal.x, solver.data.n)
     # here use solver.data.x is different with slack
+    projection_start = time_proj
     solver.sol.x.proj_diagonal!(slack.primal_sol, solver.sol.x, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
+    global time_proj_dual_slack += time_proj - projection_start
     # dual_sol_temp.dual_sol.y .= dual.y .+ (t * sigma / 2) * h2.y
     axpyz(dual_sol_temp.dual_sol.y, (t * sigma / 2), h2.y, dual.y, solver.data.m)
+    projection_start = time_proj
     solver.sol.y.proj_diagonal!(dual_sol_temp.dual_sol, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
+    global time_proj_dual_slack += time_proj - projection_start
 end
 
 """
@@ -145,13 +149,17 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.addCoeffd!(solver.data.raw_data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
+    projection_start = time_proj
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
+    global time_proj_dual_slack += time_proj - projection_start
     solver.data.diagonal_scale.Dl_temp.y .= dual_sol_temp.dual_sol_mean.y .- dual_sol_temp.dual_sol_lag.y
 
 
     
     slack.primal_sol_lag.x .= slack.primal_sol.x
+    projection_start = time_proj
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
+    global time_proj_dual_slack += time_proj - projection_start
     sInf = norm(slack.primal_sol.x, Inf)
     sNrm1 = norm(slack.primal_sol.x, 1)
 
@@ -203,7 +211,9 @@ function infeasibility_info_calculation_diagonal!(; solver::rpdhgSolver,
         solver.primalMV!(solver.data.raw_data.coeff, primal_ray.x, dual_sol_temp.dual_sol_mean);
         solver.addCoeffd!(solver.data.raw_data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
         dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
+        projection_start = time_proj
         solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
+        global time_proj_dual_slack += time_proj - projection_start
         dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y .- dual_sol_temp.dual_sol_lag.y
         l_inf_primal_ray_infeasibility = CUDA.maximum(CUDA.abs.(dual_sol_temp.dual_sol_temp.y));
     end
@@ -219,7 +229,9 @@ function infeasibility_info_calculation_diagonal!(; solver::rpdhgSolver,
         dObj += (solver.data.raw_data.bl_finite' * slack.primal_sol_lag.xbox + solver.data.raw_data.bu_finite' * slack.primal_sol_mean.xbox)
         if dObj > 0
             slack.primal_sol_lag.x .= slack.primal_sol.x
+            projection_start = time_proj
             solver.sol.x.slack_proj!(slack.primal_sol, slack)
+            global time_proj_dual_slack += time_proj - projection_start
             solver.data.diagonal_scale.Dr_temp.x .= slack.primal_sol.x .- slack.primal_sol_lag.x
             l_inf_dual_ray_infeasibility = CUDA.maximum(CUDA.abs.(solver.data.diagonal_scale.Dr_temp.x));
         end
@@ -253,6 +265,7 @@ function pdhg_one_iter_diagonal_rescaling!(; solver::rpdhgSolver, x::solVecPrima
     solver.adjointMV!(solver.data.coeff, y.dual_sol, slack.primal_sol_lag.x)
     x.primal_sol.x .-= tau .* solver.data.d_c
     x.primal_sol.x .+= tau .* slack.primal_sol_lag.x
+    projection_start = time_proj
     x.proj_diagonal!(
         x.primal_sol,
         x,
@@ -260,16 +273,19 @@ function pdhg_one_iter_diagonal_rescaling!(; solver::rpdhgSolver, x::solVecPrima
         abs_tol = solver.sol.params.proj_abs_tol,
         rel_tol = solver.sol.params.proj_rel_tol,
     )
+    global time_proj_primal += time_proj - projection_start
     x.primal_sol_lag.x .= 2 .* x.primal_sol.x .- x.primal_sol_lag.x
     solver.primalMV!(solver.data.coeff, x.primal_sol_lag.x, dual_sol_temp.dual_sol_lag)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_lag, -1.0)
     y.dual_sol.y .-= sigma .* dual_sol_temp.dual_sol_lag.y
+    projection_start = time_proj
     y.proj_diagonal!(
         y.dual_sol,
         solver.data.diagonal_scale,
         abs_tol = solver.sol.params.proj_abs_tol,
         rel_tol = solver.sol.params.proj_rel_tol,
     )
+    global time_proj_dual_slack += time_proj - projection_start
     _end_projection_work_iteration!()
     return;
 end
@@ -1045,6 +1061,10 @@ function resolving_pessimistic_step!(; solver::rpdhgSolver,
                         sol.params.adaptive_projection_tolerance,
                         sol.params.proj_base_tol,
                     )
+                    push!(
+                        sol.params.projection_tolerance_history,
+                        sol.params.proj_abs_tol,
+                    )
                 end
                 global time_exit_check += time() - time_start
                 if sol.params.verbose > 0   
@@ -1143,7 +1163,9 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
         primal_step_size = sol.params.tau * decay_step_size_ratio
         primal_update(x.primal_sol.x, x.primal_sol_lag.x, primal_sol_diff.x, solver.data.d_c, primal_step_size, solver.data.n)
         global time_iterative += time() - time_start
+        projection_start = time_proj
         x.proj_diagonal!(x.primal_sol, x, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
+        global time_proj_primal += time_proj - projection_start
         ## dual step
         time_start = time()
         # primal_sol_diff.x .= 2 .* x.primal_sol.x .- x.primal_sol_lag.x
@@ -1154,7 +1176,9 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
         dual_step_size = sol.params.sigma * decay_step_size_ratio
         dual_update(y.dual_sol.y, y.dual_sol_lag.y, dual_sol_diff.y, solver.data.coeff.d_h, dual_step_size, solver.data.m)
         global time_iterative += time() - time_start
+        projection_start = time_proj
         y.proj_diagonal!(y.dual_sol, solver.data.diagonal_scale, abs_tol = solver.sol.params.proj_abs_tol, rel_tol = solver.sol.params.proj_rel_tol)
+        global time_proj_dual_slack += time_proj - projection_start
         _end_projection_work_iteration!()
         eta_bar = eta
         eta_prime = eta
@@ -1187,6 +1211,10 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
                 average_kkt_error,
                 solver.sol.params.adaptive_projection_tolerance,
                 solver.sol.params.proj_base_tol,
+            )
+            push!(
+                solver.sol.params.projection_tolerance_history,
+                solver.sol.params.proj_abs_tol,
             )
             # @info ("proj_abs_tol: $(solver.sol.params.proj_abs_tol), proj_rel_tol: $(solver.sol.params.proj_rel_tol)")
             if sol.params.verbose > 0
@@ -1232,6 +1260,10 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
             solver.sol.params.proj_rel_tol = stalled_projection_tolerance(
                 solver.sol.params.proj_rel_tol,
                 solver.sol.params.adaptive_projection_tolerance,
+            )
+            push!(
+                solver.sol.params.projection_tolerance_history,
+                solver.sol.params.proj_abs_tol,
             )
             @info ("proj_abs_tol: $(solver.sol.params.proj_abs_tol), proj_rel_tol: $(solver.sol.params.proj_rel_tol)")
             return eta, eta_prime, true

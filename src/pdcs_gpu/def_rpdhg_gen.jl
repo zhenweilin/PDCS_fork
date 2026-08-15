@@ -64,8 +64,50 @@ function DUALEXP_proj_const_scale_diagonal!(x::T, dummy1::T, Dinv::T, dummy2::T,
     dualExponent_proj!(x)
 end
 
+const _adaptive_projection_strict_soc_dimension = 1_024
+const _adaptive_projection_strict_soc_block_count = 8_192
+const _adaptive_projection_scaled_sqrt_strict_soc_dimension = 16
+const _adaptive_projection_scaled_sqrt_strict_soc_block_count = 64
+
+"""Protect large or numerous root-solved blocks from loose tolerances."""
+function layout_projection_tolerances(
+    block_sizes::AbstractVector{<:Integer},
+    projection_types::AbstractVector{<:Integer},
+    abs_tol::Float64,
+    rel_tol::Float64,
+)
+    policy = adaptive_projection_tolerance_policy()
+    policy in (:selective_fourth_root, :selective_scaled_sqrt) ||
+        return abs_tol, rel_tol
+    strict_dimension, strict_block_count =
+        policy === :selective_scaled_sqrt ?
+        (_adaptive_projection_scaled_sqrt_strict_soc_dimension,
+         _adaptive_projection_scaled_sqrt_strict_soc_block_count) :
+        (_adaptive_projection_strict_soc_dimension,
+         _adaptive_projection_strict_soc_block_count)
+    is_soc_or_rsoc(code) = code in (
+        5, 6, 7, 8, 9, 10, 20, 21, 22, 23, 24, 25,
+    )
+    is_root_solved(code) = code in (
+        5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+    )
+    root_solved_blocks = count(is_root_solved, projection_types)
+    requires_strict = root_solved_blocks >= strict_block_count || any(
+        is_soc_or_rsoc(code) && dimension >= strict_dimension
+        for (dimension, code) in zip(block_sizes, projection_types)
+    )
+    return requires_strict ?
+        (min(abs_tol, 1e-12), min(rel_tol, 1e-12)) :
+        (abs_tol, rel_tol)
+end
+
 function massive_primal_proj_diagonal!(x::primalVector, sol::solVecPrimal, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        x.x_slice_length_cpu, x.x_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     massive_block_proj(x.x, sol.bl, sol.bu, diag_precond.Dr_product_inv_normalized.x, diag_precond.Dr_product_inv_normalized_squared.x, diag_precond.Dr.x, diag_precond.Dr_temp.x, x.t_warm_start_device, x.cone_index_start, x.x_slice_length, x.blkLen, x.x_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -74,6 +116,10 @@ end
 
 function moderate_primal_proj_diagonal!(x::primalVector, sol::solVecPrimal, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        x.x_slice_length_cpu, x.x_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     moderate_block_proj(x.x, sol.bl, sol.bu, diag_precond.Dr_product_inv_normalized.x, diag_precond.Dr_product_inv_normalized_squared.x, diag_precond.Dr.x, diag_precond.Dr_temp.x, x.t_warm_start_device, x.cone_index_start, x.x_slice_length, x.blkLen, x.x_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -82,6 +128,10 @@ end
 
 function sufficient_primal_proj_diagonal!(x::primalVector, sol::solVecPrimal, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        x.x_slice_length_cpu, x.x_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     sufficient_block_proj(x.x, sol.bl, sol.bu, diag_precond.Dr_product_inv_normalized.x, diag_precond.Dr_product_inv_normalized_squared.x, diag_precond.Dr.x, diag_precond.Dr_temp.x, x.t_warm_start_device, x.cone_index_start, x.x_slice_length, x.blkLen, x.x_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -90,6 +140,10 @@ end
 
 function few_primal_proj_diagonal!(x::primalVector, sol::solVecPrimal, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        x.x_slice_length_cpu, x.x_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     # @threads for i in 1:x.blkLen
     #     x.x_slice_proj_diagonal![i](x.x_slice[i],
     #                                 x.x_slice_part[i],
@@ -459,6 +513,10 @@ end
 
 function massive_dual_proj_diagonal!(y::dualVector, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        y.y_slice_length_cpu, y.y_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     massive_block_proj(y.y, y.y, y.y, diag_precond.Dl_product_inv_normalized.y, diag_precond.Dl_product_inv_normalized_squared.y, diag_precond.Dl.y, diag_precond.Dl_temp.y, y.t_warm_start_device, y.cone_index_start, y.y_slice_length, y.blkLen, y.y_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -466,6 +524,10 @@ end
 
 function moderate_dual_proj_diagonal!(y::dualVector, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        y.y_slice_length_cpu, y.y_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     moderate_block_proj(y.y, y.y, y.y, diag_precond.Dl_product_inv_normalized.y, diag_precond.Dl_product_inv_normalized_squared.y, diag_precond.Dl.y, diag_precond.Dl_temp.y, y.t_warm_start_device, y.cone_index_start, y.y_slice_length, y.blkLen, y.y_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -474,6 +536,10 @@ end
 
 function sufficient_dual_proj_diagonal!(y::dualVector, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        y.y_slice_length_cpu, y.y_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     sufficient_block_proj(y.y, y.y, y.y, diag_precond.Dl_product_inv_normalized.y, diag_precond.Dl_product_inv_normalized_squared.y, diag_precond.Dl.y, diag_precond.Dl_temp.y, y.t_warm_start_device, y.cone_index_start, y.y_slice_length, y.blkLen, y.y_slice_proj_kernel_diagonal_device, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start
@@ -481,6 +547,10 @@ end
 
 function few_dual_proj_diagonal!(y::dualVector, diag_precond::Diagonal_preconditioner; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
+    abs_tol, rel_tol = layout_projection_tolerances(
+        y.y_slice_length_cpu, y.y_slice_proj_kernel_diagonal,
+        abs_tol, rel_tol,
+    )
     few_block_proj(y.y, y.y, y.y, diag_precond.Dl_product_inv_normalized.y, diag_precond.Dl_product_inv_normalized_squared.y, diag_precond.Dl.y, diag_precond.Dl_temp.y, y.t_warm_start_device, y.cone_index_start_cpu, y.y_slice_length, y.y_slice_length_cpu, y.blkLen, y.y_slice_proj_kernel_diagonal, abs_tol, rel_tol)
     time_end = time()
     global time_proj += time_end - time_start

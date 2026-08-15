@@ -804,22 +804,134 @@ policy. `nothing` deliberately preserves the historical settings.
 """
 function projection_tolerance_defaults(
     adaptive_projection_tolerance::Union{Nothing,Bool},
+    policy::Symbol = adaptive_projection_tolerance_policy(),
 )
     if adaptive_projection_tolerance === true
-        return 1e-7, 1e-7
+        initial_tolerance = if policy === :capped_linear_safe
+            1e-9
+        elseif policy === :linear_safe
+            1e-10
+        elseif policy === :scaled_sqrt_safe ||
+               policy === :selective_scaled_sqrt
+            1e-9
+        elseif policy === :sqrt_safe
+            1e-8
+        elseif policy === :fourth_root_safe
+            1e-9
+        else
+            1e-7
+        end
+        return 1e-7, initial_tolerance
     elseif adaptive_projection_tolerance === false
         return 1e-12, 1e-12
     end
     return 1e-9, 1e-11
 end
 
+const SUPPORTED_ADAPTIVE_PROJECTION_TOLERANCE_POLICIES = (
+    :linear,
+    :linear_safe,
+    :capped_linear_safe,
+    :sqrt,
+    :sqrt_safe,
+    :scaled_sqrt_safe,
+    :selective_scaled_sqrt,
+    :fourth_root,
+    :fourth_root_safe,
+    :selective_fourth_root,
+    :relative_1pct,
+)
+const _adaptive_projection_tolerance_policy = Ref{Symbol}(:selective_scaled_sqrt)
+
+"""Select the process-local adaptive projection-tolerance schedule."""
+function set_adaptive_projection_tolerance_policy!(policy::Symbol)
+    policy in SUPPORTED_ADAPTIVE_PROJECTION_TOLERANCE_POLICIES ||
+        throw(ArgumentError(
+            "unsupported adaptive projection-tolerance policy: $policy",
+        ))
+    _adaptive_projection_tolerance_policy[] = policy
+    return policy
+end
+
+adaptive_projection_tolerance_policy() =
+    _adaptive_projection_tolerance_policy[]
+
+"""Resolve a requested adaptive policy for the complete conic instance.
+
+Structure-aware policies keep exact fixed-tolerance projections for an entire
+instance whenever either its primal or dual layout contains a large SOC/RSOC
+or enough root-solved SOC/RSOC/EXP blocks for small per-block projection errors
+to accumulate.
+The tighter scaled-sqrt gate was selected from the represent-data A/B screens;
+the older fourth-root policy retains its historical thresholds for audit.
+"""
+function resolve_adaptive_projection_tolerance(
+    requested::Union{Nothing,Bool},
+    socG::AbstractVector{<:Integer},
+    rsocG::AbstractVector{<:Integer},
+    soc_x::AbstractVector{<:Integer},
+    rsoc_x::AbstractVector{<:Integer};
+    expG::Integer = 0,
+    dual_expG::Integer = 0,
+    exp_x::Integer = 0,
+    dual_exp_x::Integer = 0,
+    strict_dimension::Union{Nothing,Integer} = nothing,
+    strict_block_count::Union{Nothing,Integer} = nothing,
+)
+    requested === true || return requested
+    policy = adaptive_projection_tolerance_policy()
+    policy in (:selective_fourth_root, :selective_scaled_sqrt) || return requested
+    default_dimension = policy === :selective_scaled_sqrt ? 16 : 1_024
+    default_block_count = policy === :selective_scaled_sqrt ? 64 : 8_192
+    dimension_limit = something(strict_dimension, default_dimension)
+    block_count_limit = something(strict_block_count, default_block_count)
+    largest_dimension = mapreduce(
+        dimensions -> maximum(dimensions; init=0),
+        max,
+        (socG, rsocG, soc_x, rsoc_x);
+        init=0,
+    )
+    block_count = length(socG) + length(rsocG) + length(soc_x) +
+        length(rsoc_x) + expG + dual_expG + exp_x + dual_exp_x
+    requires_strict = largest_dimension >= dimension_limit ||
+        block_count >= block_count_limit
+    return !requires_strict
+end
+
+function adaptive_projection_tolerance_target(
+    average_kkt_error::rpdhg_float,
+    base_tolerance::rpdhg_float,
+    policy::Symbol = adaptive_projection_tolerance_policy(),
+)
+    nonnegative_error = max(average_kkt_error, zero(rpdhg_float))
+    if policy === :linear || policy === :linear_safe ||
+       policy === :capped_linear_safe
+        return base_tolerance * nonnegative_error
+    elseif policy === :scaled_sqrt_safe || policy === :selective_scaled_sqrt
+        # Reach the fixed 1e-12 floor when the measured KKT error reaches the
+        # requested 1e-6 solve accuracy, while retaining a 1e-9 early phase.
+        return 1e-9 * sqrt(nonnegative_error)
+    elseif policy === :sqrt || policy === :sqrt_safe
+        return base_tolerance * sqrt(nonnegative_error)
+    elseif policy === :fourth_root || policy === :fourth_root_safe ||
+           policy === :selective_fourth_root
+        return base_tolerance * sqrt(sqrt(nonnegative_error))
+    elseif policy === :relative_1pct
+        return 1e-2 * nonnegative_error
+    end
+    throw(ArgumentError(
+        "unsupported adaptive projection-tolerance policy: $policy",
+    ))
+end
+
 """
     next_projection_tolerance(current_tolerance, average_kkt_error,
                               adaptive_projection_tolerance)
 
-Update a projection tolerance after a KKT check. The explicit adaptive mode
-tracks the average KKT error from `1e-7` down to `1e-14`; fixed mode does not
-change the tolerance; and `nothing` reproduces the historical update exactly.
+Update a projection tolerance after a KKT check. Safe adaptive policies use a
+looser tolerance early but never become stricter than the `1e-12` fixed-mode
+tolerance; fixed mode does not change the tolerance; and `nothing` reproduces
+the historical update exactly.
 """
 function next_projection_tolerance(
     current_tolerance::rpdhg_float,
@@ -827,11 +939,36 @@ function next_projection_tolerance(
     adaptive_projection_tolerance::Union{Nothing,Bool},
     base_tolerance::rpdhg_float =
         first(projection_tolerance_defaults(adaptive_projection_tolerance)),
+    policy::Symbol = adaptive_projection_tolerance_policy(),
 )
     if adaptive_projection_tolerance === true
+        target_tolerance = adaptive_projection_tolerance_target(
+            average_kkt_error,
+            base_tolerance,
+            policy,
+        )
+        maximum_tolerance = if policy === :capped_linear_safe
+            1e-9
+        elseif policy === :linear_safe
+            1e-10
+        elseif policy === :scaled_sqrt_safe ||
+               policy === :selective_scaled_sqrt
+            1e-9
+        elseif policy === :sqrt_safe
+            1e-8
+        elseif policy === :fourth_root_safe
+            1e-9
+        else
+            1e-7
+        end
+        minimum_tolerance = policy in (
+            :linear_safe, :capped_linear_safe, :sqrt_safe,
+            :scaled_sqrt_safe, :selective_scaled_sqrt, :fourth_root_safe,
+            :selective_fourth_root,
+        ) ? 1e-12 : 1e-14
         return max(
-            min(current_tolerance, average_kkt_error * base_tolerance, 1e-7),
-            1e-14,
+            min(current_tolerance, target_tolerance, maximum_tolerance),
+            minimum_tolerance,
         )
     elseif adaptive_projection_tolerance === false
         return current_tolerance
@@ -848,7 +985,12 @@ function stalled_projection_tolerance(
     adaptive_projection_tolerance::Union{Nothing,Bool},
 )
     if adaptive_projection_tolerance === true
-        return max(current_tolerance * 0.1, 1e-14)
+        minimum_tolerance = adaptive_projection_tolerance_policy() in (
+            :linear_safe, :capped_linear_safe, :sqrt_safe,
+            :scaled_sqrt_safe, :selective_scaled_sqrt, :fourth_root_safe,
+            :selective_fourth_root,
+        ) ? 1e-12 : 1e-14
+        return max(current_tolerance * 0.1, minimum_tolerance)
     elseif adaptive_projection_tolerance === false
         return current_tolerance
     end
@@ -895,6 +1037,7 @@ mutable struct PDHGCLPParameters
     proj_base_tol::rpdhg_float
     proj_abs_tol::rpdhg_float
     proj_rel_tol::rpdhg_float
+    projection_tolerance_history::Vector{rpdhg_float}
     function PDHGCLPParameters(;
          max_outer_iter, max_inner_iter, rel_tol, abs_tol,
          eps_primal_infeasible_low_acc, eps_dual_infeasible_low_acc,
@@ -926,6 +1069,7 @@ mutable struct PDHGCLPParameters
              projection_tolerance_defaults(adaptive_projection_tolerance)
          proj_abs_tol = initial_projection_tolerance
          proj_rel_tol = initial_projection_tolerance
+         projection_tolerance_history = rpdhg_float[initial_projection_tolerance]
         new(max_outer_iter, max_inner_iter, rel_tol, abs_tol,
         eps_primal_infeasible_low_acc, eps_dual_infeasible_low_acc,
         eps_primal_infeasible_high_acc, eps_dual_infeasible_high_acc,
@@ -937,7 +1081,8 @@ mutable struct PDHGCLPParameters
         use_resolving,
         use_kkt_restart, kkt_restart_freq, use_duality_gap_restart, duality_gap_restart_freq, check_terminate_freq, verbose, print_freq, time_limit,
         beta_suff, beta_necessary, beta_suff_kkt, beta_necessary_kkt, beta_artificial,
-        adaptive_projection_tolerance, proj_base_tol, proj_abs_tol, proj_rel_tol)
+        adaptive_projection_tolerance, proj_base_tol, proj_abs_tol, proj_rel_tol,
+        projection_tolerance_history)
     end
 end
 

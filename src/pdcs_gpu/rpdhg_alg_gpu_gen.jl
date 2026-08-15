@@ -143,10 +143,14 @@ function approximate_cal!(; solver::rpdhgSolver, h1::primalVector, h2::dualVecto
     tau::rpdhg_float, sigma::rpdhg_float)
     # modify `slack.primal_sol` and `dual_sol_temp.dual_sol`
     slack.primal_sol.x .= primal.x .+ (t * tau / 2) * h1.x
+    projection_start = time_proj
     slack.proj!(slack.primal_sol, solver.sol.x)
+    global time_proj_dual_slack += time_proj - projection_start
 
     dual_sol_temp.dual_sol.y .= dual.y .+ (t * sigma / 2) * h2.y
+    projection_start = time_proj
     dual_sol_temp.proj!(dual_sol_temp.dual_sol)
+    global time_proj_dual_slack += time_proj - projection_start
 end
 
 
@@ -235,7 +239,9 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
+    projection_start = time_proj
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
+    global time_proj_dual_slack += time_proj - projection_start
 
     dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
     l_2_abs_primal_res = norm(dual_sol_temp.dual_sol_temp.y);
@@ -244,7 +250,9 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(solver.data.hNrmInf, AxInf));
     
     slack.primal_sol_lag.x .= slack.primal_sol.x
+    projection_start = time_proj
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
+    global time_proj_dual_slack += time_proj - projection_start
     slack.primal_sol_mean.x .= slack.primal_sol.x - slack.primal_sol_lag.x
     l_2_abs_dual_res = norm(slack.primal_sol_mean.x);
     l_2_rel_dual_res = l_2_abs_dual_res / (1 + max(solver.data.cNrm1, AxNrm1));
@@ -286,7 +294,9 @@ function infeasibility_info_calculation(; solver::rpdhgSolver,
         solver.primalMV!(solver.data.coeff, primal_ray.x, dual_sol_temp.dual_sol_mean);
         solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
         dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
+        projection_start = time_proj
         solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
+        global time_proj_dual_slack += time_proj - projection_start
         dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
         l_inf_primal_ray_infeasibility = CUDA.maximum(CUDA.abs.(dual_sol_temp.dual_sol_temp.y));
     end
@@ -300,7 +310,9 @@ function infeasibility_info_calculation(; solver::rpdhgSolver,
         dObj += (solver.sol.x.bl' * slack.primal_sol_lag.xbox + solver.sol.x.bu' * slack.primal_sol_mean.xbox)
         if dObj > 0
             slack.primal_sol_lag.x .= slack.primal_sol.x
+            projection_start = time_proj
             solver.sol.x.slack_proj!(slack.primal_sol, slack)
+            global time_proj_dual_slack += time_proj - projection_start
             slack.primal_sol_mean.x .= slack.primal_sol.x - slack.primal_sol_lag.x
             l_inf_dual_ray_infeasibility = CUDA.maximum(CUDA.abs.(slack.primal_sol_mean.x));
         end
@@ -327,13 +339,17 @@ function pdhg_one_iter!(; solver::rpdhgSolver, x::solVecPrimal, y::solVecDual, t
     x.primal_sol_lag.x .= x.primal_sol.x
     solver.adjointMV!(solver.data.coeffTrans, y.dual_sol, slack.primal_sol_lag.x)
     x.primal_sol.x .-= tau * (solver.data.c .- slack.primal_sol_lag.x)
+    projection_start = time_proj
     x.proj!(x.primal_sol, x)
+    global time_proj_primal += time_proj - projection_start
     x.primal_sol_lag.x .= x.primal_sol.x * 2 - x.primal_sol_lag.x
     solver.primalMV!(solver.data.coeff, x.primal_sol_lag.x, dual_sol_temp.dual_sol_lag)
     # dual_sol_temp -= d
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_lag, -1.0)
     y.dual_sol.y .-= sigma * dual_sol_temp.dual_sol_lag.y
+    projection_start = time_proj
     y.proj!(y.dual_sol)
+    global time_proj_dual_slack += time_proj - projection_start
     _end_projection_work_iteration!()
 end
 
@@ -452,6 +468,11 @@ dGType<:Union{
     CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64},
     Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int64}}
 }}
+    adaptive_projection_tolerance = resolve_adaptive_projection_tolerance(
+        adaptive_projection_tolerance, socG, rsocG, soc_x, rsoc_x;
+        expG=expG, dual_expG=dual_expG, exp_x=exp_x,
+        dual_exp_x=dual_exp_x,
+    )
     use_inline_halpern = resolve_inline_halpern(
         use_inline_halpern,
         use_halpern;
@@ -485,6 +506,9 @@ dGType<:Union{
     # Check the assertion
     global num_threads = nthreads()
     global time_proj = 0.0
+    global time_proj_primal = 0.0
+    global time_proj_dual_slack = 0.0
+    global time_preprocess = 0.0
     global time_iterative = 0.0
     global time_restart_check = 0.0
     global time_exit_check = 0.0
@@ -670,6 +694,8 @@ dGType<:Union{
         diagonal_scale = diagonal_scale,
         raw_data = nothing
     )
+    CUDA.synchronize()
+    preprocess_start_time = time()
     if use_preconditioner
         raw_data = create_raw_data_from_gpu_data(
             m = m,
@@ -1068,6 +1094,8 @@ dGType<:Union{
             @info ("after scaling, normInf G: $(norm(solver.data.coeff.d_G, Inf))")
         end
     end # end if use_preconditioner
+    CUDA.synchronize()
+    global time_preprocess = time() - preprocess_start_time
 
     solver_start_time = time()
     setFunctionPointerSolver!(solver)
@@ -1183,6 +1211,7 @@ dGType<:Union{
         #     @info (" norm(sol.y.dual_sol.y, Inf): $(norm(sol.y.dual_sol.y, Inf))")
         # end
         @info ("time for projection: $(time_proj)")
+        @info ("time for preprocessing: $(time_preprocess)")
         @info ("time for iterative: $(time_iterative)")
         @info ("time for restart check: $(time_restart_check)")
         @info ("time for exit check: $(time_exit_check)")
@@ -1252,9 +1281,9 @@ end # end rpdhg_cpu_solve
       explicit method for the combined rescaling pipeline.
     - `use_preconditioner`: whether to use the preconditioner
     - `adaptive_projection_tolerance`: projection root-search tolerance policy.
-      `true` starts at `1e-7` and tightens with the average KKT error down to
-      `1e-14`; `false` uses a fixed `1e-12`; `nothing` preserves the legacy
-      policy and is the default.
+      `true` uses the selected structure-aware adaptive schedule (the default
+      schedule starts at `1e-9` and tightens to the fixed `1e-12` floor);
+      `false` uses fixed `1e-12`; `nothing` preserves the legacy policy.
     - `primal_sol`: a `Vector` to warmstart the primal variables,
     - `dual_sol`: a `Vector` to warmstart the dual variables,
     - `warm_start`: a `Bool` to enable warm start
@@ -1360,6 +1389,11 @@ function rpdhg_gpu_solve(;
     sparse_index_type = :auto,
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
+    adaptive_projection_tolerance = resolve_adaptive_projection_tolerance(
+        adaptive_projection_tolerance, socG, rsocG, soc_x, rsoc_x;
+        expG=expG, dual_expG=dual_expG, exp_x=exp_x,
+        dual_exp_x=dual_exp_x,
+    )
     use_inline_halpern = resolve_inline_halpern(
         use_inline_halpern,
         use_halpern;
@@ -1392,6 +1426,9 @@ function rpdhg_gpu_solve(;
     # Check the assertion
     global num_threads = nthreads()
     global time_proj = 0.0
+    global time_proj_primal = 0.0
+    global time_proj_dual_slack = 0.0
+    global time_preprocess = 0.0
     global time_iterative = 0.0
     global time_restart_check = 0.0
     global time_exit_check = 0.0
@@ -1579,6 +1616,8 @@ function rpdhg_gpu_solve(;
         diagonal_scale = diagonal_scale,
         raw_data = nothing
     )
+    CUDA.synchronize()
+    preprocess_start_time = time()
     if use_preconditioner
         raw_data = create_raw_data_from_cpu_data(
             m = m,
@@ -1978,6 +2017,8 @@ function rpdhg_gpu_solve(;
             @info ("after scaling, normInf G: $(norm(solver.data.coeff.d_G, Inf))")
         end
     end # end if use_preconditioner
+    CUDA.synchronize()
+    global time_preprocess = time() - preprocess_start_time
 
     solver_start_time = time()
     setFunctionPointerSolver!(solver)
@@ -2096,6 +2137,7 @@ function rpdhg_gpu_solve(;
             @info (" norm(sol.y.dual_sol.y, Inf): $(norm(sol.y.dual_sol.y, Inf))")
         end
         @info ("time for projection: $(time_proj)")
+        @info ("time for preprocessing: $(time_preprocess)")
         @info ("time for iterative: $(time_iterative)")
         @info ("time for restart check: $(time_restart_check)")
         @info ("time for exit check: $(time_exit_check)")

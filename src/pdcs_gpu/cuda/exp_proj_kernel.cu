@@ -1,19 +1,44 @@
 #include <math_constants.h>
+#include "exp_root_coordinate.cuh"
 #define positive_inf 1e32
 #define negative_inf -1e32
+#ifndef PDCS_ENABLE_EXP_RECIPROCAL_PAIR
+#define PDCS_ENABLE_EXP_RECIPROCAL_PAIR 0
+#endif
+#ifndef PDCS_ENABLE_SAFEGUARDED_NEWTON
+#define PDCS_ENABLE_SAFEGUARDED_NEWTON 1
+#endif
 // #define proj_abs_tol_exp 5e-16
 // #define proj_rel_tol_exp 5e-16
 
+__device__ __forceinline__ void pdcs_exp_pair(
+    double rho, double *exprho, double *expnegrho) {
+#if PDCS_ENABLE_EXP_RECIPROCAL_PAIR
+    if (rho >= 0.0) {
+        *expnegrho = exp(-rho);
+        *exprho = 1.0 / *expnegrho;
+    } else {
+        *exprho = exp(rho);
+        *expnegrho = 1.0 / *exprho;
+    }
+#else
+    *exprho = exp(rho);
+    *expnegrho = exp(-rho);
+#endif
+}
+
 __device__ void oracle_h(double *r, double *s, double *t, double *rho, double *f, double *df){
-    double exprho = exp(rho[0]);
-    double expnegrho = exp(-rho[0]);
+    double exprho, expnegrho;
+    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
     f[0]  = ((rho[0]-1) * r[0] + s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
     df[0] =     (rho[0]*r[0]+s[0])*exprho + (r[0]-(rho[0]-1)*s[0])*expnegrho -       (2*rho[0]-1)*t[0];
 }
 
 __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double *f, double *df){
-    double dtexprho = dt[0] * exp(rho[0]);
-    double dt_inv_expnegrho = exp(-rho[0]) / dt[0];
+    double exprho, expnegrho;
+    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    double dtexprho = dt[0] * exprho;
+    double dt_inv_expnegrho = expnegrho / dt[0];
     double rho_minus_one = rho[0] - 1;
     double ds_squared_r = ds_squared[0] * r[0];
 
@@ -22,16 +47,18 @@ __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, d
 }
 
 __device__ void oracle_f(double *r, double *s, double *t, double *rho, double *f){
-    double exprho = exp(rho[0]);
-    double expnegrho = exp(-rho[0]);
+    double exprho, expnegrho;
+    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
     f[0]  = ((rho[0]-1)*r[0]+s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
 }
 
 __device__ void oracle_f_diagonal(double *r, double *s, double *t, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double *f){
     // printf("cuda enter oracle_f_diagonal rho: %.20e\n", rho[0]);
-    double dtexprho = dt[0] * exp(rho[0]);
+    double exprho, expnegrho;
+    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    double dtexprho = dt[0] * exprho;
     // printf("cuda dtexprho: %.20e\n", dtexprho);
-    double dt_inv_expnegrho = exp(-rho[0]) / dt[0];
+    double dt_inv_expnegrho = expnegrho / dt[0];
     // printf("cuda dt_inv_expnegrho: %.20e\n", dt_inv_expnegrho);
     double rho_minus_one = rho[0] - 1.0;
     // printf("cuda rho_minus_one: %.20e\n", rho_minus_one);
@@ -523,7 +550,7 @@ __device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, 
         } else {
             *rhoh = *rho0;
         }
-        *rho = 0.5*(*rhol + *rhoh);
+        *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
         // if( fabs(*rho - *rho0) <= positive_zero*max(1.,abs(*rho)) || *rho==*rhol || *rho==*rhoh ){
         //     printf("cuda rho: %.20e, rho0: %.20e, rhol: %.20e, rhoh: %.20e\n", *rho, *rho0, *rhol, *rhoh);
         //     break;
@@ -540,6 +567,10 @@ __device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, 
 }
 
 __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *rho, double abs_tol, double rel_tol, int max_iter = 20) {
+#if !PDCS_ENABLE_SAFEGUARDED_NEWTON
+    rootsearch_bn(r0, s0, t0, rhol, rhoh, rho0, rho, abs_tol, rel_tol);
+    return;
+#endif
     bool converged = false;
     const double LODAMP = 0.05;
     const double HIDAMP = 0.95;
@@ -547,7 +578,7 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
     double df = 0.0;
     for (int i = 1; i <= max_iter; ++i) {
         oracle_h(r0, s0, t0, rho0, &f, &df);
-        
+
         if (f < 0.0) {
             *rhol = *rho0;
         } else {
@@ -559,17 +590,21 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
             break;
         }
         
-        if (isfinite(f) && df > abs_tol) {
-            *rho = *rho0 - f/df;
-        } else {
-            break;
-        }
-        
-        if (fabs(*rho - *rho0) <= positive_zero * fmax(1.0, fabs(*rho))) {
+        if (fabs(f) <= abs_tol ||
+            fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol) {
+            *rho = *rho0;
             converged = true;
             break;
         }
 
+        if (isfinite(f) && isfinite(df) && df > abs_tol) {
+            *rho = pdcs_exp_newton_candidate(
+                *rho0, f, df, *rhol, *rhoh);
+        } else {
+            break;
+        }
+
+#if PDCS_EXP_COORDINATE_MODE == 0
         if (*rho >= *rhoh) {
             *rho0 = fmin(LODAMP * *rho0 + HIDAMP * *rhoh, *rhoh);
         } else if (*rho <= *rhol) {
@@ -577,6 +612,13 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
         } else {
             *rho0 = *rho;
         }
+#else
+        if (!isfinite(*rho) || *rho <= *rhol || *rho >= *rhoh) {
+            *rho0 = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+        } else {
+            *rho0 = *rho;
+        }
+#endif
     }
 
     if (converged) {
@@ -587,7 +629,7 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
 }
 
 __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double abs_tol, double rel_tol){
-    *rho = 0.5*(*rhol + *rhoh);
+    *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
     *rho0 = *rho;
     double f = 0.0;
     int count = 0;
@@ -598,7 +640,7 @@ __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, doubl
         } else {
             *rhoh = *rho0;
         }
-        *rho = 0.5*(*rhol + *rhoh);
+        *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
         // printf("cuda enter loop rootsearch_bn_diagonal rho: %.20e\n", *rho);
         // if (fabs(*rho - *rho0) <= positive_zero*fmax(1.0, fabs(*rho)) || *rho == *rhol || *rho == *rhoh || fabs(f) <= 1e-10) {
         //     printf("cuda rho: %.20e, rho0: %.20e, rhol: %.20e, rhoh: %.20e\n", *rho, *rho0, *rhol, *rhoh);
@@ -617,6 +659,11 @@ __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, doubl
 }
 
 __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double abs_tol, double rel_tol, int max_iter = 30){
+#if !PDCS_ENABLE_SAFEGUARDED_NEWTON
+    rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh, rho0, dr, dt,
+                           ds_squared, ds_div_dr, dsdr, rho, abs_tol, rel_tol);
+    return;
+#endif
     bool converged = false;
     double LODAMP = 0.05;
     double HIDAMP = 0.95;
@@ -634,15 +681,19 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
             converged = true;
             break;
         }
-        if (isfinite(f) && df > abs_tol) {
-            *rho = *rho0 - f/df;
-        } else {
-            break;
-        }
-        if (fabs(f) <= abs_tol || fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol) {   
+        if (fabs(f) <= abs_tol ||
+            fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol) {
+            *rho = *rho0;
             converged = true;
             break;
         }
+        if (isfinite(f) && isfinite(df) && df > abs_tol) {
+            *rho = pdcs_exp_newton_candidate(
+                *rho0, f, df, *rhol, *rhoh);
+        } else {
+            break;
+        }
+#if PDCS_EXP_COORDINATE_MODE == 0
         if( *rho >= *rhoh ){
             *rho0 = fmin(LODAMP * *rho0 + HIDAMP * *rhoh, *rhoh);
         } else if (*rho <= *rhol) {
@@ -650,6 +701,13 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
         } else {
             *rho0 = *rho;
         }
+#else
+        if (!isfinite(*rho) || *rho <= *rhol || *rho >= *rhoh) {
+            *rho0 = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+        } else {
+            *rho0 = *rho;
+        }
+#endif
     }
     if (converged) {
         *rho0 = fmax(*rhol, fmin(*rhoh, *rho));
@@ -732,7 +790,7 @@ __global__ void exponent_proj_kernel(double *v, double *t_warm_start, double abs
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = 0.5*(rho_l+rho_h);
+                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
             }
             newton_rootsearch(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &rho, abs_tol, rel_tol);
             t_warm_start[0] = rho;
@@ -783,7 +841,7 @@ __device__ void exponent_proj(double *v, double *t_warm_start, double abs_tol, d
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = 0.5*(rho_l+rho_h);
+                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
             }
             newton_rootsearch(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &rho, abs_tol, rel_tol);
             t_warm_start[0] = rho;
@@ -854,7 +912,7 @@ __global__ void exponent_proj_diagonal_kernel(double *v, double *D, double *t_wa
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = 0.5*(rho_l+rho_h);
+                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
             }
             newton_rootsearch_diagonal(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, &rho, abs_tol, rel_tol);
             // printf("cuda output rho: %f\n", rho);
@@ -927,7 +985,7 @@ __device__ void exponent_proj_diagonal_initial(double *v, double *D, double *t_w
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = 0.5*(rho_l+rho_h);
+                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
             }
             newton_rootsearch_diagonal(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, &rho, abs_tol, rel_tol);
             // printf("cuda output rho: %f\n", rho);

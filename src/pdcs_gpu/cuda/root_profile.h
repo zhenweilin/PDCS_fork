@@ -10,12 +10,17 @@ struct RootProfileRecord {
   int32_t newton_accepts;
   int32_t bisection_iterations;
   int32_t oracle_evaluations;
+  // Number of oracle evaluations that also formed a derivative. Every such
+  // call is included in oracle_evaluations; this separate counter lets the
+  // rebuttal distinguish function-only bisection from fused F/F' work.
+  int32_t gradient_evaluations;
   int32_t warm_start_attempted;
   int32_t warm_start_accepted;
   int32_t max_iter_reached;
   int32_t termination_reason; // 1 residual, 2 bracket width, 3 cap, -1 unknown
   int32_t output_finite;
-  // One full-cone elementwise product followed by a scalar reduction.
+  // One full-cone traversal followed by a reduction.  A fused reduction may
+  // return a value/derivative pair but still scans and synchronizes once.
   // This field deliberately reuses the former reserved ABI slot.
   int32_t vector_vector_reductions;
   double final_residual;
@@ -24,7 +29,7 @@ struct RootProfileRecord {
   double normalized_bracket_width;
 };
 
-static_assert(sizeof(RootProfileRecord) == 80, "RootProfileRecord ABI changed");
+static_assert(sizeof(RootProfileRecord) == 88, "RootProfileRecord ABI changed");
 
 __device__ RootProfileRecord* pdcs_root_profile_records = nullptr;
 __device__ long pdcs_root_profile_count = 0;
@@ -62,6 +67,7 @@ __device__ inline bool pdcs_root_profile_leader() {
 #define PDCS_PROFILE_BISECTION() PDCS_PROFILE_ADD(bisection_iterations, 1)
 #define PDCS_PROFILE_EXPANSION() PDCS_PROFILE_ADD(interval_expansion_iterations, 1)
 #define PDCS_PROFILE_ORACLE() PDCS_PROFILE_ADD(oracle_evaluations, 1)
+#define PDCS_PROFILE_GRADIENT() PDCS_PROFILE_ADD(gradient_evaluations, 1)
 #define PDCS_PROFILE_VV_REDUCTION() PDCS_PROFILE_ADD(vector_vector_reductions, 1)
 #define PDCS_PROFILE_NEWTON_ATTEMPT() PDCS_PROFILE_ADD(newton_attempts, 1)
 #define PDCS_PROFILE_NEWTON_ACCEPT() PDCS_PROFILE_ADD(newton_accepts, 1)
@@ -128,6 +134,7 @@ __device__ inline RootProfileRecord pdcs_empty_root_record() {
   r.newton_accepts = 0;
   r.bisection_iterations = 0;
   r.oracle_evaluations = 0;
+  r.gradient_evaluations = 0;
   r.warm_start_attempted = 0;
   r.warm_start_accepted = 0;
   r.max_iter_reached = 0;

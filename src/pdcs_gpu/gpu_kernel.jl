@@ -26,7 +26,7 @@ kernels are loaded only once, even in multi-threaded environments.
 # Optional projection-work profiler (rebuttal experiment 1)
 # ----------------------------------------------------------------------------
 
-"""Host mirror of `cuda/root_profile.h::RootProfileRecord` (80-byte ABI)."""
+"""Host mirror of `cuda/root_profile.h::RootProfileRecord` (88-byte ABI)."""
 struct ProjectionProfileRecord
     branch_code::Int32
     interval_expansion_iterations::Int32
@@ -34,6 +34,7 @@ struct ProjectionProfileRecord
     newton_accepts::Int32
     bisection_iterations::Int32
     oracle_evaluations::Int32
+    gradient_evaluations::Int32
     warm_start_attempted::Int32
     warm_start_accepted::Int32
     max_iter_reached::Int32
@@ -47,14 +48,21 @@ struct ProjectionProfileRecord
 end
 
 @assert isbitstype(ProjectionProfileRecord)
-@assert sizeof(ProjectionProfileRecord) == 80
+@assert sizeof(ProjectionProfileRecord) == 88
 
 mutable struct ProjectionWorkCount
     projection_events::Int64
     vector_vector_reductions::Int64
     oracle_evaluations::Int64
+    gradient_evaluations::Int64
+    interval_expansion_iterations::Int64
     bisection_iterations::Int64
     newton_attempts::Int64
+    newton_accepts::Int64
+    warm_start_attempts::Int64
+    warm_start_accepts::Int64
+    max_iter_reached::Int64
+    nonfinite_outputs::Int64
 end
 
 mutable struct ProjectionProfileKernelState
@@ -67,6 +75,9 @@ end
 const _projection_work_profile_enabled = Ref(false)
 const _projection_work_profile_scope = Ref{Symbol}(:all)
 const _projection_work_profile_iteration_active = Ref(false)
+const _projection_work_profile_iteration_index = Ref(0)
+const _projection_work_profile_warmup_iterations = Ref(0)
+const _projection_work_profile_sample_iterations = Ref(typemax(Int))
 const _projection_work_profile_counts =
     Dict{Tuple{Symbol,Int64,Bool},ProjectionWorkCount}()
 const _projection_work_profile_lock = ReentrantLock()
@@ -102,7 +113,12 @@ end
 @inline function _begin_projection_work_iteration!()
     if _projection_work_profile_enabled[] &&
        _projection_work_profile_scope[] === :pdhg_iterations
-        _projection_work_profile_iteration_active[] = true
+        index = (_projection_work_profile_iteration_index[] += 1)
+        warmup = _projection_work_profile_warmup_iterations[]
+        samples = _projection_work_profile_sample_iterations[]
+        _projection_work_profile_iteration_active[] =
+            index > warmup &&
+            (samples == typemax(Int) || index - warmup <= samples)
     end
     return
 end
@@ -123,7 +139,14 @@ function _get_projection_profile_state(strategy::Symbol)
             return _projection_profile_states[strategy]
 
         CUDA.functional() || error("CUDA is not functional")
-        profile_path = _projection_profile_paths[strategy]
+        profile_path = joinpath(
+            get(
+                ENV,
+                "PDCS_CUDA_PROJECTION_ARTIFACT_DIR",
+                joinpath(MODULE_DIR, "cuda"),
+            ),
+            basename(_projection_profile_paths[strategy]),
+        )
         isfile(profile_path) || error(
             "missing $profile_path; run `make rebuild-profile` in src/pdcs_gpu/cuda",
         )
@@ -177,14 +200,22 @@ function _accumulate_projection_work!(
             cone === nothing && continue
             key = (cone, cone_sizes[i], _projection_profile_is_diagonal(code))
             work = get!(_projection_work_profile_counts, key) do
-                ProjectionWorkCount(0, 0, 0, 0, 0)
+                ProjectionWorkCount(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
             end
             record = records[i]
             work.projection_events += 1
             work.vector_vector_reductions += record.vector_vector_reductions
             work.oracle_evaluations += record.oracle_evaluations
+            work.gradient_evaluations += record.gradient_evaluations
+            work.interval_expansion_iterations +=
+                record.interval_expansion_iterations
             work.bisection_iterations += record.bisection_iterations
             work.newton_attempts += record.newton_attempts
+            work.newton_accepts += record.newton_accepts
+            work.warm_start_attempts += record.warm_start_attempted
+            work.warm_start_accepts += record.warm_start_accepted
+            work.max_iter_reached += record.max_iter_reached
+            work.nonfinite_outputs += record.output_finite == 0
         end
     finally
         unlock(_projection_work_profile_lock)
@@ -258,7 +289,8 @@ function _profile_block_projection!(
 end
 
 """
-    enable_projection_work_profile!(; scope=:all)
+    enable_projection_work_profile!(;
+        scope=:all, warmup_iterations=0, sample_iterations=typemax(Int))
 
 Enable the diagnostic projection kernels and reset their host counters. The
 counter records one full-cone elementwise product followed by a scalar
@@ -269,13 +301,26 @@ With `scope=:pdhg_iterations`, only the primal/dual projection pair in each
 PDHG step is recorded, matching the `M*T` denominator in R3.5. `scope=:all`
 also includes termination, restart, and infeasibility-check projections.
 """
-function enable_projection_work_profile!(; scope::Symbol = :all)
+function enable_projection_work_profile!(;
+    scope::Symbol = :all,
+    warmup_iterations::Integer = 0,
+    sample_iterations::Integer = typemax(Int),
+)
     scope in (:all, :pdhg_iterations) || throw(ArgumentError(
         "projection profile scope must be :all or :pdhg_iterations",
+    ))
+    warmup_iterations >= 0 || throw(ArgumentError(
+        "projection profile warmup_iterations must be nonnegative",
+    ))
+    sample_iterations > 0 || throw(ArgumentError(
+        "projection profile sample_iterations must be positive",
     ))
     reset_projection_work_profile!()
     _projection_work_profile_scope[] = scope
     _projection_work_profile_iteration_active[] = false
+    _projection_work_profile_iteration_index[] = 0
+    _projection_work_profile_warmup_iterations[] = Int(warmup_iterations)
+    _projection_work_profile_sample_iterations[] = Int(sample_iterations)
     _projection_work_profile_enabled[] = true
     return
 end
@@ -312,8 +357,22 @@ function projection_work_profile_summary()
                 average_vector_vector_reductions = count.projection_events == 0 ?
                     0.0 : count.vector_vector_reductions / count.projection_events,
                 oracle_evaluations = count.oracle_evaluations,
+                average_function_evaluations =
+                    count.projection_events == 0 ? 0.0 :
+                    count.oracle_evaluations / count.projection_events,
+                gradient_evaluations = count.gradient_evaluations,
+                average_gradient_evaluations =
+                    count.projection_events == 0 ? 0.0 :
+                    count.gradient_evaluations / count.projection_events,
+                interval_expansion_iterations =
+                    count.interval_expansion_iterations,
                 bisection_iterations = count.bisection_iterations,
                 newton_attempts = count.newton_attempts,
+                newton_accepts = count.newton_accepts,
+                warm_start_attempts = count.warm_start_attempts,
+                warm_start_accepts = count.warm_start_accepts,
+                max_iter_reached = count.max_iter_reached,
+                nonfinite_outputs = count.nonfinite_outputs,
             ) for (key, count) in sort!(
                 collect(_projection_work_profile_counts);
                 by = pair -> (
@@ -335,13 +394,33 @@ function projection_work_profile_summary()
             by_cone;
             init = 0,
         )
+        total_functions = mapreduce(
+            row -> row.oracle_evaluations,
+            +,
+            by_cone;
+            init = 0,
+        )
+        total_gradients = mapreduce(
+            row -> row.gradient_evaluations,
+            +,
+            by_cone;
+            init = 0,
+        )
         return (
             enabled = _projection_work_profile_enabled[],
             scope = _projection_work_profile_scope[],
+            warmup_iterations = _projection_work_profile_warmup_iterations[],
+            sample_iterations = _projection_work_profile_sample_iterations[],
             projection_events = total_events,
             vector_vector_reductions = total_reductions,
             average_vector_vector_reductions = total_events == 0 ?
                 0.0 : total_reductions / total_events,
+            function_evaluations = total_functions,
+            average_function_evaluations = total_events == 0 ?
+                0.0 : total_functions / total_events,
+            gradient_evaluations = total_gradients,
+            average_gradient_evaluations = total_events == 0 ?
+                0.0 : total_gradients / total_events,
             by_cone = by_cone,
         )
     finally
@@ -359,13 +438,217 @@ end
 const _massive_block_proj_mod    = Ref{Union{Nothing,CuModule}}(nothing)
 # Storage for the CUDA function (kernel entry point)
 const _massive_block_proj_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
+const _massive_soc_block_proj_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
+const _massive_block_proj_indexed_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
+const _simple_block_proj_indexed_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
 # Spin lock for thread-safe lazy initialization
 const _massive_block_proj_lock   = SpinLock()
 
 # Path to the PTX file containing the compiled CUDA kernel
-const _massive_block_proj_path = joinpath(MODULE_DIR, "cuda/massive_block_proj.ptx")
+@inline _projection_artifact_path(filename) = joinpath(
+    get(ENV, "PDCS_CUDA_PROJECTION_ARTIFACT_DIR", joinpath(MODULE_DIR, "cuda")),
+    filename,
+)
 # Name of the kernel function within the PTX file
 const _massive_block_proj_name = "massive_block_proj"
+const _massive_soc_block_proj_name = "massive_soc_block_proj"
+const _massive_block_proj_indexed_name = "massive_block_proj_indexed"
+const _simple_block_proj_indexed_name = "simple_block_proj_indexed"
+
+struct HeterogeneousProjectionPlan
+    masked_projection_types::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    thread_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    thread_cone_count::Int64
+    serial_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    serial_cone_count::Int64
+    compact_soc_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    compact_soc_cone_count::Int64
+    compact_warp_soc_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    compact_warp_soc_cone_count::Int64
+    simple_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    simple_cone_count::Int64
+    native_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
+    native_cone_count::Int64
+    fully_compacted::Bool
+    soc_only::Bool
+end
+
+const _heterogeneous_projection_enabled = Ref(true)
+const _heterogeneous_projection_plans = IdDict{Any,HeterogeneousProjectionPlan}()
+const _heterogeneous_projection_plan_lock = ReentrantLock()
+const _serial_compaction_minimum = 768
+const _primal_exp_compaction_minimum = 512
+const _thread_soc_dimension_limit = 4
+const _thread_soc_compaction_minimum = 256
+const _warp_soc_dimension_limit = 32
+const _warp_soc_compaction_minimum = 64
+
+@inline _is_exp_projection_code(code::Int64) =
+    code in (11, 12, 13, 14, 15, 16, 26, 27, 28, 29)
+
+@inline _is_primal_exp_projection_code(code::Int64) =
+    code in (13, 14, 15, 26, 27)
+
+@inline _is_soc_projection_code(code::Int64) =
+    code in (5, 6, 7, 20, 21, 22)
+
+@inline _is_rsoc_projection_code(code::Int64) =
+    code in (8, 9, 10, 23, 24, 25)
+
+@inline _is_simple_projection_code(code::Int64) =
+    code in (0, 1, 2, 3, 4, 17, 18, 19)
+
+function _get_heterogeneous_projection_plan(
+    gpu_ns::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    blkNum::Int64,
+    proj_type::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+)
+    lock(_heterogeneous_projection_plan_lock)
+    try
+        haskey(_heterogeneous_projection_plans, proj_type) &&
+            return _heterogeneous_projection_plans[proj_type]
+
+        cpu_ns = Array(gpu_ns)
+        cpu_types = Array(proj_type)
+        soc_only = all(
+            code -> _is_simple_projection_code(code) ||
+                    _is_soc_projection_code(code) ||
+                    _is_rsoc_projection_code(code),
+            cpu_types,
+        )
+        cone_count = min(Int(blkNum), length(cpu_types), length(cpu_ns))
+        serial_indices = Int64[]
+        tiny_soc_indices = Int64[]
+        warp_soc_indices = Int64[]
+        simple_indices = Int64[]
+        native_indices = Int64[]
+        for julia_idx in 1:cone_count
+            code = cpu_types[julia_idx]
+            dimension = cpu_ns[julia_idx]
+            if code in (0, 1)
+                # Free cones are identity projections and need no kernel work.
+                continue
+            elseif _is_exp_projection_code(code) ||
+                   (_is_simple_projection_code(code) && dimension <= 32)
+                push!(serial_indices, Int64(julia_idx - 1))
+            elseif _is_soc_projection_code(code) &&
+                   dimension <= _thread_soc_dimension_limit
+                push!(tiny_soc_indices, Int64(julia_idx - 1))
+            elseif _is_soc_projection_code(code) &&
+                   dimension <= _warp_soc_dimension_limit
+                push!(warp_soc_indices, Int64(julia_idx - 1))
+            elseif _is_simple_projection_code(code)
+                push!(simple_indices, Int64(julia_idx - 1))
+            else
+                push!(native_indices, Int64(julia_idx - 1))
+            end
+        end
+
+        # Same-GPU dispatch sweeps on H100 show that packing a handful of EXP
+        # cones loses to the native mapping; the serial path amortizes its
+        # launch/occupancy cost at roughly 512 cones.  SOCs of dimension <= 4
+        # use one thread once 256 are available. Dimensions 5--32 use one warp
+        # from 64 cones onward; assigning a dimension-8 root solve to one
+        # thread was consistently slower around the old 256-cone boundary.
+        primal_exp_count = count(
+            index -> _is_primal_exp_projection_code(cpu_types[index + 1]),
+            serial_indices,
+        )
+        serial_is_profitable =
+            primal_exp_count >= _primal_exp_compaction_minimum ||
+            length(serial_indices) >= _serial_compaction_minimum
+        has_compaction_candidate =
+            serial_is_profitable ||
+            length(tiny_soc_indices) >= _thread_soc_compaction_minimum ||
+            length(warp_soc_indices) >= _warp_soc_compaction_minimum
+        compact_soc_indices =
+            length(tiny_soc_indices) >= _thread_soc_compaction_minimum ?
+            tiny_soc_indices : Int64[]
+        compact_warp_soc_indices =
+            length(warp_soc_indices) >= _warp_soc_compaction_minimum ?
+            warp_soc_indices : Int64[]
+        original_work_blocks = length(serial_indices) +
+            length(tiny_soc_indices) + length(warp_soc_indices) +
+            length(simple_indices) + length(native_indices)
+        compact_work_blocks = length(native_indices) +
+            length(simple_indices) +
+            (length(tiny_soc_indices) < _thread_soc_compaction_minimum ?
+                length(tiny_soc_indices) :
+                cld(length(tiny_soc_indices), ThreadPerBlock)) +
+            (length(warp_soc_indices) < _warp_soc_compaction_minimum ?
+                length(warp_soc_indices) :
+                cld(length(warp_soc_indices) * 32, ThreadPerBlock)) +
+            (serial_is_profitable ?
+                cld(length(serial_indices), ThreadPerBlock) :
+                length(serial_indices))
+        fully_compacted = has_compaction_candidate &&
+            5 * compact_work_blocks <= 4 * original_work_blocks
+        thread_indices = Int64[]
+        if !fully_compacted
+            empty!(serial_indices)
+            empty!(compact_soc_indices)
+            empty!(compact_warp_soc_indices)
+            empty!(simple_indices)
+            empty!(native_indices)
+            masked = proj_type
+        else
+            serial_is_profitable || append!(native_indices, serial_indices)
+            serial_is_profitable || empty!(serial_indices)
+            length(tiny_soc_indices) < _thread_soc_compaction_minimum &&
+                append!(native_indices, tiny_soc_indices)
+            length(warp_soc_indices) < _warp_soc_compaction_minimum &&
+                append!(native_indices, warp_soc_indices)
+            thread_indices = vcat(serial_indices, compact_soc_indices)
+            masked_cpu_types = copy(cpu_types)
+            for cone_idx in Iterators.flatten(
+                (thread_indices, compact_warp_soc_indices),
+            )
+                masked_cpu_types[cone_idx + 1] = 0
+            end
+            masked = CuArray(masked_cpu_types)
+            fully_compacted = true
+        end
+        plan = HeterogeneousProjectionPlan(
+            masked,
+            CuArray(thread_indices),
+            Int64(length(thread_indices)),
+            CuArray(serial_indices),
+            Int64(length(serial_indices)),
+            CuArray(compact_soc_indices),
+            Int64(length(compact_soc_indices)),
+            CuArray(compact_warp_soc_indices),
+            Int64(length(compact_warp_soc_indices)),
+            CuArray(simple_indices),
+            Int64(length(simple_indices)),
+            CuArray(native_indices),
+            Int64(length(native_indices)),
+            fully_compacted,
+            soc_only,
+        )
+        _heterogeneous_projection_plans[proj_type] = plan
+        return plan
+    finally
+        unlock(_heterogeneous_projection_plan_lock)
+    end
+end
+
+function get_simple_block_proj_indexed_kernel()::CuFunction
+    k = _simple_block_proj_indexed_kernel[]
+    k !== nothing && return k
+    get_massive_block_proj_kernel()
+    lock(_massive_block_proj_lock)
+    try
+        k = _simple_block_proj_indexed_kernel[]
+        k !== nothing && return k
+        mod = _massive_block_proj_mod[]
+        mod !== nothing || error("massive projection CUDA module is not loaded")
+        k = CuFunction(mod, _simple_block_proj_indexed_name)
+        _simple_block_proj_indexed_kernel[] = k
+        return k
+    finally
+        unlock(_massive_block_proj_lock)
+    end
+end
 
 """
     get_massive_block_proj_kernel() -> CuFunction
@@ -398,7 +681,7 @@ function get_massive_block_proj_kernel()::CuFunction
         CUDA.zeros(Float32, 1)
 
         # Load the PTX file from disk
-        bytes = read(_massive_block_proj_path)     # Read as Vector{UInt8}
+        bytes = read(_projection_artifact_path("massive_block_proj.ptx"))
         # Create CUDA module from PTX bytes
         mod   = CuModule(bytes)
         # Get the kernel function from the module
@@ -411,6 +694,104 @@ function get_massive_block_proj_kernel()::CuFunction
     finally
         unlock(_massive_block_proj_lock)
     end
+end
+
+function get_massive_block_proj_indexed_kernel()::CuFunction
+    k = _massive_block_proj_indexed_kernel[]
+    k !== nothing && return k
+    get_massive_block_proj_kernel()
+    lock(_massive_block_proj_lock)
+    try
+        k = _massive_block_proj_indexed_kernel[]
+        k !== nothing && return k
+        mod = _massive_block_proj_mod[]
+        mod !== nothing || error("massive projection CUDA module is not loaded")
+        k = CuFunction(mod, _massive_block_proj_indexed_name)
+        _massive_block_proj_indexed_kernel[] = k
+        return k
+    finally
+        unlock(_massive_block_proj_lock)
+    end
+end
+
+function get_massive_soc_block_proj_kernel()::CuFunction
+    k = _massive_soc_block_proj_kernel[]
+    k !== nothing && return k
+    get_massive_block_proj_kernel()
+    lock(_massive_block_proj_lock)
+    try
+        k = _massive_soc_block_proj_kernel[]
+        k !== nothing && return k
+        mod = _massive_block_proj_mod[]
+        mod !== nothing || error("massive projection CUDA module is not loaded")
+        k = CuFunction(mod, _massive_soc_block_proj_name)
+        _massive_soc_block_proj_kernel[] = k
+        return k
+    finally
+        unlock(_massive_block_proj_lock)
+    end
+end
+
+function _launch_indexed_thread_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+    t_warm_start, gpu_head_start, gpu_ns, proj_type,
+    abs_tol::Float64, rel_tol::Float64,
+)
+    plan.thread_cone_count == 0 && return
+    CUDA.cudacall(
+        get_massive_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         Float64, Float64),
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns, plan.thread_cone_indices,
+        plan.thread_cone_count, proj_type, abs_tol, rel_tol;
+        blocks = cld(plan.thread_cone_count, ThreadPerBlock),
+        threads = ThreadPerBlock,
+    )
+    return
+end
+
+function _launch_indexed_compact_soc_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+    t_warm_start, gpu_head_start, gpu_ns, proj_type,
+    abs_tol::Float64, rel_tol::Float64,
+)
+    plan.compact_soc_cone_count == 0 && return
+    CUDA.cudacall(
+        get_massive_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         Float64, Float64),
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns,
+        plan.compact_soc_cone_indices, plan.compact_soc_cone_count,
+        proj_type, abs_tol, rel_tol;
+        blocks = cld(plan.compact_soc_cone_count, ThreadPerBlock),
+        threads = ThreadPerBlock,
+    )
+    return
+end
+
+function _launch_indexed_simple_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, gpu_head_start, gpu_ns, proj_type,
+)
+    plan.simple_cone_count == 0 && return
+    CUDA.cudacall(
+        get_simple_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64},
+         CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}),
+        vec, bl, bu, gpu_head_start, gpu_ns, plan.simple_cone_indices,
+        plan.simple_cone_count, proj_type;
+        blocks = plan.simple_cone_count,
+        threads = ThreadPerBlock,
+    )
+    return
 end
 
 
@@ -441,7 +822,7 @@ and scaling matrices, using the specified projection types for each block.
 function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
     # Calculate number of thread blocks needed
     # cld(x, y) = ceil(x/y) = smallest integer >= x/y
-    nBlock = cld(blkNum + ThreadPerBlock, ThreadPerBlock)
+    nBlock = max(1, cld(blkNum, ThreadPerBlock))
     if _projection_work_profile_should_record()
         return _profile_block_projection!(
             :threadWise,
@@ -454,10 +835,20 @@ function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared:
         )
     end
     
+    plan = _heterogeneous_projection_enabled[] ?
+        _get_heterogeneous_projection_plan(gpu_ns, blkNum, proj_type) : nothing
+    # Keep the SOC-only entry point available for controlled microbenchmarks,
+    # but do not select it in the solver.  Although it uses fewer registers,
+    # the qssp180 stress run showed a large end-to-end regression relative to
+    # the general thread-wise kernel.  The general kernel is therefore the
+    # correctness/performance default until the specialization has passed the
+    # full projection matrix and PDCS hard-case gate.
+    projection_kernel = get_massive_block_proj_kernel()
+
     # Launch kernel and wait for completion
     CUDA.@sync begin
         CUDA.cudacall(
-        get_massive_block_proj_kernel(),
+        projection_kernel,
         # Kernel function signature: all pointers to device memory
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
         # Kernel arguments
@@ -479,10 +870,11 @@ threadWise_block_proj(args...) = massive_block_proj(args...)
 
 const _moderate_block_proj_mod    = Ref{Union{Nothing,CuModule}}(nothing)
 const _moderate_block_proj_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
+const _moderate_block_proj_indexed_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
 const _moderate_block_proj_lock   = SpinLock()
 
-const _moderate_block_proj_path = joinpath(MODULE_DIR, "cuda/moderate_block_proj.ptx")
 const _moderate_block_proj_name = "moderate_block_proj"
+const _moderate_block_proj_indexed_name = "moderate_block_proj_indexed"
 
 """
     get_moderate_block_proj_kernel() -> CuFunction
@@ -502,7 +894,7 @@ function get_moderate_block_proj_kernel()::CuFunction
         CUDA.functional() || error("CUDA is not functional")
         CUDA.zeros(Float32, 1)
 
-        bytes = read(_moderate_block_proj_path)
+        bytes = read(_projection_artifact_path("moderate_block_proj.ptx"))
         mod   = CuModule(bytes)
         fun   = CuFunction(mod, _moderate_block_proj_name)
 
@@ -512,6 +904,53 @@ function get_moderate_block_proj_kernel()::CuFunction
     finally
         unlock(_moderate_block_proj_lock)
     end
+end
+
+function get_moderate_block_proj_indexed_kernel()::CuFunction
+    k = _moderate_block_proj_indexed_kernel[]
+    k !== nothing && return k
+    get_moderate_block_proj_kernel()
+    lock(_moderate_block_proj_lock)
+    try
+        k = _moderate_block_proj_indexed_kernel[]
+        k !== nothing && return k
+        mod = _moderate_block_proj_mod[]
+        mod !== nothing || error("moderate projection CUDA module is not loaded")
+        k = CuFunction(mod, _moderate_block_proj_indexed_name)
+        _moderate_block_proj_indexed_kernel[] = k
+        return k
+    finally
+        unlock(_moderate_block_proj_lock)
+    end
+end
+
+function _launch_indexed_block_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+    t_warm_start, gpu_head_start, gpu_ns, proj_type,
+    abs_tol::Float64, rel_tol::Float64,
+)
+    serial_blocks = cld(plan.serial_cone_count, ThreadPerBlock)
+    total_blocks = plan.native_cone_count + plan.simple_cone_count +
+                   serial_blocks
+    total_blocks == 0 && return
+    CUDA.cudacall(
+        get_moderate_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Int64}, CuPtr{Int64},
+         CuPtr{Int64}, Int64, CuPtr{Int64}, Int64,
+         CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns,
+        plan.native_cone_indices, plan.native_cone_count,
+        plan.simple_cone_indices, plan.simple_cone_count,
+        plan.serial_cone_indices, plan.serial_cone_count,
+        proj_type, abs_tol, rel_tol;
+        blocks = total_blocks,
+        threads = ThreadPerBlock,
+    )
+    return
 end
 
 """
@@ -535,13 +974,35 @@ function moderate_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared
             record_count = nBlock,
         )
     end
+    plan = _heterogeneous_projection_enabled[] ?
+        _get_heterogeneous_projection_plan(gpu_ns, blkNum, proj_type) : nothing
+    launch_projection_types = plan === nothing ? proj_type :
+        plan.masked_projection_types
     CUDA.@sync begin
-        CUDA.cudacall(
-        get_moderate_block_proj_kernel(),
-        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
-        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type, abs_tol, rel_tol;
-        blocks = nBlock, threads = ThreadPerBlock
-        )
+        if plan === nothing || !plan.fully_compacted
+            CUDA.cudacall(
+            get_moderate_block_proj_kernel(),
+            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, launch_projection_types, abs_tol, rel_tol;
+            blocks = nBlock, threads = ThreadPerBlock
+            )
+        else
+            _launch_indexed_block_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+            _launch_indexed_compact_soc_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+            _launch_indexed_compact_warp_soc_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+        end
     end
 end
 
@@ -557,10 +1018,11 @@ blockWise_block_proj(args...) = moderate_block_proj(args...)
 
 const _sufficient_block_proj_mod    = Ref{Union{Nothing,CuModule}}(nothing)
 const _sufficient_block_proj_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
+const _sufficient_block_proj_indexed_kernel = Ref{Union{Nothing,CuFunction}}(nothing)
 const _sufficient_block_proj_lock   = SpinLock()
 
-const _sufficient_block_proj_path = joinpath(MODULE_DIR, "cuda/sufficient_block_proj.ptx")
 const _sufficient_block_proj_name = "sufficient_block_proj"
+const _sufficient_block_proj_indexed_name = "sufficient_block_proj_indexed"
 
 """
     get_sufficient_block_proj_kernel() -> CuFunction
@@ -580,7 +1042,7 @@ function get_sufficient_block_proj_kernel()::CuFunction
         CUDA.functional() || error("CUDA is not functional")
         CUDA.zeros(Float32, 1)
 
-        bytes = read(_sufficient_block_proj_path)
+        bytes = read(_projection_artifact_path("sufficient_block_proj.ptx"))
         mod   = CuModule(bytes)
         fun   = CuFunction(mod, _sufficient_block_proj_name)
 
@@ -590,6 +1052,69 @@ function get_sufficient_block_proj_kernel()::CuFunction
     finally
         unlock(_sufficient_block_proj_lock)
     end
+end
+
+function get_sufficient_block_proj_indexed_kernel()::CuFunction
+    k = _sufficient_block_proj_indexed_kernel[]
+    k !== nothing && return k
+    get_sufficient_block_proj_kernel()
+    lock(_sufficient_block_proj_lock)
+    try
+        k = _sufficient_block_proj_indexed_kernel[]
+        k !== nothing && return k
+        mod = _sufficient_block_proj_mod[]
+        mod !== nothing || error("sufficient projection CUDA module is not loaded")
+        k = CuFunction(mod, _sufficient_block_proj_indexed_name)
+        _sufficient_block_proj_indexed_kernel[] = k
+        return k
+    finally
+        unlock(_sufficient_block_proj_lock)
+    end
+end
+
+function _launch_indexed_warp_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+    t_warm_start, gpu_head_start, gpu_ns, proj_type,
+    abs_tol::Float64, rel_tol::Float64,
+)
+    plan.native_cone_count == 0 && return
+    CUDA.cudacall(
+        get_sufficient_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         Float64, Float64),
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns, plan.native_cone_indices,
+        plan.native_cone_count, proj_type, abs_tol, rel_tol;
+        blocks = cld(plan.native_cone_count * 32, ThreadPerBlock),
+        threads = ThreadPerBlock,
+    )
+    return
+end
+
+function _launch_indexed_compact_warp_soc_projection!(
+    plan::HeterogeneousProjectionPlan,
+    vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+    t_warm_start, gpu_head_start, gpu_ns, proj_type,
+    abs_tol::Float64, rel_tol::Float64,
+)
+    plan.compact_warp_soc_cone_count == 0 && return
+    CUDA.cudacall(
+        get_sufficient_block_proj_indexed_kernel(),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         Float64, Float64),
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns,
+        plan.compact_warp_soc_cone_indices,
+        plan.compact_warp_soc_cone_count, proj_type, abs_tol, rel_tol;
+        blocks = cld(plan.compact_warp_soc_cone_count * 32, ThreadPerBlock),
+        threads = ThreadPerBlock,
+    )
+    return
 end
 
 """
@@ -613,13 +1138,40 @@ function sufficient_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squar
             record_count = nBlock * cld(ThreadPerBlock, 32),
         )
     end
+    plan = _heterogeneous_projection_enabled[] ?
+        _get_heterogeneous_projection_plan(gpu_ns, blkNum, proj_type) : nothing
+    launch_projection_types = plan === nothing ? proj_type :
+        plan.masked_projection_types
     CUDA.@sync begin
-        CUDA.cudacall(
-        get_sufficient_block_proj_kernel(),
-        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
-        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type, abs_tol, rel_tol;
-        blocks = nBlock, threads = ThreadPerBlock
-        )
+        if plan === nothing || !plan.fully_compacted
+            CUDA.cudacall(
+            get_sufficient_block_proj_kernel(),
+            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, launch_projection_types, abs_tol, rel_tol;
+            blocks = nBlock, threads = ThreadPerBlock
+            )
+        else
+            _launch_indexed_simple_projection!(
+                plan, vec, bl, bu, gpu_head_start, gpu_ns, proj_type,
+            )
+            _launch_indexed_warp_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+        end
+        if plan !== nothing
+            _launch_indexed_thread_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+            _launch_indexed_compact_warp_soc_projection!(
+                plan, vec, bl, bu, D_scaled, D_scaled_squared,
+                D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns,
+                proj_type, abs_tol, rel_tol,
+            )
+        end
     end
 end
 

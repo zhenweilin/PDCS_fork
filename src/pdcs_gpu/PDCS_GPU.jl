@@ -51,11 +51,18 @@ const few_block_proj_ptr = Ref{Ptr{Cvoid}}(C_NULL)
 
 
 function __init__()
+    _heterogeneous_projection_enabled[] =
+        lowercase(get(ENV, "PDCS_ENABLE_HETEROGENEOUS_PROJECTION", "1")) ∉
+        ("0", "false", "no", "off")
     CUDA.functional() || return
-    CUDA.seed!(1)
     # Open your own kernel library (NOT libcublas)
     # Replace with the actual .so path in your project
-    libpath = joinpath(joinpath(MODULE_DIR, "cuda/libfew_block_proj.so"))
+    artifact_dir = get(
+        ENV,
+        "PDCS_CUDA_PROJECTION_ARTIFACT_DIR",
+        joinpath(MODULE_DIR, "cuda"),
+    )
+    libpath = joinpath(artifact_dir, "libfew_block_proj.so")
 
     _kernlib_ref[] = Libdl.dlopen(libpath)
 

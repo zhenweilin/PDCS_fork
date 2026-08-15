@@ -202,6 +202,11 @@ mutable struct MOISolution
     objective_value::Float64
     dual_objective_value::Float64
     solve_time_sec::Float64
+    projection_time_sec::Float64
+    primal_projection_time_sec::Float64
+    dual_slack_projection_time_sec::Float64
+    preprocessing_time_sec::Float64
+    projection_tolerance_history::Vector{Float64}
     iterations::Int
     objective_constant::Float64
     l_inf_rel_primal_res::Float64
@@ -222,6 +227,11 @@ mutable struct MOISolution
         objective_value = NaN,
         dual_objective_value = NaN,
         solve_time_sec = NaN,
+        projection_time_sec = NaN,
+        primal_projection_time_sec = NaN,
+        dual_slack_projection_time_sec = NaN,
+        preprocessing_time_sec = NaN,
+        projection_tolerance_history = Float64[],
         iterations = 0,
         objective_constant = 0.0,
         l_inf_rel_primal_res = NaN,
@@ -243,6 +253,11 @@ mutable struct MOISolution
             objective_value,
             dual_objective_value,
             solve_time_sec,
+            projection_time_sec,
+            primal_projection_time_sec,
+            dual_slack_projection_time_sec,
+            preprocessing_time_sec,
+            projection_tolerance_history,
             iterations,
             objective_constant,
             l_inf_rel_primal_res,
@@ -303,6 +318,13 @@ function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
             exit_code = optimizer.sol.exit_code,
             exit_status = optimizer.sol.exit_status,
             solve_time_sec = optimizer.sol.solve_time_sec,
+            projection_time_sec = optimizer.sol.projection_time_sec,
+            primal_projection_time_sec = optimizer.sol.primal_projection_time_sec,
+            dual_slack_projection_time_sec = optimizer.sol.dual_slack_projection_time_sec,
+            preprocessing_time_sec = optimizer.sol.preprocessing_time_sec,
+            projection_tolerance_history = copy(
+                optimizer.sol.projection_tolerance_history,
+            ),
             iterations = optimizer.sol.iterations,
             l_inf_rel_primal_res = optimizer.sol.l_inf_rel_primal_res,
             l_inf_rel_dual_res = optimizer.sol.l_inf_rel_dual_res,
@@ -829,6 +851,13 @@ function MOI.optimize!(
             objective_value = (max_sense ? -1 : 1) * sol_res.info.pObj,
             dual_objective_value = (max_sense ? -1 : 1) * sol_res.info.dObj,
             solve_time_sec = sol_res.info.time,
+            projection_time_sec = time_proj,
+            primal_projection_time_sec = time_proj_primal,
+            dual_slack_projection_time_sec = time_proj_dual_slack,
+            preprocessing_time_sec = time_preprocess,
+            projection_tolerance_history = copy(
+                sol_res.params.projection_tolerance_history,
+            ),
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
             l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,
@@ -904,6 +933,13 @@ function MOI.optimize!(
             objective_value = (max_sense ? -1 : 1) * sol_res.info.pObj,
             dual_objective_value = (max_sense ? -1 : 1) * sol_res.info.dObj,
             solve_time_sec = sol_res.info.time,
+            projection_time_sec = time_proj,
+            primal_projection_time_sec = time_proj_primal,
+            dual_slack_projection_time_sec = time_proj_dual_slack,
+            preprocessing_time_sec = time_preprocess,
+            projection_tolerance_history = copy(
+                sol_res.params.projection_tolerance_history,
+            ),
             iterations = sol_res.info.iter,
             objective_constant = objective_constant,
             l_inf_rel_primal_res = sol_res.info.convergeInfo[1].l_inf_rel_primal_res,

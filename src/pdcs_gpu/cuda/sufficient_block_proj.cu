@@ -7,6 +7,19 @@
 // #define proj_abs_tol 1e-16
 // #define proj_abs_tol_squared 1e-32
 #define MAX_ITER 100000
+#ifndef PDCS_ENABLE_SAFEGUARDED_NEWTON
+#define PDCS_ENABLE_SAFEGUARDED_NEWTON 1
+#endif
+#ifndef PDCS_ENABLE_COLD_SOC_NEWTON
+#define PDCS_ENABLE_COLD_SOC_NEWTON 0
+#endif
+#ifndef PDCS_ENABLE_FUSED_SOC_ORACLE
+#define PDCS_ENABLE_FUSED_SOC_ORACLE 1
+#endif
+#ifndef PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS
+#define PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS 1
+#endif
+#include "soc_root_coordinate.cuh"
 // suitable for very much block number
 
 #include "exp_proj.cu"
@@ -492,15 +505,55 @@ __device__ void rsoc_proj(double *sol, long *n, double *temp1, double *temp2, lo
 __device__ double oracle_soc_f_sqrt(double *xi, double *x, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, long* __restrict__ lane_idx) {
   PDCS_PROFILE_ORACLE();
   // len not including the first element
+#if PDCS_ENABLE_FUSED_SOC_ORACLE
+  PDCS_PROFILE_VV_REDUCTION();
+  double value_sum = 0.0;
+  for (long j = *lane_idx; j < *len; j += warpSize) {
+    double y = D_scaled_part_mul_x_part[j] /
+               (1.0 + (2.0 * xi[0]) * D_scaled_squared_part[j]);
+    value_sum += y * y;
+  }
+  for (int stride = warpSize / 2; stride > 0; stride /= 2) {
+    value_sum += __shfl_down_sync(0xFFFFFFFF, value_sum, stride);
+  }
+  value_sum = __shfl_sync(0xFFFFFFFF, value_sum, 0);
+  return sqrt(value_sum) - (x[0] / (1 - 2 * xi[0]));
+#else
   for (long j = *lane_idx; j < *len; j += warpSize) {
     temp_part[j] = 1 / (1 + (2 * xi[0]) * D_scaled_squared_part[j]) * D_scaled_part_mul_x_part[j];
   }
   return nrm2(len, temp_part, lane_idx) - (x[0] / (1 - 2 * xi[0]));
+#endif
 }
 
 __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *f, double *h, long* __restrict__ lane_idx) {
   PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
   // len not including the first element
+#if PDCS_ENABLE_FUSED_SOC_ORACLE
+  PDCS_PROFILE_VV_REDUCTION();
+  double value_sum = 0.0;
+  double derivative_sum = 0.0;
+  for (long j = *lane_idx; j < *len; j += warpSize) {
+    double y = D_scaled_part_mul_x_part[j] /
+               (1.0 + (2.0 * xi[0]) * D_scaled_squared_part[j]);
+    double y_squared = y * y;
+    value_sum += y_squared;
+    derivative_sum += y_squared /
+        fmax(2.0 * xi[0] + D_scaled_squared_part[j], 1e-16);
+  }
+  for (int stride = warpSize / 2; stride > 0; stride /= 2) {
+    value_sum += __shfl_down_sync(0xFFFFFFFF, value_sum, stride);
+    derivative_sum +=
+        __shfl_down_sync(0xFFFFFFFF, derivative_sum, stride);
+  }
+  value_sum = __shfl_sync(0xFFFFFFFF, value_sum, 0);
+  derivative_sum = __shfl_sync(0xFFFFFFFF, derivative_sum, 0);
+  double denominator = 1.0 - 2.0 * xi[0];
+  double right = (x[0] / denominator) * (x[0] / denominator);
+  *f = value_sum - right;
+  *h = -4.0 * (derivative_sum + right / denominator);
+#else
   for (long j = *lane_idx; j < *len; j += warpSize) {
     temp_part[j] = 1 / (1 + (2 * xi[0]) * D_scaled_squared_part[j]) * D_scaled_part_mul_x_part[j];
   }
@@ -512,6 +565,7 @@ __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_
   }
   right = right / (1 - 2 * xi[0]);
   *h = -4 * (nrm2_squared(len, temp_part, lane_idx) + right);
+#endif
 }
 
 // __device__ void newton_soc_rootsearch(double *xiLeft, double *xiRight, double *xi, double *sol, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len) {
@@ -545,43 +599,121 @@ __device__ void soc_proj_diagonal_recover(double* __restrict__ sol, long* __rest
   }
 }
 
-__device__ void soc_proj_decreasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
-  *t_warm_start_val_test -= fmax(fmin(*oracleVal / *oracleVal_h, 0.001), -0.001);
-  *t_warm_start_val_test = fmax(fmin(*t_warm_start_val_test, *xiRight - rel_tol), *xiLeft + rel_tol);
-  oracle_soc_h(t_warm_start_val_test, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, lane_idx);
-  if (fabs(*oracleVal) < abs_tol * abs_tol){
-    *xi = *t_warm_start_val_test;
-    *xiLeft = *t_warm_start_val_test;
-    *xiRight = *t_warm_start_val_test;
-    soc_proj_diagonal_recover(sol, n, xi, minVal, t_warm_start, D_scaled_squared, lane_idx);
-    return;
+__device__ void soc_safeguarded_newton(
+    double *sol, double *D_scaled_mul_x_part,
+    double *D_scaled_squared_part, double *temp_part, long *len,
+    double *oracleVal, double *oracleVal_h, double *xiLeft,
+    double *xiRight, double *xi, double *warm_x, bool increasing,
+    long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
+  const int max_newton_steps = PDCS_SOC_NEWTON_STEPS;
+  double x = *warm_x;
+  double f = *oracleVal;
+  double h = *oracleVal_h;
+
+#if !PDCS_ENABLE_SAFEGUARDED_NEWTON
+  if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+    *xiRight = x;
+  } else {
+    *xiLeft = x;
   }
-  if (*oracleVal < 0){
-    *xiRight = *t_warm_start_val_test;
+  *xi = x;
+  *oracleVal = copysign(1.0, f);
+  return;
+#endif
+
+  for (int k = 0; k < max_newton_steps; ++k) {
+    if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+      *xiRight = x;
+    }
+    else {
+      *xiLeft = x;
+    }
+    if (fabs(f) <= abs_tol * abs_tol) {
+      *xi = x;
+      *xiLeft = x;
+      *xiRight = x;
+      *oracleVal = f;
+      *oracleVal_h = h;
+      return;
+    }
+
+    double width = *xiRight - *xiLeft;
+    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18 || width <= 0.0) {
+      break;
+    }
+#if PDCS_SOC_COORDINATE_MODE == 0
+    double candidate = x - f / h;
+    double guard = fmax(rel_tol, 1e-8 * width);
+    if (!isfinite(candidate) || candidate <= *xiLeft + guard ||
+        candidate >= *xiRight - guard) {
+      break;
+    }
+#else
+    double shift = pdcs_soc_coordinate_shift(rel_tol);
+    bool use_log_coordinate = true;
+#if PDCS_SOC_COORDINATE_MODE == 3
+    use_log_coordinate = pdcs_soc_newton_needs_log_coordinate(
+        x, *xiLeft, *xiRight, increasing, shift);
+#endif
+    double candidate;
+    if (use_log_coordinate) {
+      double u = pdcs_soc_root_to_coordinate(x, increasing, shift);
+      double u_left = pdcs_soc_root_to_coordinate(*xiLeft, increasing, shift);
+      double u_right = pdcs_soc_root_to_coordinate(*xiRight, increasing, shift);
+      double derivative_u = h * pdcs_soc_root_coordinate_derivative(
+          x, increasing, shift);
+      double candidate_u = u - f / derivative_u;
+      candidate = pdcs_soc_coordinate_to_root(
+          candidate_u, increasing, shift);
+      double u_guard = 1e-8 * (u_right - u_left);
+      if (!isfinite(candidate_u) || !isfinite(candidate) ||
+          !isfinite(derivative_u) || fabs(derivative_u) <= 1e-18 ||
+          candidate_u <= u_left + u_guard ||
+          candidate_u >= u_right - u_guard ||
+          candidate <= *xiLeft || candidate >= *xiRight) break;
+    }
+    else {
+      candidate = x - f / h;
+      double guard = fmax(rel_tol, 1e-8 * width);
+      if (!isfinite(candidate) || candidate <= *xiLeft + guard ||
+          candidate >= *xiRight - guard) break;
+    }
+#endif
+
+    double old_abs_f = fabs(f);
+    double candidate_f;
+    double candidate_h;
+    PDCS_PROFILE_NEWTON_ATTEMPT();
+    oracle_soc_h(&candidate, sol, D_scaled_mul_x_part,
+                 D_scaled_squared_part, temp_part, len, &candidate_f,
+                 &candidate_h, lane_idx);
+    x = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    if (fabs(f) >= old_abs_f) {
+      if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+        *xiRight = x;
+      }
+      else {
+        *xiLeft = x;
+      }
+      break;
+    }
+    PDCS_PROFILE_NEWTON_ACCEPT();
   }
-  else {
-    *xiLeft = *t_warm_start_val_test;
-  }
+
+  *xi = x;
+  *warm_x = x;
+  *oracleVal_h = h;
+  *oracleVal = copysign(1.0, f);
 }
 
-
 __device__ void decreasing_binary_soc_proj_init(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
-  if (*oracleVal < 0){
-    *xiRight = t_warm_start[0];
-    if (fabs(*oracleVal) < 0.001) {
-      for (int k = 0; k < 2; ++k) {
-        soc_proj_decreasing_newton_step(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, xiLeft, xiRight, xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, minVal, t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
-      }
-    }
-  }
-  else {
-    *xiLeft = t_warm_start[0];
-    if (fabs(*oracleVal) < 0.001) {
-      for (int k = 0; k < 2; ++k) {
-        soc_proj_decreasing_newton_step(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, xiLeft, xiRight, xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, minVal, t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
-      }
-    }
-  }
+  soc_safeguarded_newton(sol, D_scaled_mul_x_part,
+                         D_scaled_squared_part, temp_part, len, oracleVal,
+                         oracleVal_h, xiLeft, xiRight, xi,
+                         t_warm_start_val_test, false, lane_idx, abs_tol,
+                         rel_tol);
 }
 
 __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *xiLeft, double *xiRight, double *xi, long* __restrict__ lane_idx, double abs_tol, double rel_tol)
@@ -591,7 +723,8 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
     PDCS_PROFILE_BISECTION();
-    *xi = (*xiRight + *xiLeft) / 2;
+    *xi = pdcs_soc_bisection_midpoint(
+        *xiLeft, *xiRight, false, rel_tol);
     count++;
     if (count > MAX_ITER){
       PDCS_PROFILE_MAX_ITER();
@@ -616,43 +749,80 @@ __device__ void soc_proj_decreasing_binary_search(double *sol, long *n, double *
 #endif
 }
 
-__device__ void soc_proj_increasing_newton_step(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
-  *t_warm_start_val_test -= fmax(fmin(*oracleVal / *oracleVal_h, 0.001), -0.001);
-  *t_warm_start_val_test = fmax(fmin(*t_warm_start_val_test, *xiRight - rel_tol), *xiLeft + rel_tol);
-  oracle_soc_h(t_warm_start_val_test, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, lane_idx);
-  if (fabs(*oracleVal) < abs_tol * abs_tol){
-    *xi = *t_warm_start_val_test;
-    *xiLeft = *t_warm_start_val_test;
-    *xiRight = *t_warm_start_val_test;
-    soc_proj_diagonal_recover(sol, n, xi, minVal, t_warm_start, D_scaled_squared, lane_idx);
-    return;
-  }
-  if (*oracleVal > 0){
-    *xiRight = *t_warm_start_val_test;
-  }
-  else {
-    *xiLeft = *t_warm_start_val_test;
-  }
-}
-
 __device__ void increasing_binary_soc_proj_init(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *oracleVal_h, double *xiLeft, double *xiRight, double *xi, double *t_warm_start, double *D_scaled_squared, double *temp, double *D_scaled_mul_x, double *D_scaled_part, double *minVal, double *t_warm_start_val_test, long* __restrict__ lane_idx, double abs_tol, double rel_tol) 
 {
-  if (*oracleVal > 0){
-    *xiRight = t_warm_start[0];
-    if (fabs(*oracleVal) < 0.001) {
-      for (int k = 0; k < 2; ++k) {
-        soc_proj_increasing_newton_step(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, xiLeft, xiRight, xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, minVal, t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
-      }
-    }
+  soc_safeguarded_newton(sol, D_scaled_mul_x_part,
+                         D_scaled_squared_part, temp_part, len, oracleVal,
+                         oracleVal_h, xiLeft, xiRight, xi,
+                         t_warm_start_val_test, true, lane_idx, abs_tol,
+                         rel_tol);
+}
+
+__device__ bool soc_exponent_expansion_bracket(
+    double *sol, double *D_scaled_mul_x_part,
+    double *D_scaled_squared_part, double *temp_part, long *len,
+    double *xiLeft, double *xiRight, long* __restrict__ lane_idx,
+    double abs_tol) {
+#if !PDCS_ENABLE_EXPONENT_EXPANSION
+  return false;
+#else
+  double right_f = oracle_soc_f_sqrt(
+      xiRight, sol, D_scaled_mul_x_part, D_scaled_squared_part,
+      temp_part, len, lane_idx);
+  if (!isfinite(right_f)) return false;
+  if (fabs(right_f) <= abs_tol) {
+    *xiLeft = *xiRight;
+    return true;
   }
-  else {
-    *xiLeft = t_warm_start[0];
-    if (fabs(*oracleVal) < 0.001) {
-      for (int k = 0; k < 2; ++k) {
-        soc_proj_increasing_newton_step(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len, oracleVal, oracleVal_h, xiLeft, xiRight, xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, minVal, t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
-      }
+  if (right_f >= 0.0) return true;
+  double base_q = *xiRight - 0.5;
+  if (!(base_q > 0.0) || !isfinite(base_q)) return false;
+  int low_exponent = 0;
+  int high_exponent = 1;
+  bool found = false;
+  while (high_exponent <= 1020) {
+    double candidate = 0.5 + ldexp(base_q, high_exponent);
+    if (!isfinite(candidate)) break;
+    PDCS_PROFILE_EXPANSION();
+    double candidate_f = oracle_soc_f_sqrt(
+        &candidate, sol, D_scaled_mul_x_part, D_scaled_squared_part,
+        temp_part, len, lane_idx);
+    if (!isfinite(candidate_f)) break;
+    if (fabs(candidate_f) <= abs_tol) {
+      *xiLeft = candidate;
+      *xiRight = candidate;
+      return true;
     }
+    if (candidate_f >= 0.0) {
+      found = true;
+      break;
+    }
+    low_exponent = high_exponent;
+    if (high_exponent > 510) break;
+    high_exponent *= 2;
   }
+  if (!found) return false;
+  while (high_exponent - low_exponent > 1) {
+    int mid_exponent = low_exponent +
+                       (high_exponent - low_exponent) / 2;
+    double candidate = 0.5 + ldexp(base_q, mid_exponent);
+    PDCS_PROFILE_EXPANSION();
+    double candidate_f = oracle_soc_f_sqrt(
+        &candidate, sol, D_scaled_mul_x_part, D_scaled_squared_part,
+        temp_part, len, lane_idx);
+    if (!isfinite(candidate_f)) return false;
+    if (fabs(candidate_f) <= abs_tol) {
+      *xiLeft = candidate;
+      *xiRight = candidate;
+      return true;
+    }
+    if (candidate_f >= 0.0) high_exponent = mid_exponent;
+    else low_exponent = mid_exponent;
+  }
+  *xiLeft = 0.5 + ldexp(base_q, low_exponent);
+  *xiRight = 0.5 + ldexp(base_q, high_exponent);
+  return true;
+#endif
 }
 
 __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *D_scaled_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double *oracleVal, double *xiLeft, double *xiRight, double *xi, long* __restrict__ lane_idx, double abs_tol, double rel_tol)
@@ -662,7 +832,8 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
   int count = 0;
   while ((*xiRight - *xiLeft) / (1 + *xiRight + *xiLeft) > rel_tol && fabs(*oracleVal) > abs_tol) {
     PDCS_PROFILE_BISECTION();
-    *xi = (*xiRight + *xiLeft) / 2;
+    *xi = pdcs_soc_bisection_midpoint(
+        *xiLeft, *xiRight, true, rel_tol);
     count++;
     if (count > MAX_ITER){
       PDCS_PROFILE_MAX_ITER();
@@ -687,6 +858,32 @@ __device__ void soc_proj_increasing_binary_search(double *sol, long *n, double *
 #endif
 }
 
+__device__ void soc_initial_norm_pair(
+    const double *x, const double *D_scaled, double *D_scaled_mul_x,
+    long len, long lane_idx, double *polar_norm, double *weighted_norm) {
+  PDCS_PROFILE_VV_REDUCTION();
+  double polar_squared = 0.0;
+  double weighted_squared = 0.0;
+  for (long j = lane_idx; j < len; j += warpSize) {
+    double xj = x[j];
+    double dj = D_scaled[j];
+    double divided = xj / dj;
+    double weighted = dj * xj;
+    D_scaled_mul_x[j] = weighted;
+    polar_squared += divided * divided;
+    weighted_squared += weighted * weighted;
+  }
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    polar_squared += __shfl_down_sync(0xffffffffu, polar_squared, offset);
+    weighted_squared +=
+        __shfl_down_sync(0xffffffffu, weighted_squared, offset);
+  }
+  polar_squared = __shfl_sync(0xffffffffu, polar_squared, 0);
+  weighted_squared = __shfl_sync(0xffffffffu, weighted_squared, 0);
+  *polar_norm = sqrt(polar_squared);
+  *weighted_norm = sqrt(weighted_squared);
+}
+
 
 __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n, double* __restrict__ D_scaled, double* __restrict__ D_scaled_squared, double* __restrict__ D_scaled_mul_x, double* __restrict__ temp, double* __restrict__ t_warm_start, long* __restrict__ lane_idx, double abs_tol, double rel_tol) {
   double minVal = 1e-3;
@@ -704,10 +901,18 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
   double xiRight = 1.0;
   double oracleVal = 1.0;
   double oracleVal_h = 1.0;
+#if PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS
+  double polar_norm;
+  double weighted_norm;
+  soc_initial_norm_pair(x2end, D_scaled_part, D_scaled_mul_x_part, len,
+                        *lane_idx, &polar_norm, &weighted_norm);
+  if (polar_norm <= -sol[0] && sol[0] <= 0) {
+#else
   // temp_part = x2end ./ D_scaled_part
   vvrscl(&len, x2end, D_scaled_part, temp_part, lane_idx);
   __syncwarp();
   if (nrm2(&len, temp_part, lane_idx) <= -sol[0] && sol[0] <= 0) {
+#endif
     PDCS_PROFILE_BRANCH(1);
     // thrust::fill(sol, sol + n[0], 0.0);
     for (long j = *lane_idx; j < *n; j += warpSize){
@@ -716,9 +921,12 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     // __syncwarp();
     return;
   }
+#if !PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS
   // D_scaled_mul_x_part = D_scaled_part .* x2end
   vvscal(&len, D_scaled_part, x2end, D_scaled_mul_x_part, lane_idx);
-  if (nrm2(&len, D_scaled_mul_x_part, lane_idx) <= sol[0]) {
+  double weighted_norm = nrm2(&len, D_scaled_mul_x_part, lane_idx);
+#endif
+  if (weighted_norm <= sol[0]) {
     PDCS_PROFILE_BRANCH(0);
     if (*lane_idx == 0) {
       sol[0] = fmax(sol[0], 0.0);
@@ -748,6 +956,19 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       }
       decreasing_binary_soc_proj_init(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
     }
+#if PDCS_ENABLE_COLD_SOC_NEWTON
+    else {
+      t_warm_start_val_test = 0.5 * (xiLeft + xiRight);
+      oracle_soc_h(&t_warm_start_val_test, sol, D_scaled_mul_x_part,
+                   D_scaled_squared_part, temp_part, &len, &oracleVal,
+                   &oracleVal_h, lane_idx);
+      decreasing_binary_soc_proj_init(sol, n, D_scaled_mul_x_part,
+          D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h,
+          &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp,
+          D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test,
+          lane_idx, abs_tol, rel_tol);
+    }
+#endif
     soc_proj_decreasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
     PDCS_PROFILE_RESIDUAL(oracleVal);
     // `xi` is the point whose residual satisfied the stopping rule.  Replacing
@@ -771,10 +992,17 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
       }
       increasing_binary_soc_proj_init(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &oracleVal_h, &xiLeft, &xiRight, &xi, t_warm_start, D_scaled_squared, temp, D_scaled_mul_x, D_scaled_part, &minVal, &t_warm_start_val_test, lane_idx, abs_tol, rel_tol);
     }
-    while (oracle_soc_f_sqrt(&xiRight, sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, lane_idx) < 0) {
-      PDCS_PROFILE_EXPANSION();
-      xiLeft = xiRight;
-      xiRight *= 2;
+    bool exponent_bracketed = soc_exponent_expansion_bracket(
+        sol, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len,
+        &xiLeft, &xiRight, lane_idx, abs_tol);
+    if (!exponent_bracketed) {
+      while (oracle_soc_f_sqrt(&xiRight, sol, D_scaled_mul_x_part,
+                               D_scaled_squared_part, temp_part, &len,
+                               lane_idx) < 0) {
+        PDCS_PROFILE_EXPANSION();
+        xiLeft = xiRight;
+        xiRight *= 2;
+      }
     }
     soc_proj_increasing_binary_search(sol, n, D_scaled_mul_x_part, D_scaled_squared_part, temp_part, &len, &oracleVal, &xiLeft, &xiRight, &xi, lane_idx, abs_tol, rel_tol);
     PDCS_PROFILE_RESIDUAL(oracleVal);
@@ -812,6 +1040,7 @@ __device__ double oracle_rsoc_f_sqrt(double *xi, double *x0_sqr, double *y0_sqr,
 
 __device__ void oracle_rsoc_h(double *xi, double *x0_sqr, double *y0_sqr, double *x0y0, double *x_mul_d_part, double *D_scaled_part, double *D_scaled_squared_part, double *temp_part, long *len, double *f, double *h, long* __restrict__ lane_idx) {
   PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
   for (long j = *lane_idx; j < *len; j += warpSize) {
     temp_part[j] = x_mul_d_part[j] / (1 + xi[0] * D_scaled_squared_part[j]);
   }
@@ -1405,5 +1634,48 @@ sufficient_block_proj(double* arr, double* bl, double* bu, double* D_scaled, dou
         exponent_proj_diagonal(sol, sub_D_scaled_inv, &t_warm_start[warp_idx], abs_tol, rel_tol);
       }
     }
+  }
+}
+
+// Compact warp-wise entry point.  Warp ids address only cones retained at the
+// warp hierarchy, eliminating empty warps after EXP and tiny SOC cones are
+// reassigned to the thread-wise kernel.
+extern "C" __global__ void
+sufficient_block_proj_indexed(
+    double* arr, double* bl, double* bu, double* D_scaled,
+    double* D_scaled_squared, double* D_scaled_mul_x, double* temp,
+    double* t_warm_start, const long* gpu_head_start, const long* ns,
+    const long* cone_indices, int cone_count, long* proj_type,
+    double abs_tol, double rel_tol) {
+  long global_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  long list_idx = global_thread_idx / warpSize;
+  long lane_idx = global_thread_idx % warpSize;
+  if (list_idx >= cone_count) return;
+  long cone_idx = cone_indices[list_idx];
+  long n = ns[cone_idx];
+  double *sol = arr + gpu_head_start[cone_idx];
+  double *sub_D_scaled = D_scaled + gpu_head_start[cone_idx];
+  double *sub_D_scaled_squared = D_scaled_squared + gpu_head_start[cone_idx];
+  double *sub_D_scaled_mul_x = D_scaled_mul_x + gpu_head_start[cone_idx];
+  double *sub_temp = temp + gpu_head_start[cone_idx];
+  long code = proj_type[cone_idx];
+
+  if (code == 5 || code == 7 || code == 20 || code == 21) {
+    soc_proj(sol, &n, &lane_idx);
+  }
+  else if (code == 6 || code == 22) {
+    soc_proj_diagonal(sol, &n, sub_D_scaled, sub_D_scaled_squared,
+                      sub_D_scaled_mul_x, sub_temp,
+                      &t_warm_start[cone_idx], &lane_idx,
+                      abs_tol, rel_tol);
+  }
+  else if (code == 8 || code == 10 || code == 23 || code == 24) {
+    rsoc_proj(sol, &n, sub_D_scaled_mul_x, sub_temp, &lane_idx);
+  }
+  else if (code == 9 || code == 25) {
+    rsoc_proj_diagonal(sol, &n, sub_D_scaled, sub_D_scaled_squared,
+                       sub_D_scaled_mul_x, sub_temp,
+                       &t_warm_start[cone_idx], &lane_idx,
+                       abs_tol, rel_tol);
   }
 }
