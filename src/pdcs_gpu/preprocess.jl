@@ -442,6 +442,170 @@ function scalarize_cone_rescaling_kernel!(
 end
 
 
+function scalarize_masked_cone_rescaling_kernel!(
+    scaling,
+    cone_starts,
+    cone_ends,
+    scalar_cone_mask,
+)
+    cone_index = Int64(CUDA.blockIdx().x)
+    @inbounds scalar_cone_mask[cone_index] || return
+    lane = Int64(CUDA.threadIdx().x)
+    lanes = Int64(CUDA.blockDim().x)
+    start_index = @inbounds cone_starts[cone_index]
+    end_index = @inbounds cone_ends[cone_index]
+
+    local_max = 0.0
+    element_index = start_index + lane - 1
+    while element_index <= end_index
+        local_max = max(local_max, @inbounds scaling[element_index])
+        element_index += lanes
+    end
+
+    shared_max = CUDA.@cuStaticSharedMem(Float64, ThreadPerBlock)
+    shared_max[lane] = local_max
+    CUDA.sync_threads()
+
+    offset = lanes >> 1
+    while offset > 0
+        if lane <= offset
+            shared_max[lane] = max(shared_max[lane], shared_max[lane + offset])
+        end
+        CUDA.sync_threads()
+        offset >>= 1
+    end
+
+    block_max = shared_max[1]
+    element_index = start_index + lane - 1
+    while element_index <= end_index
+        @inbounds scaling[element_index] = block_max
+        element_index += lanes
+    end
+    return
+end
+
+
+function mark_non_simple_matrix_coordinates_kernel!(
+    row_is_simple,
+    column_is_simple,
+    values,
+    row_indices,
+    column_indices,
+    num_entries,
+)
+    entry_index =
+        (Int64(CUDA.blockIdx().x) - 1) * Int64(CUDA.blockDim().x) +
+        Int64(CUDA.threadIdx().x)
+    if entry_index <= num_entries
+        value = @inbounds values[entry_index]
+        if !(value == 0.0 || value == 1.0 || value == -1.0)
+            row = @inbounds row_indices[entry_index]
+            column = @inbounds column_indices[entry_index]
+            # Concurrent stores are idempotent: every writer stores `false`.
+            @inbounds row_is_simple[row] = false
+            @inbounds column_is_simple[column] = false
+        end
+    end
+    return
+end
+
+
+function simple_cone_mask_kernel!(
+    scalar_cone_mask,
+    coordinate_is_simple,
+    cone_starts,
+    cone_ends,
+)
+    cone_index = Int64(CUDA.blockIdx().x)
+    lane = Int64(CUDA.threadIdx().x)
+    lanes = Int64(CUDA.blockDim().x)
+    start_index = @inbounds cone_starts[cone_index]
+    end_index = @inbounds cone_ends[cone_index]
+
+    local_simple = Int32(1)
+    element_index = start_index + lane - 1
+    while element_index <= end_index
+        if !(@inbounds coordinate_is_simple[element_index])
+            local_simple = Int32(0)
+        end
+        element_index += lanes
+    end
+
+    shared_simple = CUDA.@cuStaticSharedMem(Int32, ThreadPerBlock)
+    shared_simple[lane] = local_simple
+    CUDA.sync_threads()
+
+    offset = lanes >> 1
+    while offset > 0
+        if lane <= offset
+            shared_simple[lane] = min(
+                shared_simple[lane],
+                shared_simple[lane + offset],
+            )
+        end
+        CUDA.sync_threads()
+        offset >>= 1
+    end
+    if lane == 1
+        @inbounds scalar_cone_mask[cone_index] = shared_simple[1] == Int32(1)
+    end
+    return
+end
+
+
+"""Return per-cone masks for original matrix blocks containing only 0 and ±1."""
+function adaptive_scalar_cone_masks(
+    matrix::CUDA.CUSPARSE.CuSparseMatrixCSR,
+    row_indices::CuArray,
+    primal_cone_starts::CuArray{Int64},
+    primal_cone_ends::CuArray{Int64},
+    dual_cone_starts::CuArray{Int64},
+    dual_cone_ends::CuArray{Int64},
+)
+    row_is_simple = CUDA.ones(Bool, size(matrix, 1))
+    column_is_simple = CUDA.ones(Bool, size(matrix, 2))
+    num_entries = length(matrix.nzVal)
+    if num_entries > 0
+        CUDA.@sync begin
+            CUDA.@cuda threads = ThreadPerBlock blocks = cld(num_entries, ThreadPerBlock) mark_non_simple_matrix_coordinates_kernel!(
+                row_is_simple,
+                column_is_simple,
+                matrix.nzVal,
+                row_indices,
+                matrix.colVal,
+                Int64(num_entries),
+            )
+        end
+    end
+
+    primal_mask = CUDA.ones(Bool, length(primal_cone_starts))
+    dual_mask = CUDA.ones(Bool, length(dual_cone_starts))
+    if !isempty(primal_mask)
+        CUDA.@sync begin
+            CUDA.@cuda threads = ThreadPerBlock blocks = length(primal_mask) simple_cone_mask_kernel!(
+                primal_mask,
+                column_is_simple,
+                primal_cone_starts,
+                primal_cone_ends,
+            )
+        end
+    end
+    if !isempty(dual_mask)
+        CUDA.@sync begin
+            CUDA.@cuda threads = ThreadPerBlock blocks = length(dual_mask) simple_cone_mask_kernel!(
+                dual_mask,
+                row_is_simple,
+                dual_cone_starts,
+                dual_cone_ends,
+            )
+        end
+    end
+    CUDA.unsafe_free!(row_is_simple)
+    CUDA.unsafe_free!(column_is_simple)
+    return primal_mask, dual_mask
+end
+
+
 """
     scalarize_cone_rescaling!(scaling, cone_starts, cone_ends)
 
@@ -470,6 +634,29 @@ function scalarize_cone_rescaling!(
 end
 
 
+"""Scalarize only the cone blocks selected by `scalar_cone_mask`."""
+function scalarize_cone_rescaling!(
+    scaling::CuArray{Float64},
+    cone_starts::CuArray{Int64},
+    cone_ends::CuArray{Int64},
+    scalar_cone_mask::CuArray{Bool},
+)
+    cone_count = length(cone_starts)
+    cone_count == length(cone_ends) == length(scalar_cone_mask) ||
+        throw(DimensionMismatch("cone ranges and mask must have equal length"))
+    cone_count == 0 && return scaling
+    CUDA.@sync begin
+        CUDA.@cuda threads = ThreadPerBlock blocks = cone_count scalarize_masked_cone_rescaling_kernel!(
+            scaling,
+            cone_starts,
+            cone_ends,
+            scalar_cone_mask,
+        )
+    end
+    return scaling
+end
+
+
 """Preprocesses the original problem, and returns a ScaledQpProblem struct.
 Applies L_inf Ruiz rescaling for `l_inf_ruiz_iterations` iterations. If
 `l2_norm_rescaling` is true, applies L2 norm rescaling. `problem` is not
@@ -486,7 +673,8 @@ function rescale_problem!(;
   dual_sol::solVecDual,
   variable_rescaling::CuArray{Float64},
   constraint_rescaling_G::CuArray{Float64},
-  scalar_cone_rescaling::Bool = false
+  scalar_cone_rescaling::Bool = false,
+  use_adaptive_diagonal_scalar_rescaling::Bool = false
 )
     row_idx = similar(data.coeff.d_G.colVal, nnz(data.coeff.d_G))
     get_row_index(data.coeff.d_G, row_idx)
@@ -494,13 +682,26 @@ function rescale_problem!(;
     primal_cone_ends = nothing
     dual_cone_starts = nothing
     dual_cone_ends = nothing
-    if scalar_cone_rescaling
+    primal_scalar_cone_mask = nothing
+    dual_scalar_cone_mask = nothing
+    if scalar_cone_rescaling || use_adaptive_diagonal_scalar_rescaling
         primal_cone_starts_cpu, primal_cone_ends_cpu = structured_cone_ranges(sol)
         dual_cone_starts_cpu, dual_cone_ends_cpu = structured_cone_ranges(dual_sol)
         primal_cone_starts = CuArray(primal_cone_starts_cpu)
         primal_cone_ends = CuArray(primal_cone_ends_cpu)
         dual_cone_starts = CuArray(dual_cone_starts_cpu)
         dual_cone_ends = CuArray(dual_cone_ends_cpu)
+    end
+    if use_adaptive_diagonal_scalar_rescaling && !scalar_cone_rescaling
+        primal_scalar_cone_mask, dual_scalar_cone_mask =
+            adaptive_scalar_cone_masks(
+                data.coeff.d_G,
+                row_idx,
+                primal_cone_starts,
+                primal_cone_ends,
+                dual_cone_starts,
+                dual_cone_ends,
+            )
     end
     variable_rescaling .= 1.0
     constraint_rescaling_G .= 1.0
@@ -515,6 +716,8 @@ function rescale_problem!(;
             variable_rescaling = variable_rescaling,
             constraint_rescaling_G = constraint_rescaling_G,
             scalar_cone_rescaling = scalar_cone_rescaling,
+            primal_scalar_cone_mask = primal_scalar_cone_mask,
+            dual_scalar_cone_mask = dual_scalar_cone_mask,
             primal_cone_starts = primal_cone_starts,
             primal_cone_ends = primal_cone_ends,
             dual_cone_starts = dual_cone_starts,
@@ -534,6 +737,8 @@ function rescale_problem!(;
             variable_rescaling = variable_rescaling,
             constraint_rescaling_G = constraint_rescaling_G,
             scalar_cone_rescaling = scalar_cone_rescaling,
+            primal_scalar_cone_mask = primal_scalar_cone_mask,
+            dual_scalar_cone_mask = dual_scalar_cone_mask,
             primal_cone_starts = primal_cone_starts,
             primal_cone_ends = primal_cone_ends,
             dual_cone_starts = dual_cone_starts,
@@ -546,6 +751,8 @@ function rescale_problem!(;
     primal_cone_ends === nothing || CUDA.unsafe_free!(primal_cone_ends)
     dual_cone_starts === nothing || CUDA.unsafe_free!(dual_cone_starts)
     dual_cone_ends === nothing || CUDA.unsafe_free!(dual_cone_ends)
+    primal_scalar_cone_mask === nothing || CUDA.unsafe_free!(primal_scalar_cone_mask)
+    dual_scalar_cone_mask === nothing || CUDA.unsafe_free!(dual_scalar_cone_mask)
 end
 
 
@@ -590,6 +797,8 @@ function pock_chambolle_rescaling!(;
     variable_rescaling::CuArray{Float64},
     constraint_rescaling_G::CuArray{Float64},
     scalar_cone_rescaling::Bool = false,
+    primal_scalar_cone_mask::Union{Nothing,CuArray{Bool}} = nothing,
+    dual_scalar_cone_mask::Union{Nothing,CuArray{Bool}} = nothing,
     primal_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
     primal_cone_ends::Union{Nothing,CuArray{Int64}} = nothing,
     dual_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
@@ -645,6 +854,19 @@ function pock_chambolle_rescaling!(;
             constraint_rescaling_G,
             dual_cone_starts,
             dual_cone_ends,
+        )
+    elseif primal_scalar_cone_mask !== nothing
+        scalarize_cone_rescaling!(
+            variable_rescaling,
+            primal_cone_starts,
+            primal_cone_ends,
+            primal_scalar_cone_mask,
+        )
+        scalarize_cone_rescaling!(
+            constraint_rescaling_G,
+            dual_cone_starts,
+            dual_cone_ends,
+            dual_scalar_cone_mask,
         )
     end
     ## debugging
@@ -711,6 +933,8 @@ function ruiz_rescaling!(;
     variable_rescaling::CuArray{Float64},
     constraint_rescaling_G::CuArray{Float64},
     scalar_cone_rescaling::Bool = false,
+    primal_scalar_cone_mask::Union{Nothing,CuArray{Bool}} = nothing,
+    dual_scalar_cone_mask::Union{Nothing,CuArray{Bool}} = nothing,
     primal_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
     primal_cone_ends::Union{Nothing,CuArray{Int64}} = nothing,
     dual_cone_starts::Union{Nothing,CuArray{Int64}} = nothing,
@@ -780,6 +1004,19 @@ function ruiz_rescaling!(;
                 constraint_rescaling_G,
                 dual_cone_starts,
                 dual_cone_ends,
+            )
+        elseif primal_scalar_cone_mask !== nothing
+            scalarize_cone_rescaling!(
+                variable_rescaling,
+                primal_cone_starts,
+                primal_cone_ends,
+                primal_scalar_cone_mask,
+            )
+            scalarize_cone_rescaling!(
+                constraint_rescaling_G,
+                dual_cone_starts,
+                dual_cone_ends,
+                dual_scalar_cone_mask,
             )
         end
         scale_data!(

@@ -643,6 +643,12 @@ function MOI.optimize!(
             println("scalar_cone_rescaling is not set, using default value: false.")
         end
     end
+    if !haskey(options, :use_adaptive_diagonal_scalar_rescaling)
+        options[:use_adaptive_diagonal_scalar_rescaling] = false
+        if options[:verbose] > 0
+            println("use_adaptive_diagonal_scalar_rescaling is not set, using default value: false.")
+        end
+    end
     if !haskey(options, :use_adaptive_restart)
         options[:use_adaptive_restart] = true
         if options[:verbose] > 0
@@ -813,6 +819,8 @@ function MOI.optimize!(
             use_preconditioner = true,
             rescaling_method = options[:rescaling_method],
             scalar_cone_rescaling = options[:scalar_cone_rescaling],
+            use_adaptive_diagonal_scalar_rescaling =
+                options[:use_adaptive_diagonal_scalar_rescaling],
             method = :average,
             time_limit = options[:time_limit_secs],
             use_adaptive_restart = options[:use_adaptive_restart],
@@ -895,6 +903,8 @@ function MOI.optimize!(
             use_preconditioner = true,
             rescaling_method = :none,
             scalar_cone_rescaling = options[:scalar_cone_rescaling],
+            use_adaptive_diagonal_scalar_rescaling =
+                options[:use_adaptive_diagonal_scalar_rescaling],
             method = :average,
             time_limit = options[:time_limit_secs],
             use_adaptive_restart = options[:use_adaptive_restart],

@@ -1374,6 +1374,7 @@ mutable struct PDCS_GPU_Solver
     Dr::Union{Vector{rpdhg_float}, CuArray}
     rescaling_method::Symbol
     scalar_cone_rescaling::Bool
+    use_adaptive_diagonal_scalar_rescaling::Bool
     use_preconditioner::Bool
     use_adaptive_restart::Bool
     use_adaptive_step_size_weight::Bool
@@ -1432,6 +1433,7 @@ mutable struct PDCS_GPU_Solver
         Dr::Union{Vector{rpdhg_float}, CuArray} = ones(n),
         rescaling_method::Symbol = :ruiz_pock_chambolle,
         scalar_cone_rescaling::Bool = false,
+        use_adaptive_diagonal_scalar_rescaling::Bool = false,
         use_preconditioner::Bool = true,
         use_adaptive_restart::Bool = true,
         use_adaptive_step_size_weight::Bool = true,
@@ -1528,6 +1530,7 @@ mutable struct PDCS_GPU_Solver
             Dr,
             rescaling_method,
             scalar_cone_rescaling,
+            use_adaptive_diagonal_scalar_rescaling,
             use_preconditioner,
             use_adaptive_restart,
             use_adaptive_step_size_weight,

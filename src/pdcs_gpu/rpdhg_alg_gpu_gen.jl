@@ -425,6 +425,7 @@ function rpdhg_gpu_solve_input_gpu_data(;
     Dr::CuArray{rpdhg_float} = CuArray(ones(n)),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
     scalar_cone_rescaling::Bool = false,
+    use_adaptive_diagonal_scalar_rescaling::Bool = false,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
@@ -521,6 +522,7 @@ dGType<:Union{
         @info ("use_preconditioner: $use_preconditioner")
         @info ("rescaling_method: $rescaling_method")
         @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
+        @info ("use_adaptive_diagonal_scalar_rescaling: $use_adaptive_diagonal_scalar_rescaling")
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
@@ -1031,7 +1033,9 @@ dGType<:Union{
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method == :pock_chambolle
             rescale_problem!(
@@ -1044,7 +1048,9 @@ dGType<:Union{
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method in (
             :ruiz_pock_chambolle,
@@ -1060,7 +1066,9 @@ dGType<:Union{
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method == :none
             if verbose > 0
@@ -1279,6 +1287,11 @@ end # end rpdhg_cpu_solve
       cone. The default `false` preserves coordinate-wise diagonal rescaling.
       `rescaling_method=:ruiz_pock_chambolle_scalar_cone` is an equivalent
       explicit method for the combined rescaling pipeline.
+    - `use_adaptive_diagonal_scalar_rescaling`: if true, inspect each
+      structured cone block in the original constraint matrix. Blocks whose
+      stored coefficients are all `-1`, `0`, or `1` use one scalar rescaling
+      factor; all other blocks retain coordinate-wise diagonal rescaling.
+      `scalar_cone_rescaling=true` takes precedence and scalarizes every cone.
     - `use_preconditioner`: whether to use the preconditioner
     - `adaptive_projection_tolerance`: projection root-search tolerance policy.
       `true` uses the selected structure-aware adaptive schedule (the default
@@ -1350,6 +1363,7 @@ function rpdhg_gpu_solve(;
     Dr::Vector{rpdhg_float} = ones(n),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
     scalar_cone_rescaling::Bool = false,
+    use_adaptive_diagonal_scalar_rescaling::Bool = false,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
     use_adaptive_step_size_weight::Bool = true,
@@ -1441,6 +1455,7 @@ function rpdhg_gpu_solve(;
         @info ("use_preconditioner: $use_preconditioner")
         @info ("rescaling_method: $rescaling_method")
         @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
+        @info ("use_adaptive_diagonal_scalar_rescaling: $use_adaptive_diagonal_scalar_rescaling")
         @info ("use_adaptive_restart: $use_adaptive_restart")
         @info ("use_adaptive_step_size_weight: $use_adaptive_step_size_weight")
         @info ("use_aggressive: $use_aggressive")
@@ -1953,7 +1968,9 @@ function rpdhg_gpu_solve(;
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method == :pock_chambolle
             rescale_problem!(
@@ -1966,7 +1983,9 @@ function rpdhg_gpu_solve(;
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method in (
             :ruiz_pock_chambolle,
@@ -1982,7 +2001,9 @@ function rpdhg_gpu_solve(;
                 dual_sol = solver.sol.y,
                 variable_rescaling = solver.data.diagonal_scale.Dr_temp.x,
                 constraint_rescaling_G = solver.data.diagonal_scale.Dl_temp.y,
-                scalar_cone_rescaling = use_scalar_cone_rescaling
+                scalar_cone_rescaling = use_scalar_cone_rescaling,
+                use_adaptive_diagonal_scalar_rescaling =
+                    use_adaptive_diagonal_scalar_rescaling,
             )
         elseif rescaling_method == :none
             if verbose > 0
@@ -2175,6 +2196,8 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             Dl = solver.Dl,
             rescaling_method = solver.rescaling_method,
             scalar_cone_rescaling = solver.scalar_cone_rescaling,
+            use_adaptive_diagonal_scalar_rescaling =
+                solver.use_adaptive_diagonal_scalar_rescaling,
             use_preconditioner = solver.use_preconditioner,
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
@@ -2230,6 +2253,8 @@ function solve_with_solver(solver::PDCS_GPU_Solver)
             Dl = solver.Dl,
             rescaling_method = solver.rescaling_method,
             scalar_cone_rescaling = solver.scalar_cone_rescaling,
+            use_adaptive_diagonal_scalar_rescaling =
+                solver.use_adaptive_diagonal_scalar_rescaling,
             use_preconditioner = solver.use_preconditioner,
             use_adaptive_restart = solver.use_adaptive_restart,
             use_adaptive_step_size_weight = solver.use_adaptive_step_size_weight,
