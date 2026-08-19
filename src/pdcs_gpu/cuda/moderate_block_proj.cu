@@ -26,6 +26,20 @@
 // block reduction.  The D .* x vector is retained for the root oracle.
 #define PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS 1
 #endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ROOT
+#define PDCS_ENABLE_BOUNDED_SOC_ROOT 1
+#endif
+#ifndef PDCS_SOC_BOUNDED_NEWTON_STEPS
+#define PDCS_SOC_BOUNDED_NEWTON_STEPS 8
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+// On the block-wise path the shorter Illinois search increases register and
+// scalar-control cost more than it saves at the measured cone sizes.
+#define PDCS_ENABLE_BOUNDED_SOC_ILLINOIS 0
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_HALLEY
+#define PDCS_ENABLE_BOUNDED_SOC_HALLEY 0
+#endif
 #ifndef PDCS_ENABLE_SHUFFLE_BLOCK_REDUCTION
 #define PDCS_ENABLE_SHUFFLE_BLOCK_REDUCTION 0
 #endif
@@ -50,6 +64,7 @@
 #ifndef PDCS_SOC_NEWTON_STEPS
 #define PDCS_SOC_NEWTON_STEPS 2
 #endif
+#include "bounded_soc_root_step.cuh"
 // suitable for very much block number
 
 #include "exp_proj.cu"
@@ -149,6 +164,75 @@ __device__ void block_reduce_pair(
   *derivative_sum = partial_derivatives[0];
 #endif
 }
+
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+__device__ void block_reduce_triple(
+    double value, double derivative, double second,
+    long thread_idx, long blk_dim, double *value_sum,
+    double *derivative_sum, double *second_sum) {
+#if PDCS_ENABLE_SHUFFLE_BLOCK_REDUCTION
+  unsigned mask = 0xffffffffu;
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    value += __shfl_down_sync(mask, value, offset);
+    derivative += __shfl_down_sync(mask, derivative, offset);
+    second += __shfl_down_sync(mask, second, offset);
+  }
+  __shared__ double warp_values[32];
+  __shared__ double warp_derivatives[32];
+  __shared__ double warp_seconds[32];
+  int lane = thread_idx & (warpSize - 1);
+  int warp = thread_idx / warpSize;
+  int warp_count = (blk_dim + warpSize - 1) / warpSize;
+  if (lane == 0) {
+    warp_values[warp] = value;
+    warp_derivatives[warp] = derivative;
+    warp_seconds[warp] = second;
+  }
+  __syncthreads();
+  double block_value =
+      (warp == 0 && lane < warp_count) ? warp_values[lane] : 0.0;
+  double block_derivative =
+      (warp == 0 && lane < warp_count) ? warp_derivatives[lane] : 0.0;
+  double block_second =
+      (warp == 0 && lane < warp_count) ? warp_seconds[lane] : 0.0;
+  if (warp == 0) {
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+      block_value += __shfl_down_sync(mask, block_value, offset);
+      block_derivative += __shfl_down_sync(mask, block_derivative, offset);
+      block_second += __shfl_down_sync(mask, block_second, offset);
+    }
+    if (lane == 0) {
+      warp_values[0] = block_value;
+      warp_derivatives[0] = block_derivative;
+      warp_seconds[0] = block_second;
+    }
+  }
+  __syncthreads();
+  *value_sum = warp_values[0];
+  *derivative_sum = warp_derivatives[0];
+  *second_sum = warp_seconds[0];
+#else
+  __shared__ double partial_values[1024];
+  __shared__ double partial_derivatives[1024];
+  __shared__ double partial_seconds[1024];
+  partial_values[thread_idx] = value;
+  partial_derivatives[thread_idx] = derivative;
+  partial_seconds[thread_idx] = second;
+  __syncthreads();
+  for (int stride = blk_dim / 2; stride > 0; stride /= 2) {
+    if (thread_idx < stride) {
+      partial_values[thread_idx] += partial_values[thread_idx + stride];
+      partial_derivatives[thread_idx] += partial_derivatives[thread_idx + stride];
+      partial_seconds[thread_idx] += partial_seconds[thread_idx + stride];
+    }
+    __syncthreads();
+  }
+  *value_sum = partial_values[0];
+  *derivative_sum = partial_derivatives[0];
+  *second_sum = partial_seconds[0];
+#endif
+}
+#endif
 
 // BLAS functions
 __device__ double nrm2(const long* __restrict__ n, const double* __restrict__ x, long *thread_idx, long *blk_dim)
@@ -625,12 +709,12 @@ __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_
   double local_value = 0.0;
   double local_derivative = 0.0;
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
-    double y = D_scaled_part_mul_x_part[j] /
-               (1.0 + (2.0 * xi[0]) * D_scaled_squared_part[j]);
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + (2.0 * xi[0]) * q;
+    double y = D_scaled_part_mul_x_part[j] / denominator;
     double y_squared = y * y;
     local_value += y_squared;
-    local_derivative += y_squared /
-        fmax(2.0 * xi[0] + D_scaled_squared_part[j], 1e-16);
+    local_derivative += y_squared * q / denominator;
   }
   double value_sum;
   double derivative_sum;
@@ -649,11 +733,281 @@ __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_
   right = right * right;
   *f = left - right;
   for (long j = *thread_idx; j < *len; j += *blk_dim) {
-    temp_part[j] = temp_part[j] / sqrt(fmax(2 * xi[0] + D_scaled_squared_part[j], 1e-16));
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + 2.0 * xi[0] * q;
+    temp_part[j] *= sqrt(fmax(q / denominator, 0.0));
   }
   right = right / (1 - 2 * xi[0]);
   *h = -4 * (nrm2_squared(len, temp_part, thread_idx, blk_dim) + right);
 #endif
+}
+
+__device__ double oracle_soc_bounded_u_f(
+    double u, double t, bool increasing,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_VV_REDUCTION();
+  double local_value = 0.0;
+  for (long j = *thread_idx; j < *len; j += *blk_dim) {
+    const double a = D_scaled_part_mul_x_part[j];
+    const double c = D_scaled_squared_part[j];
+    const double ratio = increasing ? u / (c + 1.0 - u)
+                                    : (1.0 - u) / (1.0 + c * u);
+    const double value = a * ratio;
+    local_value += value * value;
+  }
+  const double value_sum = block_reduce_sum(
+      local_value, *thread_idx, *blk_dim);
+  return value_sum - t * t;
+}
+
+__device__ void oracle_soc_bounded_u_h(
+    double u, double t, bool increasing,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len, double *f, double *h,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
+  PDCS_PROFILE_VV_REDUCTION();
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  for (long j = *thread_idx; j < *len; j += *blk_dim) {
+    const double a = D_scaled_part_mul_x_part[j];
+    const double a_squared = a * a;
+    const double c = D_scaled_squared_part[j];
+    if (increasing) {
+      const double denominator = c + 1.0 - u;
+      const double denominator_squared = denominator * denominator;
+      local_value += a_squared * u * u / denominator_squared;
+      local_derivative += 2.0 * a_squared * u * (1.0 + c) /
+                          (denominator_squared * denominator);
+    } else {
+      const double one_minus_u = 1.0 - u;
+      const double denominator = 1.0 + c * u;
+      const double denominator_squared = denominator * denominator;
+      local_value += a_squared * one_minus_u * one_minus_u /
+                     denominator_squared;
+      local_derivative -= 2.0 * a_squared * one_minus_u * (1.0 + c) /
+                          (denominator_squared * denominator);
+    }
+  }
+  double value_sum;
+  double derivative_sum;
+  block_reduce_pair(local_value, local_derivative, *thread_idx, *blk_dim,
+                    &value_sum, &derivative_sum);
+  *f = value_sum - t * t;
+  *h = derivative_sum;
+}
+
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+__device__ void oracle_soc_bounded_u_h2(
+    double u, double t, bool increasing,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    double *f, double *h, double *h2,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
+  PDCS_PROFILE_VV_REDUCTION();
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  double local_second = 0.0;
+  for (long j = *thread_idx; j < *len; j += *blk_dim) {
+    const double a = D_scaled_part_mul_x_part[j];
+    const double a_squared = a * a;
+    const double c = D_scaled_squared_part[j];
+    const double q = 1.0 + c;
+    if (increasing) {
+      const double denominator = q - u;
+      const double denominator_squared = denominator * denominator;
+      const double denominator_fourth = denominator_squared * denominator_squared;
+      local_value += a_squared * u * u / denominator_squared;
+      local_derivative += 2.0 * a_squared * u * q /
+                          (denominator_squared * denominator);
+      local_second += 2.0 * a_squared * q * (q + 2.0 * u) /
+                      denominator_fourth;
+    } else {
+      const double one_minus_u = 1.0 - u;
+      const double denominator = 1.0 + c * u;
+      const double denominator_squared = denominator * denominator;
+      const double denominator_fourth = denominator_squared * denominator_squared;
+      local_value += a_squared * one_minus_u * one_minus_u /
+                     denominator_squared;
+      local_derivative -= 2.0 * a_squared * one_minus_u * q /
+                          (denominator_squared * denominator);
+      local_second += 2.0 * a_squared * q *
+                      (1.0 + 3.0 * c - 2.0 * c * u) /
+                      denominator_fourth;
+    }
+  }
+  double value_sum;
+  double derivative_sum;
+  double second_sum;
+  block_reduce_triple(local_value, local_derivative, local_second,
+                      *thread_idx, *blk_dim, &value_sum,
+                      &derivative_sum, &second_sum);
+  *f = value_sum - t * t;
+  *h = derivative_sum;
+  *h2 = second_sum;
+}
+#endif
+
+__device__ __forceinline__ bool soc_bounded_u_residual_converged(
+    double f, double t, double abs_tol) {
+  return fabs(f) <= abs_tol * (1.0 + t * t);
+}
+
+__device__ double soc_bounded_u_solve(
+    double t, bool increasing, double warm_u,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim,
+    double endpoint_norm, double abs_tol, double rel_tol) {
+  double left = 0.0;
+  double right = 1.0;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+  const double t_squared = t * t;
+  const double endpoint_f = endpoint_norm * endpoint_norm - t_squared;
+  double left_f = increasing ? -t_squared : endpoint_f;
+  double right_f = increasing ? endpoint_f : -t_squared;
+#endif
+  const bool valid_warm = isfinite(warm_u) && warm_u > 0.0 && warm_u < 1.0;
+  double u = valid_warm ? warm_u : 0.5;
+  if (valid_warm) PDCS_PROFILE_WARM_ATTEMPT();
+
+  double f;
+  double h;
+  oracle_soc_bounded_u_h(
+      u, t, increasing, D_scaled_part_mul_x_part,
+      D_scaled_squared_part, len, &f, &h, thread_idx, blk_dim);
+  if (valid_warm && soc_bounded_u_residual_converged(f, t, abs_tol)) {
+    PDCS_PROFILE_WARM_ACCEPT();
+    return u;
+  }
+  if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+    right = u;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+    right_f = f;
+#endif
+  } else {
+    left = u;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+    left_f = f;
+#endif
+  }
+
+  for (int iter = 0;
+       iter < PDCS_SOC_BOUNDED_NEWTON_STEPS &&
+       PDCS_ENABLE_SAFEGUARDED_NEWTON;
+       ++iter) {
+    if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
+        right - left <= rel_tol) return u;
+    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
+    const double candidate = u - f / h;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-8 * (right - left));
+    if (!isfinite(candidate) || candidate <= left + guard ||
+        candidate >= right - guard) break;
+
+    PDCS_PROFILE_NEWTON_ATTEMPT();
+    double candidate_f;
+    double candidate_h;
+    oracle_soc_bounded_u_h(
+        candidate, t, increasing, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, &candidate_f, &candidate_h,
+        thread_idx, blk_dim);
+    if ((increasing && candidate_f > 0.0) ||
+        (!increasing && candidate_f < 0.0)) {
+      right = candidate;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      right_f = candidate_f;
+#endif
+    } else {
+      left = candidate;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      left_f = candidate_f;
+#endif
+    }
+    if (!isfinite(candidate_f) || fabs(candidate_f) >= fabs(f)) break;
+    PDCS_PROFILE_NEWTON_ACCEPT();
+    const double step = fabs(candidate - u);
+    u = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    if (step <= rel_tol ||
+        soc_bounded_u_residual_converged(f, t, abs_tol)) return u;
+  }
+
+  int count = 0;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+  int last_updated_side = 0;
+#endif
+  while (right - left > rel_tol && count <= MAX_ITER) {
+    PDCS_PROFILE_BISECTION();
+    ++count;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+    const double denominator = right_f - left_f;
+    u = left - left_f * (right - left) / denominator;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * (right - left));
+    if (!isfinite(u) || !isfinite(denominator) ||
+        fabs(denominator) <= 1e-300 || u <= left + guard ||
+        u >= right - guard) {
+      u = 0.5 * (left + right);
+      last_updated_side = 0;
+    }
+#else
+    u = 0.5 * (left + right);
+#endif
+    f = oracle_soc_bounded_u_f(
+        u, t, increasing, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, thread_idx, blk_dim);
+    if (!isfinite(f) || soc_bounded_u_residual_converged(f, t, abs_tol)) break;
+    const bool update_right =
+        (increasing && f > 0.0) || (!increasing && f < 0.0);
+    if (update_right) {
+      right = u;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      right_f = f;
+      if (last_updated_side == 1) left_f *= 0.5;
+      last_updated_side = 1;
+#endif
+    } else {
+      left = u;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      left_f = f;
+      if (last_updated_side == -1) right_f *= 0.5;
+      last_updated_side = -1;
+#endif
+    }
+  }
+  if (count > MAX_ITER) PDCS_PROFILE_MAX_ITER();
+  if (!soc_bounded_u_residual_converged(f, t, abs_tol)) {
+    u = 0.5 * (left + right);
+  }
+  PDCS_PROFILE_RESIDUAL(f);
+  PDCS_PROFILE_BRACKET(left, right);
+  return fmin(fmax(u, 64.0 * 2.220446049250313e-16),
+              1.0 - 64.0 * 2.220446049250313e-16);
+}
+
+__device__ void soc_bounded_u_recover(
+    double *sol, long *n, double u, bool increasing,
+    double minVal, double *t_warm_start, double *D_scaled_squared,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  if (*thread_idx == 0) {
+    t_warm_start[0] = u;
+    sol[0] = increasing ? -sol[0] * (1.0 - u) / u * minVal
+                        : sol[0] / (1.0 - u) * minVal;
+  }
+  for (long j = 1 + *thread_idx; j < *n; j += *blk_dim) {
+    const double c = D_scaled_squared[j];
+    sol[j] = increasing ? sol[j] * (1.0 - u) / (c + 1.0 - u) * minVal
+                        : sol[j] / (1.0 + c * u) * minVal;
+  }
+  __syncthreads();
 }
 
 // __device__ void newton_soc_rootsearch(double *xiLeft, double *xiRight, double *xi, double *sol, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len) {
@@ -1229,6 +1583,20 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     scal_inplace(n, &minVal, sol, thread_idx, blk_dim);
     return;
   }
+#if PDCS_ENABLE_BOUNDED_SOC_ROOT
+  if (t > rel_tol || t < -rel_tol) {
+    const bool increasing = t < 0.0;
+    PDCS_PROFILE_BRANCH(increasing ? 3 : 2);
+    const double u = soc_bounded_u_solve(
+        t, increasing, t_warm_start_val_test, D_scaled_mul_x_part,
+        D_scaled_squared_part, &len, thread_idx, blk_dim,
+        increasing ? polar_norm : weighted_norm, abs_tol, rel_tol);
+    soc_bounded_u_recover(
+        sol, n, u, increasing, minVal, t_warm_start,
+        D_scaled_squared, thread_idx, blk_dim);
+    return;
+  }
+#endif
   if (t > rel_tol) {
     PDCS_PROFILE_BRANCH(2);
     xiRight = 0.5;

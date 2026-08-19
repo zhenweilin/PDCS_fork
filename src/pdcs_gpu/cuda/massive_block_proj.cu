@@ -19,7 +19,20 @@
 #ifndef PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS
 #define PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS 1
 #endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ROOT
+#define PDCS_ENABLE_BOUNDED_SOC_ROOT 1
+#endif
+#ifndef PDCS_SOC_BOUNDED_NEWTON_STEPS
+#define PDCS_SOC_BOUNDED_NEWTON_STEPS 8
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#define PDCS_ENABLE_BOUNDED_SOC_ILLINOIS 1
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_HALLEY
+#define PDCS_ENABLE_BOUNDED_SOC_HALLEY 0
+#endif
 #include "soc_root_coordinate.cuh"
+#include "bounded_soc_root_step.cuh"
 
 
 #include "exp_proj.cu"
@@ -475,12 +488,12 @@ __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_
   double value_sum = 0.0;
   double derivative_sum = 0.0;
   for (long j = 0; j < *len; ++j) {
-    double y = D_scaled_part_mul_x_part[j] /
-               (1.0 + (2.0 * xi[0]) * D_scaled_squared_part[j]);
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + (2.0 * xi[0]) * q;
+    double y = D_scaled_part_mul_x_part[j] / denominator;
     double y_squared = y * y;
     value_sum += y_squared;
-    derivative_sum += y_squared /
-        fmax(2.0 * xi[0] + D_scaled_squared_part[j], 1e-16);
+    derivative_sum += y_squared * q / denominator;
   }
   double denominator = 1.0 - 2.0 * xi[0];
   double right = (x[0] / denominator) * (x[0] / denominator);
@@ -495,11 +508,201 @@ __device__ void oracle_soc_h(double *xi, double *x, double *D_scaled_part_mul_x_
   double right = (x[0] / temp) * (x[0] / temp);
   *f = left - right;
   for (long j = 0; j < *len; ++j) {
-    temp_part[j] = temp_part[j] / sqrt(2 * xi[0] + D_scaled_squared_part[j]);
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + 2.0 * xi[0] * q;
+    temp_part[j] *= sqrt(fmax(q / denominator, 0.0));
   }
   right = right / temp;
   *h = -4 * (nrm2_squared(len, temp_part) + right);
 #endif
+}
+
+__device__ double oracle_soc_bounded_u_f(
+    double u, double t, bool increasing,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_VV_REDUCTION();
+  double value_sum = 0.0;
+  for (long j = 0; j < *len; ++j) {
+    const double a = D_scaled_part_mul_x_part[j];
+    const double c = D_scaled_squared_part[j];
+    const double ratio = increasing ? u / (c + 1.0 - u)
+                                    : (1.0 - u) / (1.0 + c * u);
+    const double value = a * ratio;
+    value_sum += value * value;
+  }
+  return value_sum - t * t;
+}
+
+__device__ void oracle_soc_bounded_u_h(
+    double u, double t, bool increasing,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len, double *f, double *h) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
+  PDCS_PROFILE_VV_REDUCTION();
+  double value_sum = 0.0;
+  double derivative_sum = 0.0;
+  for (long j = 0; j < *len; ++j) {
+    const double a = D_scaled_part_mul_x_part[j];
+    const double a_squared = a * a;
+    const double c = D_scaled_squared_part[j];
+    if (increasing) {
+      const double denominator = c + 1.0 - u;
+      const double denominator_squared = denominator * denominator;
+      value_sum += a_squared * u * u / denominator_squared;
+      derivative_sum += 2.0 * a_squared * u * (1.0 + c) /
+                        (denominator_squared * denominator);
+    } else {
+      const double one_minus_u = 1.0 - u;
+      const double denominator = 1.0 + c * u;
+      const double denominator_squared = denominator * denominator;
+      value_sum += a_squared * one_minus_u * one_minus_u /
+                   denominator_squared;
+      derivative_sum -= 2.0 * a_squared * one_minus_u * (1.0 + c) /
+                        (denominator_squared * denominator);
+    }
+  }
+  *f = value_sum - t * t;
+  *h = derivative_sum;
+}
+
+__device__ __forceinline__ bool soc_bounded_u_residual_converged(
+    double f, double t, double abs_tol) {
+  return fabs(f) <= abs_tol * (1.0 + t * t);
+}
+
+__device__ double soc_bounded_u_solve(
+    double t, bool increasing, double warm_u,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    double endpoint_norm, double abs_tol, double rel_tol) {
+  double left = 0.0;
+  double right = 1.0;
+  const double t_squared = t * t;
+  const double endpoint_f = endpoint_norm * endpoint_norm - t_squared;
+  double left_f = increasing ? -t_squared : endpoint_f;
+  double right_f = increasing ? endpoint_f : -t_squared;
+  const bool valid_warm = isfinite(warm_u) && warm_u > 0.0 && warm_u < 1.0;
+  double u = valid_warm ? warm_u : 0.5;
+  if (valid_warm) PDCS_PROFILE_WARM_ATTEMPT();
+
+  double f;
+  double h;
+  oracle_soc_bounded_u_h(
+      u, t, increasing, D_scaled_part_mul_x_part,
+      D_scaled_squared_part, len, &f, &h);
+  if (valid_warm && soc_bounded_u_residual_converged(f, t, abs_tol)) {
+    PDCS_PROFILE_WARM_ACCEPT();
+    return u;
+  }
+  if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+    right = u;
+    right_f = f;
+  } else {
+    left = u;
+    left_f = f;
+  }
+
+  for (int iter = 0;
+       iter < PDCS_SOC_BOUNDED_NEWTON_STEPS &&
+       PDCS_ENABLE_SAFEGUARDED_NEWTON;
+       ++iter) {
+    if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
+        right - left <= rel_tol) {
+      return u;
+    }
+    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
+    const double candidate = u - f / h;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-8 * (right - left));
+    if (!isfinite(candidate) || candidate <= left + guard ||
+        candidate >= right - guard) break;
+
+    PDCS_PROFILE_NEWTON_ATTEMPT();
+    double candidate_f;
+    double candidate_h;
+    oracle_soc_bounded_u_h(
+        candidate, t, increasing, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, &candidate_f, &candidate_h);
+    if ((increasing && candidate_f > 0.0) ||
+        (!increasing && candidate_f < 0.0)) {
+      right = candidate;
+      right_f = candidate_f;
+    } else {
+      left = candidate;
+      left_f = candidate_f;
+    }
+    if (!isfinite(candidate_f) || fabs(candidate_f) >= fabs(f)) break;
+    PDCS_PROFILE_NEWTON_ACCEPT();
+    const double step = fabs(candidate - u);
+    u = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    if (step <= rel_tol ||
+        soc_bounded_u_residual_converged(f, t, abs_tol)) return u;
+  }
+
+  int count = 0;
+  int last_updated_side = 0;
+  while (right - left > rel_tol && count <= MAX_ITER) {
+    PDCS_PROFILE_BISECTION();
+    ++count;
+    const double denominator = right_f - left_f;
+    u = left - left_f * (right - left) / denominator;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * (right - left));
+    if (!isfinite(u) || !isfinite(denominator) ||
+        fabs(denominator) <= 1e-300 || u <= left + guard ||
+        u >= right - guard) {
+      u = 0.5 * (left + right);
+      last_updated_side = 0;
+    }
+    f = oracle_soc_bounded_u_f(
+        u, t, increasing, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len);
+    if (!isfinite(f) || soc_bounded_u_residual_converged(f, t, abs_tol)) break;
+    const bool update_right =
+        (increasing && f > 0.0) || (!increasing && f < 0.0);
+    if (update_right) {
+      right = u;
+      right_f = f;
+      if (last_updated_side == 1) left_f *= 0.5;
+      last_updated_side = 1;
+    } else {
+      left = u;
+      left_f = f;
+      if (last_updated_side == -1) right_f *= 0.5;
+      last_updated_side = -1;
+    }
+  }
+  if (count > MAX_ITER) PDCS_PROFILE_MAX_ITER();
+  if (!soc_bounded_u_residual_converged(f, t, abs_tol)) {
+    u = 0.5 * (left + right);
+  }
+  PDCS_PROFILE_RESIDUAL(f);
+  PDCS_PROFILE_BRACKET(left, right);
+  return fmin(fmax(u, 64.0 * 2.220446049250313e-16),
+              1.0 - 64.0 * 2.220446049250313e-16);
+}
+
+__device__ void soc_bounded_u_recover(
+    double *sol, long *n, double u, bool increasing,
+    double minVal, double *t_warm_start, double *D_scaled_squared) {
+  t_warm_start[0] = u;
+  if (increasing) {
+    sol[0] = -sol[0] * (1.0 - u) / u * minVal;
+    for (long j = 1; j < *n; ++j) {
+      const double c = D_scaled_squared[j];
+      sol[j] = sol[j] * (1.0 - u) / (c + 1.0 - u) * minVal;
+    }
+  } else {
+    sol[0] = sol[0] / (1.0 - u) * minVal;
+    for (long j = 1; j < *n; ++j) {
+      sol[j] = sol[j] / (1.0 + u * D_scaled_squared[j]) * minVal;
+    }
+  }
 }
 
 __device__ void newton_soc_rootsearch(double *xiLeft, double *xiRight, double *xi, double *sol, double *D_scaled_part_mul_x_part, double *D_scaled_squared_part, double *temp_part, long *len, double abs_tol, double rel_tol) {
@@ -852,6 +1055,19 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     // printf("soc_proj_diagonal 1\n");
     return;
   }
+#if PDCS_ENABLE_BOUNDED_SOC_ROOT
+  if (t > rel_tol || t < -rel_tol) {
+    const bool increasing = t < 0.0;
+    PDCS_PROFILE_BRANCH(increasing ? 3 : 2);
+    const double u = soc_bounded_u_solve(
+        t, increasing, t_warm_start[0], D_scaled_mul_x_part,
+        D_scaled_squared_part, &len,
+        increasing ? polar_norm : weighted_norm, abs_tol, rel_tol);
+    soc_bounded_u_recover(
+        sol, n, u, increasing, minVal, t_warm_start, D_scaled_squared);
+    return;
+  }
+#endif
   if (t > rel_tol) {
     PDCS_PROFILE_BRANCH(2);
     xiRight = 0.5;
