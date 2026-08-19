@@ -1,0 +1,6 @@
+*.cbf
+*.cbf.gz
+results/
+generated/
+pilot_reproduction/
+table5_solver_results/

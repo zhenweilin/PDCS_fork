@@ -1,0 +1,6 @@
+raw/
+results/
+instances/
+*.cbf
+*.cbf.gz
+*.log
