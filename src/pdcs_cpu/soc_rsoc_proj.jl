@@ -191,7 +191,8 @@ function oracle_soc_h(xi, x, D_scaled_part_mul_x_part, D_scaled_squared_part, te
     left = norm(temp_part)^2
     right = (x[1] / (1 - 2 * xi))^2
     f = left - right
-    temp_part ./= sqrt.(2 * xi .+ D_scaled_squared_part)
+    temp_part .*= sqrt.(D_scaled_squared_part ./
+                       (1 .+ 2 * xi .* D_scaled_squared_part))
     right /= (1 - 2 * xi)
     h = -4 * (norm(temp_part)^2 + right)
     return f, h

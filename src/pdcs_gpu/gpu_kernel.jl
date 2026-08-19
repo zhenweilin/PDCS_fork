@@ -57,8 +57,11 @@ mutable struct ProjectionWorkCount
     gradient_evaluations::Int64
     interval_expansion_iterations::Int64
     bisection_iterations::Int64
+    bisection_events::Int64
     newton_attempts::Int64
     newton_accepts::Int64
+    newton_attempt_events::Int64
+    newton_accept_events::Int64
     warm_start_attempts::Int64
     warm_start_accepts::Int64
     max_iter_reached::Int64
@@ -200,7 +203,9 @@ function _accumulate_projection_work!(
             cone === nothing && continue
             key = (cone, cone_sizes[i], _projection_profile_is_diagonal(code))
             work = get!(_projection_work_profile_counts, key) do
-                ProjectionWorkCount(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                ProjectionWorkCount(
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                )
             end
             record = records[i]
             work.projection_events += 1
@@ -210,8 +215,11 @@ function _accumulate_projection_work!(
             work.interval_expansion_iterations +=
                 record.interval_expansion_iterations
             work.bisection_iterations += record.bisection_iterations
+            work.bisection_events += record.bisection_iterations > 0
             work.newton_attempts += record.newton_attempts
             work.newton_accepts += record.newton_accepts
+            work.newton_attempt_events += record.newton_attempts > 0
+            work.newton_accept_events += record.newton_accepts > 0
             work.warm_start_attempts += record.warm_start_attempted
             work.warm_start_accepts += record.warm_start_accepted
             work.max_iter_reached += record.max_iter_reached
@@ -367,8 +375,17 @@ function projection_work_profile_summary()
                 interval_expansion_iterations =
                     count.interval_expansion_iterations,
                 bisection_iterations = count.bisection_iterations,
+                bisection_events = count.bisection_events,
+                bisection_event_fraction = count.projection_events == 0 ?
+                    0.0 : count.bisection_events / count.projection_events,
                 newton_attempts = count.newton_attempts,
                 newton_accepts = count.newton_accepts,
+                newton_attempt_events = count.newton_attempt_events,
+                newton_accept_events = count.newton_accept_events,
+                newton_attempt_event_fraction = count.projection_events == 0 ?
+                    0.0 : count.newton_attempt_events / count.projection_events,
+                newton_accept_event_fraction = count.projection_events == 0 ?
+                    0.0 : count.newton_accept_events / count.projection_events,
                 warm_start_attempts = count.warm_start_attempts,
                 warm_start_accepts = count.warm_start_accepts,
                 max_iter_reached = count.max_iter_reached,

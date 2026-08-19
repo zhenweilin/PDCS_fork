@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "cuda_runtime.h"
 #include "cublas_v2.h"
 #include <thrust/device_vector.h>
@@ -27,9 +28,99 @@
 // allocating three device scalars on every projection call.
 #define PDCS_ENABLE_GRID_SOC_FASTPATH 1
 #endif
+#ifndef PDCS_PROFILE_GRID_ROOT_SEARCH
+#define PDCS_PROFILE_GRID_ROOT_SEARCH 0
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ROOT
+// Work in the bounded variables from Proposition soc_bisection:
+//   u = 2 lambda                    for t > 0,
+//   u = 1 - (2 lambda)^(-1)         for t < 0.
+// Both roots lie strictly in (0, 1), so the negative branch no longer needs
+// an outward/doubling search to construct a finite lambda bracket.
+#define PDCS_ENABLE_BOUNDED_SOC_ROOT 1
+#endif
+#ifndef PDCS_SOC_BOUNDED_NEWTON_STEPS
+#define PDCS_SOC_BOUNDED_NEWTON_STEPS 8
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#define PDCS_ENABLE_BOUNDED_SOC_ILLINOIS 1
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_HALLEY
+#define PDCS_ENABLE_BOUNDED_SOC_HALLEY 0
+#endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+#define PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT 0
+#endif
+#ifndef PDCS_SOC_LOGIT_STEPS
+#define PDCS_SOC_LOGIT_STEPS 48
+#endif
+#ifndef PDCS_SOC_POST_BRACKET_NEWTON_STEPS
+// The unbounded negative branch cannot safely use Newton until its upper
+// endpoint has been found.  Once that strict bracket exists, fused F/F' costs
+// one vector traversal, so a handful of safeguarded steps is substantially
+// cheaper than dozens of full-vector bisection evaluations.
+#define PDCS_SOC_POST_BRACKET_NEWTON_STEPS 8
+#endif
 #include "soc_root_coordinate.cuh"
+#include "bounded_soc_root_step.cuh"
+#include "bounded_soc_logit_root.cuh"
 
 #include "exp_proj_kernel.cu"
+
+#if PDCS_PROFILE_GRID_ROOT_SEARCH
+struct GridSocProfileCounters {
+  uint64_t projection_events;
+  uint64_t polar_events;
+  uint64_t interior_events;
+  uint64_t root_events;
+  uint64_t positive_root_events;
+  uint64_t negative_root_events;
+  uint64_t warm_start_attempts;
+  uint64_t warm_start_direct_accepts;
+  uint64_t newton_attempts;
+  uint64_t newton_accepts;
+  uint64_t newton_converged_events;
+  uint64_t bisection_events;
+  uint64_t bisection_iterations;
+  uint64_t function_evaluations;
+  uint64_t gradient_evaluations;
+  uint64_t vector_reductions;
+};
+
+static GridSocProfileCounters grid_soc_profile = {};
+
+extern "C" void pdcs_grid_soc_profile_reset() {
+  grid_soc_profile = {};
+}
+
+extern "C" void pdcs_grid_soc_profile_read(uint64_t* output, int length) {
+  const uint64_t values[] = {
+      grid_soc_profile.projection_events,
+      grid_soc_profile.polar_events,
+      grid_soc_profile.interior_events,
+      grid_soc_profile.root_events,
+      grid_soc_profile.positive_root_events,
+      grid_soc_profile.negative_root_events,
+      grid_soc_profile.warm_start_attempts,
+      grid_soc_profile.warm_start_direct_accepts,
+      grid_soc_profile.newton_attempts,
+      grid_soc_profile.newton_accepts,
+      grid_soc_profile.newton_converged_events,
+      grid_soc_profile.bisection_events,
+      grid_soc_profile.bisection_iterations,
+      grid_soc_profile.function_evaluations,
+      grid_soc_profile.gradient_evaluations,
+      grid_soc_profile.vector_reductions,
+  };
+  int count = length < 16 ? length : 16;
+  for (int i = 0; i < count; ++i) output[i] = values[i];
+}
+
+#define GRID_SOC_PROFILE_ADD(field, amount) \
+  do { grid_soc_profile.field += (uint64_t)(amount); } while (0)
+#else
+#define GRID_SOC_PROFILE_ADD(field, amount) do {} while (0)
+#endif
 
 // n is the length of the vector, including the first element
 // len is the length of the vector, not including the first element or the top two elements
@@ -246,7 +337,9 @@ __global__ void oracle_soc_h_scale_kernel(
     double* __restrict__ temp_part, long* __restrict__ len) {
   long j = threadIdx.x + blockIdx.x * blockDim.x;
   if (j < *len) {
-    temp_part[j] /= sqrt(fmax(2.0 * xi + D_scaled_squared_part[j], 1e-16));
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + 2.0 * xi * q;
+    temp_part[j] *= sqrt(fmax(q / denominator, 0.0));
   }
 }
 
@@ -255,7 +348,9 @@ __global__ void oracle_soc_h_scale_value_kernel(
     double* __restrict__ temp_part, long len) {
   long j = threadIdx.x + blockIdx.x * blockDim.x;
   if (j < len) {
-    temp_part[j] /= sqrt(fmax(2.0 * xi + D_scaled_squared_part[j], 1e-16));
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + 2.0 * xi * q;
+    temp_part[j] *= sqrt(fmax(q / denominator, 0.0));
   }
 }
 
@@ -298,12 +393,14 @@ __global__ void oracle_soc_h_reduce_kernel(
   double local_derivative = 0.0;
   for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
        j < len; j += (long)gridDim.x * blockDim.x) {
-    double y = D_scaled_mul_x_part[j] /
-               (1.0 + (2.0 * xi) * D_scaled_squared_part[j]);
+    const double q = D_scaled_squared_part[j];
+    const double denominator = 1.0 + (2.0 * xi) * q;
+    double y = D_scaled_mul_x_part[j] / denominator;
     double y_squared = y * y;
     local_value += y_squared;
-    local_derivative += y_squared /
-        fmax(2.0 * xi + D_scaled_squared_part[j], 1e-16);
+    // If y_j = a_j / (1 + 2 xi q_j), then
+    // d(y_j^2)/d xi = -4 y_j^2 q_j / (1 + 2 xi q_j).
+    local_derivative += y_squared * q / denominator;
   }
   partial_value[threadIdx.x] = local_value;
   partial_derivative[threadIdx.x] = local_derivative;
@@ -319,6 +416,234 @@ __global__ void oracle_soc_h_reduce_kernel(
   if (threadIdx.x == 0) {
     atomicAdd(result, partial_value[0]);
     atomicAdd(result + 1, partial_derivative[0]);
+  }
+}
+
+// The bounded-coordinate equations use a_j = sqrt(c_j) x_j, where
+// c_j = hat(d)_j^(-2).  `D_scaled_mul_x_part` already stores a_j and
+// `D_scaled_squared_part` stores c_j.  The value and derivative variants below
+// therefore need only one traversal/reduction, just like the lambda oracle.
+__global__ void oracle_soc_bounded_u_f_reduce_kernel(
+    double u, bool increasing,
+    const double* __restrict__ D_scaled_mul_x_part,
+    const double* __restrict__ D_scaled_squared_part, long len,
+    double* __restrict__ result) {
+  extern __shared__ double partial[];
+  double local_value = 0.0;
+  for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
+       j < len; j += (long)gridDim.x * blockDim.x) {
+    const double a = D_scaled_mul_x_part[j];
+    const double c = D_scaled_squared_part[j];
+    double ratio;
+    if (increasing) {
+      // t < 0: F_-(u), increasing on (0, 1).
+      ratio = u / (c + 1.0 - u);
+    } else {
+      // t > 0: F_+(u), decreasing on (0, 1).
+      ratio = (1.0 - u) / (1.0 + c * u);
+    }
+    const double value = a * ratio;
+    local_value += value * value;
+  }
+  partial[threadIdx.x] = local_value;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      partial[threadIdx.x] += partial[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) atomicAdd(result, partial[0]);
+}
+
+__global__ void oracle_soc_bounded_u_h_reduce_kernel(
+    double u, bool increasing,
+    const double* __restrict__ D_scaled_mul_x_part,
+    const double* __restrict__ D_scaled_squared_part, long len,
+    double* __restrict__ result) {
+  extern __shared__ double partial[];
+  double* partial_value = partial;
+  double* partial_derivative = partial + blockDim.x;
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
+       j < len; j += (long)gridDim.x * blockDim.x) {
+    const double a = D_scaled_mul_x_part[j];
+    const double a_squared = a * a;
+    const double c = D_scaled_squared_part[j];
+    if (increasing) {
+      const double denominator = c + 1.0 - u;
+      const double denominator_squared = denominator * denominator;
+      local_value += a_squared * u * u / denominator_squared;
+      local_derivative += 2.0 * a_squared * u * (1.0 + c) /
+                          (denominator_squared * denominator);
+    } else {
+      const double one_minus_u = 1.0 - u;
+      const double denominator = 1.0 + c * u;
+      const double denominator_squared = denominator * denominator;
+      local_value += a_squared * one_minus_u * one_minus_u /
+                     denominator_squared;
+      local_derivative -= 2.0 * a_squared * one_minus_u * (1.0 + c) /
+                          (denominator_squared * denominator);
+    }
+  }
+  partial_value[threadIdx.x] = local_value;
+  partial_derivative[threadIdx.x] = local_derivative;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      partial_value[threadIdx.x] += partial_value[threadIdx.x + stride];
+      partial_derivative[threadIdx.x] +=
+          partial_derivative[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    atomicAdd(result, partial_value[0]);
+    atomicAdd(result + 1, partial_derivative[0]);
+  }
+}
+
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+__global__ void oracle_soc_bounded_u_h2_reduce_kernel(
+    double u, bool increasing,
+    const double* __restrict__ D_scaled_mul_x_part,
+    const double* __restrict__ D_scaled_squared_part, long len,
+    double* __restrict__ result) {
+  extern __shared__ double partial[];
+  double* partial_value = partial;
+  double* partial_derivative = partial + blockDim.x;
+  double* partial_second = partial + 2 * blockDim.x;
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  double local_second = 0.0;
+  for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
+       j < len; j += (long)gridDim.x * blockDim.x) {
+    const double a = D_scaled_mul_x_part[j];
+    const double a_squared = a * a;
+    const double c = D_scaled_squared_part[j];
+    const double q = 1.0 + c;
+    if (increasing) {
+      const double denominator = q - u;
+      const double denominator_squared = denominator * denominator;
+      const double denominator_fourth = denominator_squared * denominator_squared;
+      local_value += a_squared * u * u / denominator_squared;
+      local_derivative += 2.0 * a_squared * u * q /
+                          (denominator_squared * denominator);
+      local_second += 2.0 * a_squared * q * (q + 2.0 * u) /
+                      denominator_fourth;
+    } else {
+      const double one_minus_u = 1.0 - u;
+      const double denominator = 1.0 + c * u;
+      const double denominator_squared = denominator * denominator;
+      const double denominator_fourth = denominator_squared * denominator_squared;
+      local_value += a_squared * one_minus_u * one_minus_u /
+                     denominator_squared;
+      local_derivative -= 2.0 * a_squared * one_minus_u * q /
+                          (denominator_squared * denominator);
+      local_second += 2.0 * a_squared * q *
+                      (1.0 + 3.0 * c - 2.0 * c * u) /
+                      denominator_fourth;
+    }
+  }
+  partial_value[threadIdx.x] = local_value;
+  partial_derivative[threadIdx.x] = local_derivative;
+  partial_second[threadIdx.x] = local_second;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      partial_value[threadIdx.x] += partial_value[threadIdx.x + stride];
+      partial_derivative[threadIdx.x] +=
+          partial_derivative[threadIdx.x + stride];
+      partial_second[threadIdx.x] += partial_second[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    atomicAdd(result, partial_value[0]);
+    atomicAdd(result + 1, partial_derivative[0]);
+    atomicAdd(result + 2, partial_second[0]);
+  }
+}
+#endif
+#endif
+
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+__global__ void oracle_soc_logit_z_f_reduce_kernel(
+    double z, bool negative_branch,
+    const double* __restrict__ D_scaled_mul_x_part,
+    const double* __restrict__ D_scaled_squared_part, long len,
+    double* __restrict__ result) {
+  extern __shared__ double partial[];
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  double local_value = 0.0;
+  for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
+       j < len; j += (long)gridDim.x * blockDim.x) {
+    double value;
+    double derivative;
+    double second;
+    pdcs_soc_logit_term(
+        D_scaled_mul_x_part[j], D_scaled_squared_part[j], s, v,
+        negative_branch, &value, &derivative, &second);
+    local_value += value;
+  }
+  partial[threadIdx.x] = local_value;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      partial[threadIdx.x] += partial[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) atomicAdd(result, partial[0]);
+}
+
+__global__ void oracle_soc_logit_z_h2_reduce_kernel(
+    double z, bool negative_branch,
+    const double* __restrict__ D_scaled_mul_x_part,
+    const double* __restrict__ D_scaled_squared_part, long len,
+    double* __restrict__ result) {
+  extern __shared__ double partial[];
+  double* partial_value = partial;
+  double* partial_derivative = partial + blockDim.x;
+  double* partial_second = partial + 2 * blockDim.x;
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  double local_second = 0.0;
+  for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
+       j < len; j += (long)gridDim.x * blockDim.x) {
+    double value;
+    double derivative;
+    double second;
+    pdcs_soc_logit_term(
+        D_scaled_mul_x_part[j], D_scaled_squared_part[j], s, v,
+        negative_branch, &value, &derivative, &second);
+    local_value += value;
+    local_derivative += derivative;
+    local_second += second;
+  }
+  partial_value[threadIdx.x] = local_value;
+  partial_derivative[threadIdx.x] = local_derivative;
+  partial_second[threadIdx.x] = local_second;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      partial_value[threadIdx.x] += partial_value[threadIdx.x + stride];
+      partial_derivative[threadIdx.x] +=
+          partial_derivative[threadIdx.x + stride];
+      partial_second[threadIdx.x] += partial_second[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    atomicAdd(result, partial_value[0]);
+    atomicAdd(result + 1, partial_derivative[0]);
+    atomicAdd(result + 2, partial_second[0]);
   }
 }
 #endif
@@ -380,6 +705,8 @@ static double oracle_soc_f_host(
     double* D_scaled_squared_part, double* temp_part,
     long* len_cpu, long* len_gpu, int nThread, int nBlock,
     double* oracle_gpu) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
 #if PDCS_ENABLE_FUSED_SOC_ORACLE
   cudaMemset(oracle_gpu, 0, sizeof(double));
   oracle_soc_f_reduce_kernel<<<nBlock, nThread,
@@ -404,6 +731,13 @@ static void oracle_soc_h_host(
     double* D_scaled_squared_part, double* temp_part,
     long* len_cpu, long* len_gpu, int nThread, int nBlock,
     double* oracle_gpu, double* f, double* h) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(gradient_evaluations, 1);
+#if PDCS_ENABLE_FUSED_SOC_ORACLE
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+#else
+  GRID_SOC_PROFILE_ADD(vector_reductions, 2);
+#endif
 #if PDCS_ENABLE_FUSED_SOC_ORACLE
   cudaMemset(oracle_gpu, 0, 2 * sizeof(double));
   oracle_soc_h_reduce_kernel<<<nBlock, nThread,
@@ -433,6 +767,387 @@ static void oracle_soc_h_host(
   *f = norm1 * norm1 - right;
   *h = -4.0 * (norm2 * norm2 + right / denominator);
 #endif
+}
+
+static double oracle_soc_bounded_u_f_host(
+    double u, double sol0, bool increasing,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+  cudaMemset(oracle_gpu, 0, sizeof(double));
+  oracle_soc_bounded_u_f_reduce_kernel<<<nBlock, nThread,
+      nThread * sizeof(double)>>>(
+      u, increasing, D_scaled_mul_x_part, D_scaled_squared_part, len,
+      oracle_gpu);
+  double value_sum;
+  cudaMemcpy(&value_sum, oracle_gpu, sizeof(double), cudaMemcpyDeviceToHost);
+  return value_sum - sol0 * sol0;
+}
+
+static void oracle_soc_bounded_u_h_host(
+    double u, double sol0, bool increasing,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu,
+    double* f, double* h) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(gradient_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+  cudaMemset(oracle_gpu, 0, 2 * sizeof(double));
+  oracle_soc_bounded_u_h_reduce_kernel<<<nBlock, nThread,
+      2 * nThread * sizeof(double)>>>(
+      u, increasing, D_scaled_mul_x_part, D_scaled_squared_part, len,
+      oracle_gpu);
+  double sums[2];
+  cudaMemcpy(sums, oracle_gpu, 2 * sizeof(double), cudaMemcpyDeviceToHost);
+  *f = sums[0] - sol0 * sol0;
+  *h = sums[1];
+}
+
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+static void oracle_soc_bounded_u_h2_host(
+    double u, double sol0, bool increasing,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu,
+    double* f, double* h, double* h2) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(gradient_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+  cudaMemset(oracle_gpu, 0, 3 * sizeof(double));
+  oracle_soc_bounded_u_h2_reduce_kernel<<<nBlock, nThread,
+      3 * nThread * sizeof(double)>>>(
+      u, increasing, D_scaled_mul_x_part, D_scaled_squared_part, len,
+      oracle_gpu);
+  double sums[3];
+  cudaMemcpy(sums, oracle_gpu, 3 * sizeof(double), cudaMemcpyDeviceToHost);
+  *f = sums[0] - sol0 * sol0;
+  *h = sums[1];
+  *h2 = sums[2];
+}
+#endif
+
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+static double oracle_soc_logit_z_f_host(
+    double z, double sol0, bool negative_branch,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+  cudaMemset(oracle_gpu, 0, sizeof(double));
+  oracle_soc_logit_z_f_reduce_kernel<<<nBlock, nThread,
+      nThread * sizeof(double)>>>(
+      z, negative_branch, D_scaled_mul_x_part, D_scaled_squared_part,
+      len, oracle_gpu);
+  double value_sum;
+  cudaMemcpy(&value_sum, oracle_gpu, sizeof(double), cudaMemcpyDeviceToHost);
+  return value_sum - sol0 * sol0;
+}
+
+static void oracle_soc_logit_z_h2_host(
+    double z, double sol0, bool negative_branch,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu,
+    double* f, double* h, double* h2) {
+  GRID_SOC_PROFILE_ADD(function_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(gradient_evaluations, 1);
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
+  cudaMemset(oracle_gpu, 0, 3 * sizeof(double));
+  oracle_soc_logit_z_h2_reduce_kernel<<<nBlock, nThread,
+      3 * nThread * sizeof(double)>>>(
+      z, negative_branch, D_scaled_mul_x_part, D_scaled_squared_part,
+      len, oracle_gpu);
+  double sums[3];
+  cudaMemcpy(sums, oracle_gpu, 3 * sizeof(double), cudaMemcpyDeviceToHost);
+  *f = sums[0] - sol0 * sol0;
+  *h = sums[1];
+  *h2 = sums[2];
+}
+
+static double soc_logit_z_solve_host(
+    double sol0, bool negative_branch, double warm_z,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu,
+    double endpoint_norm, double abs_tol, double rel_tol) {
+  double left = -700.0;
+  double right = 700.0;
+  const double t_squared = sol0 * sol0;
+  double left_f = -t_squared;
+  double right_f = endpoint_norm * endpoint_norm - t_squared;
+  const bool valid_warm =
+      isfinite(warm_z) && warm_z > left && warm_z < right;
+  double z = valid_warm ? warm_z : 0.0;
+  if (valid_warm) GRID_SOC_PROFILE_ADD(warm_start_attempts, 1);
+
+  double f;
+  double h;
+  double h2;
+  oracle_soc_logit_z_h2_host(
+      z, sol0, negative_branch, D_scaled_mul_x_part,
+      D_scaled_squared_part, len, nThread, nBlock, oracle_gpu,
+      &f, &h, &h2);
+  if (valid_warm && pdcs_soc_logit_converged(
+          f, h, z, left, right, sol0, abs_tol, rel_tol)) {
+    GRID_SOC_PROFILE_ADD(warm_start_direct_accepts, 1);
+    return z;
+  }
+  if (f > 0.0) {
+    right = z;
+    right_f = f;
+  } else {
+    left = z;
+    left_f = f;
+  }
+
+  for (int iter = 0;
+       iter < PDCS_SOC_LOGIT_STEPS && PDCS_ENABLE_SAFEGUARDED_NEWTON;
+       ++iter) {
+    if (pdcs_soc_logit_converged(
+            f, h, z, left, right, sol0, abs_tol, rel_tol)) {
+      GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
+      return z;
+    }
+    double candidate;
+    if (!pdcs_soc_logit_candidate(
+            z, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+    GRID_SOC_PROFILE_ADD(newton_attempts, 1);
+    double candidate_f;
+    double candidate_h;
+    double candidate_h2;
+    oracle_soc_logit_z_h2_host(
+        candidate, sol0, negative_branch, D_scaled_mul_x_part,
+        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu,
+        &candidate_f, &candidate_h, &candidate_h2);
+    if (candidate_f > 0.0) {
+      right = candidate;
+      right_f = candidate_f;
+    } else {
+      left = candidate;
+      left_f = candidate_f;
+    }
+    if (!isfinite(candidate_f)) break;
+    GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+    z = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    h2 = candidate_h2;
+  }
+  if (pdcs_soc_logit_converged(
+          f, h, z, left, right, sol0, abs_tol, rel_tol)) {
+    GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
+    return z;
+  }
+
+  bool used_fallback = false;
+  int last_updated_side = 0;
+  for (int iter = 0; iter < 256 && right - left > rel_tol; ++iter) {
+    used_fallback = true;
+    GRID_SOC_PROFILE_ADD(bisection_iterations, 1);
+    const double denominator = right_f - left_f;
+    double candidate = left - left_f * (right - left) / denominator;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * (right - left));
+    if (!isfinite(candidate) || !isfinite(denominator) ||
+        fabs(denominator) <= 1e-300 || candidate <= left + guard ||
+        candidate >= right - guard) {
+      candidate = 0.5 * (left + right);
+      last_updated_side = 0;
+    }
+    f = oracle_soc_logit_z_f_host(
+        candidate, sol0, negative_branch, D_scaled_mul_x_part,
+        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu);
+    z = candidate;
+    if (!isfinite(f) || f == 0.0) break;
+    if (f > 0.0) {
+      right = candidate;
+      right_f = f;
+      if (last_updated_side == 1) left_f *= 0.5;
+      last_updated_side = 1;
+    } else {
+      left = candidate;
+      left_f = f;
+      if (last_updated_side == -1) right_f *= 0.5;
+      last_updated_side = -1;
+    }
+  }
+  if (used_fallback) GRID_SOC_PROFILE_ADD(bisection_events, 1);
+  if (f != 0.0) z = 0.5 * (left + right);
+  return fmin(fmax(z, -700.0), 700.0);
+}
+#endif
+
+static __forceinline__ bool soc_bounded_u_residual_converged(
+    double f, double sol0, double abs_tol) {
+  // F is a difference of squared norms.  Scale the absolute threshold by the
+  // squared right-hand side so the test remains meaningful after the cone's
+  // homogeneous 1e3 numerical scaling.
+  return fabs(f) <= abs_tol * (1.0 + sol0 * sol0);
+}
+
+static double soc_bounded_u_solve_host(
+    double sol0, bool increasing, double warm_u,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    long len, int nThread, int nBlock, double* oracle_gpu,
+    double endpoint_norm, double abs_tol, double rel_tol) {
+  double left = 0.0;
+  double right = 1.0;
+  const double t_squared = sol0 * sol0;
+  const double endpoint_f = endpoint_norm * endpoint_norm - t_squared;
+  // Strict endpoint signs are supplied by the failed primal/polar tests.
+  double left_f = increasing ? -t_squared : endpoint_f;
+  double right_f = increasing ? endpoint_f : -t_squared;
+  const bool valid_warm = isfinite(warm_u) && warm_u > left && warm_u < right;
+  double u = valid_warm ? warm_u : 0.5;
+  if (valid_warm) GRID_SOC_PROFILE_ADD(warm_start_attempts, 1);
+
+  double f;
+  double h;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+  double h2;
+  oracle_soc_bounded_u_h2_host(
+      u, sol0, increasing, D_scaled_mul_x_part, D_scaled_squared_part,
+      len, nThread, nBlock, oracle_gpu, &f, &h, &h2);
+#else
+  oracle_soc_bounded_u_h_host(
+      u, sol0, increasing, D_scaled_mul_x_part, D_scaled_squared_part,
+      len, nThread, nBlock, oracle_gpu, &f, &h);
+#endif
+  if (valid_warm && soc_bounded_u_residual_converged(f, sol0, abs_tol)) {
+    GRID_SOC_PROFILE_ADD(warm_start_direct_accepts, 1);
+    return u;
+  }
+  if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+    right = u;
+    right_f = f;
+  } else {
+    left = u;
+    left_f = f;
+  }
+
+  bool newton_converged = false;
+  for (int iter = 0;
+       iter < PDCS_SOC_BOUNDED_NEWTON_STEPS &&
+       PDCS_ENABLE_SAFEGUARDED_NEWTON;
+       ++iter) {
+    if (soc_bounded_u_residual_converged(f, sol0, abs_tol) ||
+        right - left <= rel_tol) {
+      newton_converged = true;
+      break;
+    }
+    double candidate;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    if (!pdcs_bounded_soc_candidate(
+            u, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+#else
+    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
+    candidate = u - f / h;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-8 * (right - left));
+    if (!isfinite(candidate) || candidate <= left + guard ||
+        candidate >= right - guard) break;
+#endif
+
+    GRID_SOC_PROFILE_ADD(newton_attempts, 1);
+#if !PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    const double old_abs_f = fabs(f);
+#endif
+    double candidate_f;
+    double candidate_h;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    double candidate_h2;
+    oracle_soc_bounded_u_h2_host(
+        candidate, sol0, increasing, D_scaled_mul_x_part,
+        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu,
+        &candidate_f, &candidate_h, &candidate_h2);
+#else
+    oracle_soc_bounded_u_h_host(
+        candidate, sol0, increasing, D_scaled_mul_x_part,
+        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu,
+        &candidate_f, &candidate_h);
+#endif
+    if ((increasing && candidate_f > 0.0) ||
+        (!increasing && candidate_f < 0.0)) {
+      right = candidate;
+      right_f = candidate_f;
+    } else {
+      left = candidate;
+      left_f = candidate_f;
+    }
+    if (!isfinite(candidate_f)) break;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    if (soc_bounded_u_residual_converged(candidate_f, sol0, abs_tol)) {
+      GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+      u = candidate;
+      f = candidate_f;
+      newton_converged = true;
+      break;
+    }
+    // The candidate is bracket-safe, so retain it even if roundoff prevents
+    // a strict residual decrease.  Returning is still controlled only by the
+    // residual or bracket width.
+#else
+    if (fabs(candidate_f) >= old_abs_f) break;
+#endif
+    GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+    u = candidate;
+    f = candidate_f;
+    h = candidate_h;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    h2 = candidate_h2;
+#endif
+  }
+  if (newton_converged ||
+      soc_bounded_u_residual_converged(f, sol0, abs_tol) ||
+      right - left <= rel_tol) {
+    GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
+    return u;
+  }
+
+  // Illinois regula falsi uses only F, so each fallback point costs the same
+  // single vector reduction as bisection while exploiting the endpoint
+  // magnitudes.  If interpolation becomes unsafe, the point is replaced by
+  // the arithmetic midpoint and the strict bracket is preserved.
+  bool used_fallback = false;
+  int last_updated_side = 0;  // -1: left, +1: right.
+  for (int iter = 0; iter < 128 && right - left > rel_tol; ++iter) {
+    used_fallback = true;
+    GRID_SOC_PROFILE_ADD(bisection_iterations, 1);
+    const double denominator = right_f - left_f;
+    double candidate = left - left_f * (right - left) / denominator;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * (right - left));
+    if (!isfinite(candidate) || !isfinite(denominator) ||
+        fabs(denominator) <= 1e-300 || candidate <= left + guard ||
+        candidate >= right - guard) {
+      candidate = 0.5 * (left + right);
+      last_updated_side = 0;
+    }
+    f = oracle_soc_bounded_u_f_host(
+        candidate, sol0, increasing, D_scaled_mul_x_part,
+        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu);
+    u = candidate;
+    if (!isfinite(f) ||
+        soc_bounded_u_residual_converged(f, sol0, abs_tol)) break;
+
+    const bool update_right =
+        (increasing && f > 0.0) || (!increasing && f < 0.0);
+    if (update_right) {
+      right = candidate;
+      right_f = f;
+      if (last_updated_side == 1) left_f *= 0.5;
+      last_updated_side = 1;
+    } else {
+      left = candidate;
+      left_f = f;
+      if (last_updated_side == -1) right_f *= 0.5;
+      last_updated_side = -1;
+    }
+  }
+  if (used_fallback) GRID_SOC_PROFILE_ADD(bisection_events, 1);
+  if (!isfinite(f) || !soc_bounded_u_residual_converged(f, sol0, abs_tol)) {
+    u = 0.5 * (left + right);
+  }
+  return fmin(fmax(u, 64.0 * 2.220446049250313e-16),
+              1.0 - 64.0 * 2.220446049250313e-16);
 }
 
 static bool soc_safeguarded_candidate_host(
@@ -474,6 +1189,94 @@ static bool soc_safeguarded_candidate_host(
          candidate_u > u_left + u_guard &&
          candidate_u < u_right - u_guard &&
          *candidate > left && *candidate < right;
+#endif
+}
+
+static bool soc_post_bracket_newton_host(
+    cublasHandle_t handle, double sol0, double* xi_gpu,
+    double* D_scaled_mul_x_part, double* D_scaled_squared_part,
+    double* temp_part, long* len_cpu, long* len_gpu, int nThread,
+    int nBlock, double* oracle_gpu, bool increasing, double* left,
+    double* right, double* xi, double abs_tol, double rel_tol) {
+#if !PDCS_ENABLE_SAFEGUARDED_NEWTON || PDCS_SOC_POST_BRACKET_NEWTON_STEPS <= 0
+  return false;
+#else
+  if (!isfinite(*left) || !isfinite(*right) || !(*left < *right)) {
+    return false;
+  }
+
+  double x = pdcs_soc_bisection_midpoint(
+      *left, *right, increasing, rel_tol);
+  double f;
+  double h;
+  oracle_soc_h_host(handle, x, sol0, xi_gpu, D_scaled_mul_x_part,
+      D_scaled_squared_part, temp_part, len_cpu, len_gpu, nThread,
+      nBlock, oracle_gpu, &f, &h);
+
+  for (int iter = 0; iter < PDCS_SOC_POST_BRACKET_NEWTON_STEPS; ++iter) {
+    if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+      *right = x;
+    } else {
+      *left = x;
+    }
+    double normalized_width = (*right - *left) /
+                              (1.0 + *right + *left);
+    if (fabs(f) <= abs_tol * abs_tol || normalized_width <= rel_tol) {
+      *xi = x;
+      return true;
+    }
+
+    double candidate;
+    if (!soc_safeguarded_candidate_host(
+            x, f, h, *left, *right, increasing, rel_tol, &candidate)) {
+      break;
+    }
+    GRID_SOC_PROFILE_ADD(newton_attempts, 1);
+    double candidate_f;
+    double candidate_h;
+    oracle_soc_h_host(handle, candidate, sol0, xi_gpu,
+        D_scaled_mul_x_part, D_scaled_squared_part, temp_part, len_cpu,
+        len_gpu, nThread, nBlock, oracle_gpu, &candidate_f, &candidate_h);
+
+    // Even a rejected Newton point has a valid sign and can tighten the
+    // bracket.  Stop spending derivative work when it does not improve the
+    // residual; the caller then continues with guaranteed bisection.
+    if (fabs(candidate_f) >= fabs(f)) {
+      if ((increasing && candidate_f > 0.0) ||
+          (!increasing && candidate_f < 0.0)) {
+        *right = candidate;
+      } else {
+        *left = candidate;
+      }
+      break;
+    }
+    GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+    double normalized_step = fabs(candidate - x) /
+                             (1.0 + fabs(candidate) + fabs(x));
+    x = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    if (normalized_step <= rel_tol || fabs(f) <= abs_tol * abs_tol) {
+      *xi = x;
+      return true;
+    }
+  }
+
+  // Commit the final accepted point to the bracket.  The old implementation
+  // only did this at the start of the next loop iteration, so its last useful
+  // Newton step was discarded whenever the step budget was exhausted.
+  if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
+    *right = x;
+  } else {
+    *left = x;
+  }
+  double normalized_width = (*right - *left) /
+                            (1.0 + *right + *left);
+  if (fabs(f) <= abs_tol * abs_tol || normalized_width <= rel_tol) {
+    *xi = x;
+    return true;
+  }
+  return false;
 #endif
 }
 
@@ -559,6 +1362,49 @@ __global__ void recover_sol_case01(double* __restrict__ sol, double* __restrict_
   }
 }
 
+__global__ void recover_sol_bounded_u(
+    double* __restrict__ sol, double u, bool increasing,
+    double* __restrict__ D_scaled_squared, long* __restrict__ n) {
+  long j = threadIdx.x + blockIdx.x * blockDim.x;
+  if (j == 0) {
+    if (increasing) {
+      // t < 0 and u = 1 - (2 lambda)^(-1).
+      sol[0] = -sol[0] * (1.0 - u) / u * minVal;
+    } else {
+      // t > 0 and u = 2 lambda.
+      sol[0] = sol[0] / (1.0 - u) * minVal;
+    }
+  }
+  if (j > 0 && j < *n) {
+    const double c = D_scaled_squared[j];
+    if (increasing) {
+      sol[j] = sol[j] * (1.0 - u) / (c + 1.0 - u) * minVal;
+    } else {
+      sol[j] = sol[j] / (1.0 + c * u) * minVal;
+    }
+  }
+}
+
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+__global__ void recover_sol_logit_z(
+    double* __restrict__ sol, double z, bool negative_branch,
+    double* __restrict__ D_scaled_squared, long* __restrict__ n) {
+  long j = threadIdx.x + blockIdx.x * blockDim.x;
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  if (j == 0) {
+    sol[0] = negative_branch ? -sol[0] * v / s * minVal
+                             : sol[0] / s * minVal;
+  }
+  if (j > 0 && j < *n) {
+    const double c = D_scaled_squared[j];
+    sol[j] = negative_branch ? sol[j] * v / (c + v) * minVal
+                             : sol[j] / (1.0 + c * v) * minVal;
+  }
+}
+#endif
+
 __global__ void binary_search_case0(double* __restrict__ xiLeft_gpu, double* __restrict__ xiRight_gpu,  double* __restrict__ oracleVal_gpu, double *t_warm_start_gpu, bool* __restrict__ d_auxiliary_flag, bool* __restrict__ d_return_flag, double abs_tol, double rel_tol) {
   if (*d_auxiliary_flag){
     *xiRight_gpu = *t_warm_start_gpu;
@@ -623,6 +1469,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
                                  bool* d_auxiliary_flag,
                                  double abs_tol,
                                  double rel_tol) {
+  GRID_SOC_PROFILE_ADD(projection_events, 1);
   // This is deliberately a cuBLAS implementation: Dnrm2 performs the
   // large-vector reductions while small kernels only evaluate/recover the
   // scalar root.  The temporary root bounds must not alias D_scaled[0] or
@@ -654,6 +1501,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
 
   // Test the polar cone with ||x ./ D|| and feasibility with ||D .* x||.
 #if PDCS_ENABLE_FUSED_SOC_INITIAL_TESTS
+  GRID_SOC_PROFILE_ADD(vector_reductions, 1);
   cudaMemset(oracle, 0, 2 * sizeof(double));
   int warp_count = (nThread + 31) / 32;
   soc_initial_norm_pair_kernel<<<nBlock, nThread,
@@ -674,6 +1522,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   cudaMemcpy(&polar_norm, oracle, sizeof(double), cudaMemcpyDeviceToHost);
 #endif
   if (polar_norm <= -sol0 && sol0 <= 0.0) {
+    GRID_SOC_PROFILE_ADD(polar_events, 1);
     cudaMemset(sol_gpu, 0, *n_cpu * sizeof(double));
     return;
   }
@@ -695,6 +1544,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   cudaMemcpy(&weighted_norm, oracle, sizeof(double), cudaMemcpyDeviceToHost);
 #endif
   if (weighted_norm <= sol0) {
+    GRID_SOC_PROFILE_ADD(interior_events, 1);
     const double scale_factor = minVal;
     cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
     cublasDscal_v2(handle, *n_cpu, &scale_factor, sol_gpu, 1);
@@ -717,16 +1567,62 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   double warm_x;
   cudaMemcpy(&warm_x, t_warm_start_gpu, sizeof(double), cudaMemcpyDeviceToHost);
 
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+  if (sol0 >= rel_tol || sol0 <= -rel_tol) {
+    GRID_SOC_PROFILE_ADD(root_events, 1);
+    const bool negative_branch = sol0 < 0.0;
+    if (negative_branch) {
+      GRID_SOC_PROFILE_ADD(negative_root_events, 1);
+    } else {
+      GRID_SOC_PROFILE_ADD(positive_root_events, 1);
+    }
+    const double z = soc_logit_z_solve_host(
+        sol0, negative_branch, warm_x, d_times_x_tail, d_squared_tail,
+        *len_cpu, nThread, nBlock, oracle,
+        negative_branch ? polar_norm : weighted_norm, abs_tol, rel_tol);
+    cudaMemcpy(t_warm_start_gpu, &z, sizeof(double), cudaMemcpyHostToDevice);
+    recover_sol_logit_z<<<nBlock, nThread>>>(
+        sol_gpu, z, negative_branch, D_scaled_squared_gpu, n_gpu);
+    return;
+  }
+#elif PDCS_ENABLE_BOUNDED_SOC_ROOT
+  if (sol0 >= rel_tol || sol0 <= -rel_tol) {
+    GRID_SOC_PROFILE_ADD(root_events, 1);
+    const bool increasing = sol0 < 0.0;
+    if (increasing) {
+      GRID_SOC_PROFILE_ADD(negative_root_events, 1);
+    } else {
+      GRID_SOC_PROFILE_ADD(positive_root_events, 1);
+    }
+    const double u = soc_bounded_u_solve_host(
+        sol0, increasing, warm_x, d_times_x_tail, d_squared_tail,
+        *len_cpu, nThread, nBlock, oracle,
+        increasing ? polar_norm : weighted_norm, abs_tol, rel_tol);
+    cudaMemcpy(t_warm_start_gpu, &u, sizeof(double), cudaMemcpyHostToDevice);
+    recover_sol_bounded_u<<<nBlock, nThread>>>(
+        sol_gpu, u, increasing, D_scaled_squared_gpu, n_gpu);
+    return;
+  }
+#endif
+
   if (sol0 >= rel_tol) {
+    GRID_SOC_PROFILE_ADD(root_events, 1);
+    GRID_SOC_PROFILE_ADD(positive_root_events, 1);
     double left = 0.0;
     double right = 0.5;
     double f = 1.0;
     if (warm_x > left && warm_x < right) {
+      GRID_SOC_PROFILE_ADD(warm_start_attempts, 1);
       double h;
       oracle_soc_h_host(handle, warm_x, sol0, t_warm_start_gpu,
           d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
           nThread, nBlock, oracle, &f, &h);
+      bool warm_direct = fabs(f) <= abs_tol * abs_tol;
+      if (warm_direct) {
+        GRID_SOC_PROFILE_ADD(warm_start_direct_accepts, 1);
+      }
       double x = warm_x;
+      int accepted_newton_steps = 0;
       for (int iter = 0;
            iter < PDCS_SOC_NEWTON_STEPS && PDCS_ENABLE_SAFEGUARDED_NEWTON;
            ++iter) {
@@ -739,6 +1635,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
         double candidate;
         if (!soc_safeguarded_candidate_host(
                 x, f, h, left, right, false, rel_tol, &candidate)) break;
+        GRID_SOC_PROFILE_ADD(newton_attempts, 1);
         double old_abs_f = fabs(f);
         x = candidate;
         oracle_soc_h_host(handle, x, sol0, t_warm_start_gpu,
@@ -748,30 +1645,58 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
           if (f < 0.0) right = x; else left = x;
           break;
         }
+        GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+        ++accepted_newton_steps;
+      }
+      if (!warm_direct && accepted_newton_steps > 0 && left == right) {
+        GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
       }
     }
     if (left != right) f = 1.0;
     double xi = 0.5 * (left + right);
+    bool newton_converged = soc_post_bracket_newton_host(
+        handle, sol0, t_warm_start_gpu, d_times_x_tail, d_squared_tail,
+        work_tail, len_cpu, len_gpu, nThread, nBlock, oracle, false,
+        &left, &right, &xi, abs_tol, rel_tol);
+    if (newton_converged) {
+      GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
+      f = 0.0;
+    } else {
+      xi = 0.5 * (left + right);
+      f = 1.0;
+    }
+    bool used_bisection = false;
     while ((right - left) / (1.0 + right + left) > rel_tol &&
            fabs(f) > abs_tol) {
+      used_bisection = true;
+      GRID_SOC_PROFILE_ADD(bisection_iterations, 1);
       xi = pdcs_soc_bisection_midpoint(left, right, false, rel_tol);
       f = oracle_soc_f_host(handle, xi, sol0, t_warm_start_gpu,
           d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
           nThread, nBlock, oracle);
       if (f < 0.0) right = xi; else left = xi;
     }
+    if (used_bisection) GRID_SOC_PROFILE_ADD(bisection_events, 1);
     cudaMemcpy(t_warm_start_gpu, &xi, sizeof(double), cudaMemcpyHostToDevice);
     recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu,
                                               D_scaled_squared_gpu, n_gpu);
   } else if (sol0 <= -rel_tol) {
+    GRID_SOC_PROFILE_ADD(root_events, 1);
+    GRID_SOC_PROFILE_ADD(negative_root_events, 1);
     double left = 0.5, right = 1.0;
     double f = 1.0;
     if (warm_x > left) {
+      GRID_SOC_PROFILE_ADD(warm_start_attempts, 1);
       double h;
       oracle_soc_h_host(handle, warm_x, sol0, t_warm_start_gpu,
           d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
           nThread, nBlock, oracle, &f, &h);
+      bool warm_direct = fabs(f) <= abs_tol * abs_tol;
+      if (warm_direct) {
+        GRID_SOC_PROFILE_ADD(warm_start_direct_accepts, 1);
+      }
       double x = warm_x;
+      int accepted_newton_steps = 0;
       for (int iter = 0;
            iter < PDCS_SOC_NEWTON_STEPS && PDCS_ENABLE_SAFEGUARDED_NEWTON;
            ++iter) {
@@ -784,6 +1709,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
         double candidate;
         if (!soc_safeguarded_candidate_host(
                 x, f, h, left, right, true, rel_tol, &candidate)) break;
+        GRID_SOC_PROFILE_ADD(newton_attempts, 1);
         double old_abs_f = fabs(f);
         x = candidate;
         oracle_soc_h_host(handle, x, sol0, t_warm_start_gpu,
@@ -793,6 +1719,11 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
           if (f > 0.0) right = x; else left = x;
           break;
         }
+        GRID_SOC_PROFILE_ADD(newton_accepts, 1);
+        ++accepted_newton_steps;
+      }
+      if (!warm_direct && accepted_newton_steps > 0 && left == right) {
+        GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
       }
     }
     bool exponent_bracketed = soc_exponent_expansion_bracket_host(
@@ -812,14 +1743,29 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
       }
     }
     double xi = 0.5 * (left + right);
+    bool newton_converged = soc_post_bracket_newton_host(
+        handle, sol0, t_warm_start_gpu, d_times_x_tail, d_squared_tail,
+        work_tail, len_cpu, len_gpu, nThread, nBlock, oracle, true,
+        &left, &right, &xi, abs_tol, rel_tol);
+    if (newton_converged) {
+      GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
+      f = 0.0;
+    } else {
+      xi = 0.5 * (left + right);
+      f = 1.0;
+    }
+    bool used_bisection = false;
     while ((right - left) / (1.0 + right + left) > rel_tol &&
            fabs(f) > abs_tol) {
+      used_bisection = true;
+      GRID_SOC_PROFILE_ADD(bisection_iterations, 1);
       xi = pdcs_soc_bisection_midpoint(left, right, true, rel_tol);
       f = oracle_soc_f_host(handle, xi, sol0, t_warm_start_gpu,
           d_times_x_tail, d_squared_tail, work_tail, len_cpu, len_gpu,
           nThread, nBlock, oracle);
       if (f > 0.0) right = xi; else left = xi;
     }
+    if (used_bisection) GRID_SOC_PROFILE_ADD(bisection_events, 1);
     cudaMemcpy(t_warm_start_gpu, &xi, sizeof(double), cudaMemcpyHostToDevice);
     recover_sol_case01<<<nBlock, nThread>>>(sol_gpu, t_warm_start_gpu,
                                               D_scaled_squared_gpu, n_gpu);
