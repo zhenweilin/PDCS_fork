@@ -40,6 +40,12 @@
 #ifndef PDCS_ENABLE_BOUNDED_SOC_HALLEY
 #define PDCS_ENABLE_BOUNDED_SOC_HALLEY 0
 #endif
+#ifndef PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+#define PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT 0
+#endif
+#ifndef PDCS_SOC_LOGIT_STEPS
+#define PDCS_SOC_LOGIT_STEPS 48
+#endif
 #ifndef PDCS_ENABLE_SHUFFLE_BLOCK_REDUCTION
 #define PDCS_ENABLE_SHUFFLE_BLOCK_REDUCTION 0
 #endif
@@ -65,6 +71,7 @@
 #define PDCS_SOC_NEWTON_STEPS 2
 #endif
 #include "bounded_soc_root_step.cuh"
+#include "bounded_soc_logit_root.cuh"
 // suitable for very much block number
 
 #include "exp_proj.cu"
@@ -165,7 +172,7 @@ __device__ void block_reduce_pair(
 #endif
 }
 
-#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY || PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
 __device__ void block_reduce_triple(
     double value, double derivative, double second,
     long thread_idx, long blk_dim, double *value_sum,
@@ -854,6 +861,204 @@ __device__ void oracle_soc_bounded_u_h2(
 }
 #endif
 
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+__device__ double oracle_soc_logit_z_f(
+    double z, double t, bool negative_branch,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_VV_REDUCTION();
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  double local_value = 0.0;
+  for (long j = *thread_idx; j < *len; j += *blk_dim) {
+    double value;
+    double derivative;
+    double second;
+    pdcs_soc_logit_term(
+        D_scaled_part_mul_x_part[j], D_scaled_squared_part[j], s, v,
+        negative_branch, &value, &derivative, &second);
+    local_value += value;
+  }
+  return block_reduce_sum(local_value, *thread_idx, *blk_dim) - t * t;
+}
+
+__device__ void oracle_soc_logit_z_h2(
+    double z, double t, bool negative_branch,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    double *f, double *h, double *h2,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  PDCS_PROFILE_ORACLE();
+  PDCS_PROFILE_GRADIENT();
+  PDCS_PROFILE_VV_REDUCTION();
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  double local_value = 0.0;
+  double local_derivative = 0.0;
+  double local_second = 0.0;
+  for (long j = *thread_idx; j < *len; j += *blk_dim) {
+    double value;
+    double derivative;
+    double second;
+    pdcs_soc_logit_term(
+        D_scaled_part_mul_x_part[j], D_scaled_squared_part[j], s, v,
+        negative_branch, &value, &derivative, &second);
+    local_value += value;
+    local_derivative += derivative;
+    local_second += second;
+  }
+  double value_sum;
+  double derivative_sum;
+  double second_sum;
+  block_reduce_triple(local_value, local_derivative, local_second,
+                      *thread_idx, *blk_dim, &value_sum,
+                      &derivative_sum, &second_sum);
+  *f = value_sum - t * t;
+  *h = derivative_sum;
+  *h2 = second_sum;
+}
+
+__device__ double soc_logit_z_solve(
+    double t, bool negative_branch, double warm_z,
+    double *D_scaled_part_mul_x_part,
+    double *D_scaled_squared_part, long *len,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim,
+    double endpoint_norm, double abs_tol, double rel_tol) {
+  double left = -700.0;
+  double right = 700.0;
+  const double t_squared = t * t;
+  double left_f = -t_squared;
+  double right_f = endpoint_norm * endpoint_norm - t_squared;
+  const bool valid_warm =
+      isfinite(warm_z) && warm_z > left && warm_z < right;
+  double z = valid_warm ? warm_z : 0.0;
+  if (valid_warm) PDCS_PROFILE_WARM_ATTEMPT();
+
+  double f;
+  double h;
+  double h2;
+  oracle_soc_logit_z_h2(
+      z, t, negative_branch, D_scaled_part_mul_x_part,
+      D_scaled_squared_part, len, &f, &h, &h2, thread_idx, blk_dim);
+  if (valid_warm && pdcs_soc_logit_converged(
+          f, h, z, left, right, t, abs_tol, rel_tol)) {
+    PDCS_PROFILE_WARM_ACCEPT();
+    return z;
+  }
+  if (f > 0.0) {
+    right = z;
+    right_f = f;
+  } else {
+    left = z;
+    left_f = f;
+  }
+
+  for (int iter = 0;
+       iter < PDCS_SOC_LOGIT_STEPS && PDCS_ENABLE_SAFEGUARDED_NEWTON;
+       ++iter) {
+    if (pdcs_soc_logit_converged(
+            f, h, z, left, right, t, abs_tol, rel_tol)) return z;
+    double candidate;
+    if (!pdcs_soc_logit_candidate(
+            z, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+    PDCS_PROFILE_NEWTON_ATTEMPT();
+    double candidate_f;
+    double candidate_h;
+    double candidate_h2;
+    oracle_soc_logit_z_h2(
+        candidate, t, negative_branch, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, &candidate_f, &candidate_h,
+        &candidate_h2, thread_idx, blk_dim);
+    if (candidate_f > 0.0) {
+      right = candidate;
+      right_f = candidate_f;
+    } else {
+      left = candidate;
+      left_f = candidate_f;
+    }
+    if (!isfinite(candidate_f)) break;
+    PDCS_PROFILE_NEWTON_ACCEPT();
+    z = candidate;
+    f = candidate_f;
+    h = candidate_h;
+    h2 = candidate_h2;
+  }
+  if (pdcs_soc_logit_converged(
+          f, h, z, left, right, t, abs_tol, rel_tol)) return z;
+
+  int count = 0;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+  int last_updated_side = 0;
+#endif
+  while (right - left > rel_tol && count <= MAX_ITER) {
+    PDCS_PROFILE_BISECTION();
+    ++count;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+    const double denominator = right_f - left_f;
+    z = left - left_f * (right - left) / denominator;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * (right - left));
+    if (!isfinite(z) || !isfinite(denominator) ||
+        fabs(denominator) <= 1e-300 || z <= left + guard ||
+        z >= right - guard) {
+      z = 0.5 * (left + right);
+      last_updated_side = 0;
+    }
+#else
+    z = 0.5 * (left + right);
+#endif
+    f = oracle_soc_logit_z_f(
+        z, t, negative_branch, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, thread_idx, blk_dim);
+    if (!isfinite(f) || f == 0.0) break;
+    if (f > 0.0) {
+      right = z;
+      right_f = f;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      if (last_updated_side == 1) left_f *= 0.5;
+      last_updated_side = 1;
+#endif
+    } else {
+      left = z;
+      left_f = f;
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+      if (last_updated_side == -1) right_f *= 0.5;
+      last_updated_side = -1;
+#endif
+    }
+  }
+  if (count > MAX_ITER) PDCS_PROFILE_MAX_ITER();
+  if (f != 0.0) z = 0.5 * (left + right);
+  PDCS_PROFILE_RESIDUAL(f);
+  PDCS_PROFILE_BRACKET(left, right);
+  return fmin(fmax(z, -700.0), 700.0);
+}
+
+__device__ void soc_logit_z_recover(
+    double *sol, long *n, double z, bool negative_branch,
+    double minVal, double *t_warm_start, double *D_scaled_squared,
+    long* __restrict__ thread_idx, long* __restrict__ blk_dim) {
+  double s;
+  double v;
+  pdcs_soc_logistic_pair(z, &s, &v);
+  if (*thread_idx == 0) {
+    t_warm_start[0] = z;
+    sol[0] = negative_branch ? -sol[0] * v / s * minVal
+                             : sol[0] / s * minVal;
+  }
+  for (long j = 1 + *thread_idx; j < *n; j += *blk_dim) {
+    const double c = D_scaled_squared[j];
+    sol[j] = negative_branch ? sol[j] * v / (c + v) * minVal
+                             : sol[j] / (1.0 + c * v) * minVal;
+  }
+  __syncthreads();
+}
+#endif
+
 __device__ __forceinline__ bool soc_bounded_u_residual_converged(
     double f, double t, double abs_tol) {
   return fabs(f) <= abs_tol * (1.0 + t * t);
@@ -867,7 +1072,7 @@ __device__ double soc_bounded_u_solve(
     double endpoint_norm, double abs_tol, double rel_tol) {
   double left = 0.0;
   double right = 1.0;
-#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS || PDCS_ENABLE_BOUNDED_SOC_HALLEY
   const double t_squared = t * t;
   const double endpoint_f = endpoint_norm * endpoint_norm - t_squared;
   double left_f = increasing ? -t_squared : endpoint_f;
@@ -879,21 +1084,28 @@ __device__ double soc_bounded_u_solve(
 
   double f;
   double h;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+  double h2;
+  oracle_soc_bounded_u_h2(
+      u, t, increasing, D_scaled_part_mul_x_part,
+      D_scaled_squared_part, len, &f, &h, &h2, thread_idx, blk_dim);
+#else
   oracle_soc_bounded_u_h(
       u, t, increasing, D_scaled_part_mul_x_part,
       D_scaled_squared_part, len, &f, &h, thread_idx, blk_dim);
+#endif
   if (valid_warm && soc_bounded_u_residual_converged(f, t, abs_tol)) {
     PDCS_PROFILE_WARM_ACCEPT();
     return u;
   }
   if ((increasing && f > 0.0) || (!increasing && f < 0.0)) {
     right = u;
-#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS || PDCS_ENABLE_BOUNDED_SOC_HALLEY
     right_f = f;
 #endif
   } else {
     left = u;
-#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS || PDCS_ENABLE_BOUNDED_SOC_HALLEY
     left_f = f;
 #endif
   }
@@ -904,40 +1116,66 @@ __device__ double soc_bounded_u_solve(
        ++iter) {
     if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
         right - left <= rel_tol) return u;
+    double candidate;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    if (!pdcs_bounded_soc_candidate(
+            u, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+#else
     if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
-    const double candidate = u - f / h;
+    candidate = u - f / h;
     const double guard = fmax(64.0 * 2.220446049250313e-16,
                               1e-8 * (right - left));
     if (!isfinite(candidate) || candidate <= left + guard ||
         candidate >= right - guard) break;
+#endif
 
     PDCS_PROFILE_NEWTON_ATTEMPT();
     double candidate_f;
     double candidate_h;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    double candidate_h2;
+    oracle_soc_bounded_u_h2(
+        candidate, t, increasing, D_scaled_part_mul_x_part,
+        D_scaled_squared_part, len, &candidate_f, &candidate_h,
+        &candidate_h2, thread_idx, blk_dim);
+#else
     oracle_soc_bounded_u_h(
         candidate, t, increasing, D_scaled_part_mul_x_part,
         D_scaled_squared_part, len, &candidate_f, &candidate_h,
         thread_idx, blk_dim);
+#endif
     if ((increasing && candidate_f > 0.0) ||
         (!increasing && candidate_f < 0.0)) {
       right = candidate;
-#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS || PDCS_ENABLE_BOUNDED_SOC_HALLEY
       right_f = candidate_f;
 #endif
     } else {
       left = candidate;
-#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS
+#if PDCS_ENABLE_BOUNDED_SOC_ILLINOIS || PDCS_ENABLE_BOUNDED_SOC_HALLEY
       left_f = candidate_f;
 #endif
     }
-    if (!isfinite(candidate_f) || fabs(candidate_f) >= fabs(f)) break;
+    if (!isfinite(candidate_f)) break;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    if (soc_bounded_u_residual_converged(candidate_f, t, abs_tol)) {
+      PDCS_PROFILE_NEWTON_ACCEPT();
+      return candidate;
+    }
+    // The candidate is bracket-safe; do not confuse a small/stagnating
+    // Newton step with convergence near a transformed-coordinate endpoint.
+#else
+    if (fabs(candidate_f) >= fabs(f)) break;
+#endif
     PDCS_PROFILE_NEWTON_ACCEPT();
-    const double step = fabs(candidate - u);
     u = candidate;
     f = candidate_f;
     h = candidate_h;
-    if (step <= rel_tol ||
-        soc_bounded_u_residual_converged(f, t, abs_tol)) return u;
+#if PDCS_ENABLE_BOUNDED_SOC_HALLEY
+    h2 = candidate_h2;
+#endif
+    if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
+        right - left <= rel_tol) return u;
   }
 
   int count = 0;
@@ -1583,7 +1821,20 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     scal_inplace(n, &minVal, sol, thread_idx, blk_dim);
     return;
   }
-#if PDCS_ENABLE_BOUNDED_SOC_ROOT
+#if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
+  if (t > rel_tol || t < -rel_tol) {
+    const bool negative_branch = t < 0.0;
+    PDCS_PROFILE_BRANCH(negative_branch ? 3 : 2);
+    const double z = soc_logit_z_solve(
+        t, negative_branch, t_warm_start_val_test, D_scaled_mul_x_part,
+        D_scaled_squared_part, &len, thread_idx, blk_dim,
+        negative_branch ? polar_norm : weighted_norm, abs_tol, rel_tol);
+    soc_logit_z_recover(
+        sol, n, z, negative_branch, minVal, t_warm_start,
+        D_scaled_squared, thread_idx, blk_dim);
+    return;
+  }
+#elif PDCS_ENABLE_BOUNDED_SOC_ROOT
   if (t > rel_tol || t < -rel_tol) {
     const bool increasing = t < 0.0;
     PDCS_PROFILE_BRANCH(increasing ? 3 : 2);

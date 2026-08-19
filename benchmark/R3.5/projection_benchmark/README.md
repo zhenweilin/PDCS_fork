@@ -1,5 +1,9 @@
 # PDCS projection stress benchmark
 
+The experimental diagonal-SOC logit/Halley root solver and an exact
+cross-machine procedure are documented in
+[`BOUNDED_SOC_LOGIT_REPRODUCE.md`](BOUNDED_SOC_LOGIT_REPRODUCE.md).
+
 This directory is the isolated workspace for selecting and validating the GPU
 projection implementation used by PDCS. The benchmark covers the cone families
 in the requested experiments: SOC, primal exponential, and dual exponential.
