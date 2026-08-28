@@ -633,13 +633,9 @@ __device__ double oracle_soc_logit_z_f(
   pdcs_soc_logistic_pair(z, &s, &v);
   double value_sum = 0.0;
   for (long j = 0; j < *len; ++j) {
-    double value;
-    double derivative;
-    double second;
-    pdcs_soc_logit_term(
+    value_sum += pdcs_soc_logit_term_f(
         D_scaled_part_mul_x_part[j], D_scaled_squared_part[j], s, v,
-        negative_branch, &value, &derivative, &second);
-    value_sum += value;
+        negative_branch);
   }
   return value_sum - t * t;
 }
@@ -685,7 +681,10 @@ __device__ double soc_logit_z_solve(
   double left_f = -t_squared;
   double right_f = endpoint_norm * endpoint_norm - t_squared;
   const bool valid_warm =
-      isfinite(warm_z) && warm_z > left && warm_z < right;
+      isfinite(warm_z) && warm_z > left && warm_z < right &&
+      warm_z != PDCS_SOC_WARM_START_SENTINEL;
+  const bool use_halley =
+      !PDCS_ENABLE_ADAPTIVE_LOGIT_NEWTON || !valid_warm;
   double z = valid_warm ? warm_z : 0.0;
   if (valid_warm) PDCS_PROFILE_WARM_ATTEMPT();
 
@@ -715,7 +714,8 @@ __device__ double soc_logit_z_solve(
             f, h, z, left, right, t, abs_tol, rel_tol)) return z;
     double candidate;
     if (!pdcs_soc_logit_candidate(
-            z, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+            z, f, h, h2, left, right, left_f, right_f, use_halley,
+            &candidate)) break;
     PDCS_PROFILE_NEWTON_ATTEMPT();
     double candidate_f;
     double candidate_h;
@@ -796,11 +796,6 @@ __device__ void soc_logit_z_recover(
 }
 #endif
 
-__device__ __forceinline__ bool soc_bounded_u_residual_converged(
-    double f, double t, double abs_tol) {
-  return fabs(f) <= abs_tol * (1.0 + t * t);
-}
-
 __device__ double soc_bounded_u_solve(
     double t, bool increasing, double warm_u,
     double *D_scaled_part_mul_x_part,
@@ -828,7 +823,8 @@ __device__ double soc_bounded_u_solve(
       u, t, increasing, D_scaled_part_mul_x_part,
       D_scaled_squared_part, len, &f, &h);
 #endif
-  if (valid_warm && soc_bounded_u_residual_converged(f, t, abs_tol)) {
+  if (valid_warm && pdcs_bounded_soc_projection_converged(
+          f, h, u, t, abs_tol, rel_tol)) {
     PDCS_PROFILE_WARM_ACCEPT();
     return u;
   }
@@ -844,8 +840,9 @@ __device__ double soc_bounded_u_solve(
        iter < PDCS_SOC_BOUNDED_NEWTON_STEPS &&
        PDCS_ENABLE_SAFEGUARDED_NEWTON;
        ++iter) {
-    if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
-        right - left <= rel_tol) {
+    if (pdcs_bounded_soc_projection_converged(
+            f, h, u, t, abs_tol, rel_tol) ||
+        pdcs_bounded_soc_bracket_converged(left, right, rel_tol)) {
       return u;
     }
     double candidate;
@@ -853,12 +850,8 @@ __device__ double soc_bounded_u_solve(
     if (!pdcs_bounded_soc_candidate(
             u, f, h, h2, left, right, left_f, right_f, &candidate)) break;
 #else
-    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
-    candidate = u - f / h;
-    const double guard = fmax(64.0 * 2.220446049250313e-16,
-                              1e-8 * (right - left));
-    if (!isfinite(candidate) || candidate <= left + guard ||
-        candidate >= right - guard) break;
+    if (!pdcs_bounded_soc_newton_candidate(
+            u, f, h, left, right, &candidate)) break;
 #endif
 
     PDCS_PROFILE_NEWTON_ATTEMPT();
@@ -885,7 +878,9 @@ __device__ double soc_bounded_u_solve(
     }
     if (!isfinite(candidate_f)) break;
 #if PDCS_ENABLE_BOUNDED_SOC_HALLEY
-    if (soc_bounded_u_residual_converged(candidate_f, t, abs_tol)) {
+    if (pdcs_bounded_soc_projection_converged(
+            candidate_f, candidate_h, candidate, t,
+            abs_tol, rel_tol)) {
       PDCS_PROFILE_NEWTON_ACCEPT();
       return candidate;
     }
@@ -901,29 +896,39 @@ __device__ double soc_bounded_u_solve(
 #if PDCS_ENABLE_BOUNDED_SOC_HALLEY
     h2 = candidate_h2;
 #endif
-    if (soc_bounded_u_residual_converged(f, t, abs_tol) ||
-        right - left <= rel_tol) return u;
+    if (pdcs_bounded_soc_projection_converged(
+            f, h, u, t, abs_tol, rel_tol) ||
+        pdcs_bounded_soc_bracket_converged(left, right, rel_tol)) return u;
   }
 
   int count = 0;
   int last_updated_side = 0;
-  while (right - left > rel_tol && count <= MAX_ITER) {
+  while (!pdcs_bounded_soc_bracket_converged(
+             left, right, rel_tol) && count <= MAX_ITER) {
     PDCS_PROFILE_BISECTION();
     ++count;
     const double denominator = right_f - left_f;
     u = left - left_f * (right - left) / denominator;
-    const double guard = fmax(64.0 * 2.220446049250313e-16,
-                              1e-6 * (right - left));
+    const double guard = fmax(
+        pdcs_bounded_soc_coordinate_resolution(0.5 * (left + right)),
+        1e-6 * (right - left));
     if (!isfinite(u) || !isfinite(denominator) ||
         fabs(denominator) <= 1e-300 || u <= left + guard ||
         u >= right - guard) {
-      u = 0.5 * (left + right);
+      u = pdcs_bounded_soc_bisection_midpoint(left, right);
       last_updated_side = 0;
     }
-    f = oracle_soc_bounded_u_f(
-        u, t, increasing, D_scaled_part_mul_x_part,
-        D_scaled_squared_part, len);
-    if (!isfinite(f) || soc_bounded_u_residual_converged(f, t, abs_tol)) break;
+    if (pdcs_bounded_soc_near_endpoint(u, rel_tol)) {
+      oracle_soc_bounded_u_h(
+          u, t, increasing, D_scaled_part_mul_x_part,
+          D_scaled_squared_part, len, &f, &h);
+    } else {
+      f = oracle_soc_bounded_u_f(
+          u, t, increasing, D_scaled_part_mul_x_part,
+          D_scaled_squared_part, len);
+    }
+    if (!isfinite(f) || pdcs_bounded_soc_projection_converged(
+            f, h, u, t, abs_tol, rel_tol)) break;
     const bool update_right =
         (increasing && f > 0.0) || (!increasing && f < 0.0);
     if (update_right) {
@@ -939,8 +944,9 @@ __device__ double soc_bounded_u_solve(
     }
   }
   if (count > MAX_ITER) PDCS_PROFILE_MAX_ITER();
-  if (!soc_bounded_u_residual_converged(f, t, abs_tol)) {
-    u = 0.5 * (left + right);
+  if (!pdcs_bounded_soc_projection_converged(
+          f, h, u, t, abs_tol, rel_tol)) {
+    u = pdcs_bounded_soc_bisection_midpoint(left, right);
   }
   PDCS_PROFILE_RESIDUAL(f);
   PDCS_PROFILE_BRACKET(left, right);
@@ -1317,7 +1323,9 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
     return;
   }
 #if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
-  if (t > rel_tol || t < -rel_tol) {
+  if (PDCS_ENABLE_THREAD_SOC_LOGIT_ROOT &&
+      *n >= PDCS_SOC_LOGIT_MIN_DIMENSION &&
+      (t > rel_tol || t < -rel_tol)) {
     const bool negative_branch = t < 0.0;
     PDCS_PROFILE_BRANCH(negative_branch ? 3 : 2);
     const double z = soc_logit_z_solve(
@@ -1329,7 +1337,8 @@ __device__ void soc_proj_diagonal(double* __restrict__ sol, long* __restrict__ n
         D_scaled_squared);
     return;
   }
-#elif PDCS_ENABLE_BOUNDED_SOC_ROOT
+#endif
+#if PDCS_ENABLE_BOUNDED_SOC_ROOT
   if (t > rel_tol || t < -rel_tol) {
     const bool increasing = t < 0.0;
     PDCS_PROFILE_BRANCH(increasing ? 3 : 2);

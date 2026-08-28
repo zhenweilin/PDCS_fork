@@ -5,6 +5,37 @@
 #ifndef PDCS_ENABLE_EXP_RECIPROCAL_PAIR
 #define PDCS_ENABLE_EXP_RECIPROCAL_PAIR 0
 #endif
+#ifndef PDCS_ENABLE_STANDARD_EXP_RECIPROCAL_PAIR
+#define PDCS_ENABLE_STANDARD_EXP_RECIPROCAL_PAIR \
+    PDCS_ENABLE_EXP_RECIPROCAL_PAIR
+#endif
+#ifndef PDCS_ENABLE_DIAGONAL_EXP_RECIPROCAL_PAIR
+#define PDCS_ENABLE_DIAGONAL_EXP_RECIPROCAL_PAIR \
+    PDCS_ENABLE_EXP_RECIPROCAL_PAIR
+#endif
+#ifndef PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+// Carry F(left) and F(right) from bracket construction through safeguarded
+// Newton into the fallback search.  The legacy path retained only endpoint
+// positions and recomputed already-known values.
+#define PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES 0
+#endif
+#ifndef PDCS_ENABLE_EXP_REUSE_WARM_ORACLE
+// The projection entry point already tests F at the stored rho.  Compute F'
+// in that same oracle call and let Newton consume both values instead of
+// evaluating the identical point again.
+#define PDCS_ENABLE_EXP_REUSE_WARM_ORACLE 1
+#endif
+#ifndef PDCS_ENABLE_STANDARD_EXP_REUSE_WARM_ORACLE
+#define PDCS_ENABLE_STANDARD_EXP_REUSE_WARM_ORACLE \
+    PDCS_ENABLE_EXP_REUSE_WARM_ORACLE
+#endif
+#ifndef PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE
+#define PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE \
+    PDCS_ENABLE_EXP_REUSE_WARM_ORACLE
+#endif
+#ifndef PDCS_EXP_MAX_ITER
+#define PDCS_EXP_MAX_ITER 100000
+#endif
 #ifndef PDCS_PROFILE_BISECTION
 #define PDCS_PROFILE_BISECTION() ((void)0)
 #define PDCS_PROFILE_EXPANSION() ((void)0)
@@ -25,9 +56,10 @@
 // #define proj_abs_tol_exp 5e-16
 // #define proj_rel_tol_exp 5e-16
 
-__device__ __forceinline__ void pdcs_exp_pair(
+template <bool UseReciprocal>
+__device__ __forceinline__ void pdcs_exp_pair_mode(
     double rho, double *exprho, double *expnegrho) {
-#if PDCS_ENABLE_EXP_RECIPROCAL_PAIR
+  if (UseReciprocal) {
     // Evaluate the non-overflowing side and obtain its reciprocal.  Besides
     // halving transcendental evaluations, choosing by sign preserves the
     // same underflow/overflow behavior at the ends of the double range.
@@ -38,17 +70,61 @@ __device__ __forceinline__ void pdcs_exp_pair(
         *exprho = exp(rho);
         *expnegrho = 1.0 / *exprho;
     }
-#else
+  } else {
     *exprho = exp(rho);
     *expnegrho = exp(-rho);
-#endif
+  }
+}
+
+__device__ __forceinline__ void pdcs_standard_exp_pair(
+    double rho, double *exprho, double *expnegrho) {
+  pdcs_exp_pair_mode<(PDCS_ENABLE_STANDARD_EXP_RECIPROCAL_PAIR != 0)>(
+      rho, exprho, expnegrho);
+}
+
+__device__ __forceinline__ void pdcs_diagonal_exp_pair(
+    double rho, double *exprho, double *expnegrho) {
+  pdcs_exp_pair_mode<(PDCS_ENABLE_DIAGONAL_EXP_RECIPROCAL_PAIR != 0)>(
+      rho, exprho, expnegrho);
+}
+
+template <int CoordinateMode>
+__device__ __forceinline__ double pdcs_exp_bracket_candidate_mode(
+    double left, double right, double left_f, double right_f) {
+    const double width = right - left;
+    const double denominator = right_f - left_f;
+    const double guard = fmax(64.0 * 2.220446049250313e-16,
+                              1e-6 * width);
+    if (isfinite(left_f) && isfinite(right_f) &&
+        left_f <= 0.0 && right_f >= 0.0 &&
+        isfinite(denominator) &&
+        fabs(denominator) > 1e-300) {
+        const double candidate = left - left_f * width / denominator;
+        if (isfinite(candidate) && candidate > left + guard &&
+            candidate < right - guard) {
+            return candidate;
+        }
+    }
+    return pdcs_exp_bisection_midpoint_mode<CoordinateMode>(left, right);
+}
+
+__device__ __forceinline__ double pdcs_standard_exp_bracket_candidate(
+    double left, double right, double left_f, double right_f) {
+  return pdcs_exp_bracket_candidate_mode<PDCS_STANDARD_EXP_COORDINATE_MODE>(
+      left, right, left_f, right_f);
+}
+
+__device__ __forceinline__ double pdcs_diagonal_exp_bracket_candidate(
+    double left, double right, double left_f, double right_f) {
+  return pdcs_exp_bracket_candidate_mode<PDCS_DIAGONAL_EXP_COORDINATE_MODE>(
+      left, right, left_f, right_f);
 }
 
 __device__ void oracle_h(double *r, double *s, double *t, double *rho, double *f, double *df){
     PDCS_PROFILE_ORACLE();
     PDCS_PROFILE_GRADIENT();
     double exprho, expnegrho;
-    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    pdcs_standard_exp_pair(rho[0], &exprho, &expnegrho);
     f[0]  = ((rho[0]-1) * r[0] + s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
     df[0] =     (rho[0]*r[0]+s[0])*exprho + (r[0]-(rho[0]-1)*s[0])*expnegrho -       (2*rho[0]-1)*t[0];
 }
@@ -57,7 +133,7 @@ __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, d
     PDCS_PROFILE_ORACLE();
     PDCS_PROFILE_GRADIENT();
     double exprho, expnegrho;
-    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    pdcs_diagonal_exp_pair(rho[0], &exprho, &expnegrho);
     double dtexprho = dt[0] * exprho;
     double dt_inv_expnegrho = expnegrho / dt[0];
     double rho_minus_one = rho[0] - 1;
@@ -70,7 +146,7 @@ __device__ void oracle_h_diagonal(double *r, double *s, double *t, double *dr, d
 __device__ void oracle_f(double *r, double *s, double *t, double *rho, double *f){
     PDCS_PROFILE_ORACLE();
     double exprho, expnegrho;
-    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    pdcs_standard_exp_pair(rho[0], &exprho, &expnegrho);
     f[0]  = ((rho[0]-1)*r[0]+s[0])*exprho -     (r[0]-rho[0]*s[0])*expnegrho - (rho[0]*(rho[0]-1)+1)*t[0];
 }
 
@@ -78,7 +154,7 @@ __device__ void oracle_f_diagonal(double *r, double *s, double *t, double *dr, d
     PDCS_PROFILE_ORACLE();
     // printf("cuda enter oracle_f_diagonal rho: %.20e\n", rho[0]);
     double exprho, expnegrho;
-    pdcs_exp_pair(rho[0], &exprho, &expnegrho);
+    pdcs_diagonal_exp_pair(rho[0], &exprho, &expnegrho);
     double dtexprho = dt[0] * exprho;
     // printf("cuda dtexprho: %.20e\n", dtexprho);
     double dt_inv_expnegrho = expnegrho / dt[0];
@@ -255,12 +331,17 @@ __device__ void domega_diagonal(double *rho, double *val, double *dr_inv, double
     val[0] /= dt[0];
 }
 
-__device__ void rho_bound(double *r0, double *s0, double *t0, double *pdist, double *ddist, double *low, double *upr) {
+__device__ void rho_bound(double *r0, double *s0, double *t0,
+                          double *pdist, double *ddist,
+                          double *low, double *upr,
+                          double *low_f, double *upr_f) {
     // Fix variable declarations - separate each variable
     double baselow = negative_inf;
     double baseupr = positive_inf;
     *low = negative_inf;
     *upr = positive_inf;
+    *low_f = CUDART_NAN;
+    *upr_f = CUDART_NAN;
     double psi_val = 0.0;
     double omega_val = 0.0;
     
@@ -315,12 +396,16 @@ __device__ void rho_bound(double *r0, double *s0, double *t0, double *pdist, dou
         double fl, fu;
         oracle_f(r0, s0, t0, low, &fl);
         oracle_f(r0, s0, t0, upr, &fu);
+        *low_f = fl;
+        *upr_f = fu;
 
         if (fl * fu >= 0.0) {
             if (fabs(fl) < fabs(fu)) {
                 *upr = *low;
+                *upr_f = fl;
             } else {
                 *low = *upr;
+                *low_f = fu;
             }
         }
     }
@@ -331,12 +416,16 @@ __device__ void rho_bound_diagonal(double *r0, double *s0, double *t0,
                                 double *ds, double *dt, double *ds_squared,
                                 double *c1, double *c2, double *a3, double *a4,
                                 double *ds_div_dr, double *ds_div_dr_squared,
-                                double *dr_inv, double *dsdr, double *rho_l, double *rho_h) {
+                                double *dr_inv, double *dsdr,
+                                double *rho_l, double *rho_h,
+                                double *rho_l_f, double *rho_h_f) {
     // Initialize bounds
     double baselow = negative_inf;
     double baseupr = positive_inf;
     double low = negative_inf;
     double upr = positive_inf;
+    double low_f = CUDART_NAN;
+    double upr_f = CUDART_NAN;
 
     // Calculate deltas
     double temp_s0 = fmin(s0[0], 0.0);
@@ -556,40 +645,81 @@ __device__ void rho_bound_diagonal(double *r0, double *s0, double *t0,
         double fu = 0.0;
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &low, &fl);
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, &upr, &fu);
+        low_f = fl;
+        upr_f = fu;
         if (!(fl * fu < 0.0)) {
             if (fabs(fl) < fabs(fu) || isnan(fl)) {
                 upr = low;
+                upr_f = fl;
             } else {
                 low = upr;
+                low_f = fu;
             }
         }
     }
     *rho_l = low;
     *rho_h = upr;
+    *rho_l_f = low_f;
+    *rho_h_f = upr_f;
 }
 
-__device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *rho, double abs_tol, double rel_tol){
+__device__ void rootsearch_bn(double *r0, double *s0, double *t0,
+                              double *rhol, double *rhoh,
+                              double *rhol_f, double *rhoh_f,
+                              double *rho0, double *rho,
+                              double abs_tol, double rel_tol){
     *rho = 0.0;
     double f = 0.0;
     int count = 0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+    if (!isfinite(*rhol_f)) oracle_f(r0, s0, t0, rhol, rhol_f);
+    if (!isfinite(*rhoh_f)) oracle_f(r0, s0, t0, rhoh, rhoh_f);
+    *rho0 = pdcs_standard_exp_bracket_candidate(
+        *rhol, *rhoh, *rhol_f, *rhoh_f);
+    int last_updated_side = 0;
+#endif
     while (true){
         PDCS_PROFILE_BISECTION();
         oracle_f(r0, s0, t0, rho0, &f);
         if( f < 0.0 ){
             *rhol = *rho0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+            *rhol_f = f;
+            if (last_updated_side == -1) *rhoh_f *= 0.5;
+            last_updated_side = -1;
+#endif
         } else {
             *rhoh = *rho0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+            *rhoh_f = f;
+            if (last_updated_side == 1) *rhol_f *= 0.5;
+            last_updated_side = 1;
+#endif
         }
-        *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+        if (fabs(f) <= abs_tol) {
+            *rho = *rho0;
+            break;
+        }
+        *rho = pdcs_standard_exp_bracket_candidate(
+            *rhol, *rhoh, *rhol_f, *rhoh_f);
+#else
+        *rho = pdcs_standard_exp_bisection_midpoint(*rhol, *rhoh);
+#endif
         // if( fabs(*rho - *rho0) <= positive_zero*max(1.,abs(*rho)) || *rho==*rhol || *rho==*rhoh ){
         //     printf("cuda rho: %.20e, rho0: %.20e, rhol: %.20e, rhoh: %.20e, f: %.20e\n", *rho, *rho0, *rhol, *rhoh, f);
         //     break;
         // }
-        if (fabs(f) <= abs_tol || fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+        if (fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#else
+        if (fabs(f) <= abs_tol ||
+            fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#endif
             break;
         }
         count++;
-        if (count > MAX_ITER){
+        if (count > PDCS_EXP_MAX_ITER){
             PDCS_PROFILE_MAX_ITER();
             break;
         }
@@ -598,9 +728,17 @@ __device__ void rootsearch_bn(double *r0, double *s0, double *t0, double *rhol, 
     PDCS_PROFILE_RESIDUAL(f);
 }
 
-__device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *rho, double abs_tol, double rel_tol, int max_iter = 20) {
+__device__ void newton_rootsearch(double *r0, double *s0, double *t0,
+                                  double *rhol, double *rhoh,
+                                  double *rhol_f, double *rhoh_f,
+                                  double *rho0, double *rho,
+                                  double initial_f, double initial_df,
+                                  bool initial_oracle_valid,
+                                  double abs_tol, double rel_tol,
+                                  int max_iter = 20) {
 #if !PDCS_ENABLE_SAFEGUARDED_NEWTON
-    rootsearch_bn(r0, s0, t0, rhol, rhoh, rho0, rho, abs_tol, rel_tol);
+    rootsearch_bn(r0, s0, t0, rhol, rhoh, rhol_f, rhoh_f,
+                  rho0, rho, abs_tol, rel_tol);
     return;
 #endif
     bool converged = false;
@@ -610,12 +748,19 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
     double df = 0.0;
     for (int i = 1; i <= max_iter; ++i) {
         PDCS_PROFILE_NEWTON_ATTEMPT();
-        oracle_h(r0, s0, t0, rho0, &f, &df);
+        if (i == 1 && initial_oracle_valid) {
+            f = initial_f;
+            df = initial_df;
+        } else {
+            oracle_h(r0, s0, t0, rho0, &f, &df);
+        }
         
         if (f < 0.0) {
             *rhol = *rho0;
+            *rhol_f = f;
         } else {
             *rhoh = *rho0;
+            *rhoh_f = f;
         }
 
         if (fabs(f) <= abs_tol ||
@@ -632,13 +777,13 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
         }
         
         if (isfinite(f) && isfinite(df) && df > abs_tol) {
-            *rho = pdcs_exp_newton_candidate(
+            *rho = pdcs_standard_exp_newton_candidate(
                 *rho0, f, df, *rhol, *rhoh);
         } else {
             break;
         }
 
-#if PDCS_EXP_COORDINATE_MODE == 0
+#if PDCS_STANDARD_EXP_COORDINATE_MODE == 0
         if (*rho >= *rhoh) {
             *rho0 = fmin(LODAMP * *rho0 + HIDAMP * *rhoh, *rhoh);
         } else if (*rho <= *rhol) {
@@ -649,7 +794,7 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
         }
 #else
         if (!isfinite(*rho) || *rho <= *rhol || *rho >= *rhoh) {
-            *rho0 = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+            *rho0 = pdcs_standard_exp_bisection_midpoint(*rhol, *rhoh);
         } else {
             *rho0 = *rho;
             PDCS_PROFILE_NEWTON_ACCEPT();
@@ -662,34 +807,80 @@ __device__ void newton_rootsearch(double *r0, double *s0, double *t0, double *rh
         *rho0 = *rho;
     } else {
         *rho0 = fmax(*rhol, fmin(*rhoh, *rho0));
-        rootsearch_bn(r0, s0, t0, rhol, rhoh, rho0, rho, abs_tol, rel_tol);
+        rootsearch_bn(r0, s0, t0, rhol, rhoh, rhol_f, rhoh_f,
+                      rho0, rho, abs_tol, rel_tol);
     }
 }
 
-__device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double abs_tol, double rel_tol){
-    *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+__device__ void rootsearch_bn_diagonal(
+    double *r0, double *s0, double *t0,
+    double *rhol, double *rhoh, double *rhol_f, double *rhoh_f,
+    double *rho0, double *dr, double *dt, double *ds_squared,
+    double *ds_div_dr, double *dsdr, double *rho,
+    double abs_tol, double rel_tol){
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+    if (!isfinite(*rhol_f)) {
+        oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr,
+                          dsdr, rhol, rhol_f);
+    }
+    if (!isfinite(*rhoh_f)) {
+        oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr,
+                          dsdr, rhoh, rhoh_f);
+    }
+    *rho = pdcs_diagonal_exp_bracket_candidate(
+        *rhol, *rhoh, *rhol_f, *rhoh_f);
+#else
+    *rho = pdcs_diagonal_exp_bisection_midpoint(*rhol, *rhoh);
+#endif
     *rho0 = *rho;
     double f = 0.0;
     int count = 0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+    int last_updated_side = 0;
+#endif
     while (true){
         PDCS_PROFILE_BISECTION();
         oracle_f_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, rho0, &f);
         if (f < 0.0) {
             *rhol = *rho0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+            *rhol_f = f;
+            if (last_updated_side == -1) *rhoh_f *= 0.5;
+            last_updated_side = -1;
+#endif
         } else {
             *rhoh = *rho0;
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+            *rhoh_f = f;
+            if (last_updated_side == 1) *rhol_f *= 0.5;
+            last_updated_side = 1;
+#endif
         }
-        *rho = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+        if (fabs(f) <= abs_tol) {
+            *rho = *rho0;
+            break;
+        }
+        *rho = pdcs_diagonal_exp_bracket_candidate(
+            *rhol, *rhoh, *rhol_f, *rhoh_f);
+#else
+        *rho = pdcs_diagonal_exp_bisection_midpoint(*rhol, *rhoh);
+#endif
         // printf("cuda enter loop rootsearch_bn_diagonal rho: %.20e\n", *rho);
         // if (fabs(*rho - *rho0) <= positive_zero*fmax(1.0, fabs(*rho)) || *rho == *rhol || *rho == *rhoh || fabs(f) <= proj_abs_tol_exp) {
         //     printf("cuda rho: %.20e, rho0: %.20e, rhol: %.20e, rhoh: %.20e, f: %.20e\n", *rho, *rho0, *rhol, *rhoh, f);
         //     break;
         // }
-        if (fabs(f) <= abs_tol || fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#if PDCS_ENABLE_EXP_REUSE_ENDPOINT_VALUES
+        if (fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#else
+        if (fabs(f) <= abs_tol ||
+            fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol){
+#endif
             break;
         }
         count++;
-        if (count > MAX_ITER){
+        if (count > PDCS_EXP_MAX_ITER){
             PDCS_PROFILE_MAX_ITER();
             break;
         }
@@ -699,10 +890,17 @@ __device__ void rootsearch_bn_diagonal(double *r0, double *s0, double *t0, doubl
     // printf("*****cuda output rho: %.20e\n", *rho);
 }
 
-__device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, double *rhol, double *rhoh, double *rho0, double *dr, double *dt, double *ds_squared, double *ds_div_dr, double *dsdr, double *rho, double abs_tol, double rel_tol, int max_iter = 30){
+__device__ void newton_rootsearch_diagonal(
+    double *r0, double *s0, double *t0,
+    double *rhol, double *rhoh, double *rhol_f, double *rhoh_f,
+    double *rho0, double *dr, double *dt, double *ds_squared,
+    double *ds_div_dr, double *dsdr, double *rho,
+    double initial_f, double initial_df, bool initial_oracle_valid,
+    double abs_tol, double rel_tol, int max_iter = 30){
 #if !PDCS_ENABLE_SAFEGUARDED_NEWTON
-    rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh, rho0, dr, dt,
-                           ds_squared, ds_div_dr, dsdr, rho, abs_tol, rel_tol);
+    rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh, rhol_f, rhoh_f,
+                           rho0, dr, dt, ds_squared, ds_div_dr, dsdr,
+                           rho, abs_tol, rel_tol);
     return;
 #endif
     bool converged = false;
@@ -713,11 +911,19 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
     *rho = *rho0;
     for (int i = 1; i <= max_iter; ++i) {
         PDCS_PROFILE_NEWTON_ATTEMPT();
-        oracle_h_diagonal(r0, s0, t0, dr, dt, ds_squared, ds_div_dr, dsdr, rho0, &f, &df);
+        if (i == 1 && initial_oracle_valid) {
+            f = initial_f;
+            df = initial_df;
+        } else {
+            oracle_h_diagonal(r0, s0, t0, dr, dt, ds_squared,
+                              ds_div_dr, dsdr, rho0, &f, &df);
+        }
         if (f < 0.0) {
             *rhol = *rho0;
+            *rhol_f = f;
         } else {
             *rhoh = *rho0;
+            *rhoh_f = f;
         }
         if (fabs(f) <= abs_tol ||
             fabs(*rhoh - *rhol) / fabs(1 + *rhoh + *rhol) <= rel_tol) {
@@ -731,12 +937,12 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
             break;
         }
         if (isfinite(f) && isfinite(df) && df > abs_tol) {
-            *rho = pdcs_exp_newton_candidate(
+            *rho = pdcs_diagonal_exp_newton_candidate(
                 *rho0, f, df, *rhol, *rhoh);
         } else {
             break;
         }
-#if PDCS_EXP_COORDINATE_MODE == 0
+#if PDCS_DIAGONAL_EXP_COORDINATE_MODE == 0
         if( *rho >= *rhoh ){
             *rho0 = fmin(LODAMP * *rho0 + HIDAMP * *rhoh, *rhoh);
         } else if (*rho <= *rhol) {
@@ -747,7 +953,7 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
         }
 #else
         if (!isfinite(*rho) || *rho <= *rhol || *rho >= *rhoh) {
-            *rho0 = pdcs_exp_bisection_midpoint(*rhol, *rhoh);
+            *rho0 = pdcs_diagonal_exp_bisection_midpoint(*rhol, *rhoh);
         } else {
             *rho0 = *rho;
             PDCS_PROFILE_NEWTON_ACCEPT();
@@ -759,7 +965,10 @@ __device__ void newton_rootsearch_diagonal(double *r0, double *s0, double *t0, d
         *rho0 = *rho;
     } else {
         *rho0 = fmax(*rhol, fmin(*rhoh, *rho0));
-        rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh, rho0, dr, dt, ds_squared, ds_div_dr, dsdr, rho, abs_tol, rel_tol);
+        rootsearch_bn_diagonal(r0, s0, t0, rhol, rhoh,
+                               rhol_f, rhoh_f, rho0, dr, dt,
+                               ds_squared, ds_div_dr, dsdr, rho,
+                               abs_tol, rel_tol);
     }
 }
 
@@ -831,17 +1040,30 @@ __device__ void exponent_proj(double *v, double *t_warm_start, double abs_tol, d
     bool case3 = (inf_norm_vp_vd <= abs_tol && dot_vp_vd <= abs_tol);
     if (!case1 && !case2 && !case3){
         double f;
+        double warm_df = CUDART_NAN;
+#if PDCS_ENABLE_STANDARD_EXP_REUSE_WARM_ORACLE
+        oracle_h(&r0, &s0, &t0, t_warm_start, &f, &warm_df);
+#else
         oracle_f(&r0, &s0, &t0, t_warm_start, &f);
+#endif
         if (fabs(f) > abs_tol){ // warm start
-            double rho_l, rho_h;
-            rho_bound(&r0, &s0, &t0, &pdist, &ddist, &rho_l, &rho_h);
-            if (rho_l < t_warm_start[0] && rho_h > t_warm_start[0]){
+            double rho_l, rho_h, rho_l_f, rho_h_f;
+            rho_bound(&r0, &s0, &t0, &pdist, &ddist,
+                      &rho_l, &rho_h, &rho_l_f, &rho_h_f);
+            const bool warm_inside =
+                rho_l < t_warm_start[0] && rho_h > t_warm_start[0];
+            if (warm_inside){
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
+                rho0 = pdcs_standard_exp_bisection_midpoint(rho_l, rho_h);
             }
-            newton_rootsearch(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &rho, abs_tol, rel_tol);
+            newton_rootsearch(&r0, &s0, &t0, &rho_l, &rho_h,
+                              &rho_l_f, &rho_h_f, &rho0, &rho,
+                              f, warm_df,
+                              PDCS_ENABLE_STANDARD_EXP_REUSE_WARM_ORACLE &&
+                                  warm_inside,
+                              abs_tol, rel_tol);
             t_warm_start[0] = rho;
         }else{ // no warm start
             rho = t_warm_start[0];
@@ -914,20 +1136,38 @@ __device__ void exponent_proj_diagonal(double *v, double *D, double *t_warm_star
     bool case3 = (inf_norm_vp_vd <= abs_tol && dot_vp_vd <= abs_tol);
     if (!case1 && !case2 && !case3){
         double f;
-        oracle_f_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, t_warm_start, &f);
+        double warm_df = CUDART_NAN;
+#if PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE
+        oracle_h_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared,
+                          &ds_div_dr, &dsdr, t_warm_start, &f, &warm_df);
+#else
+        oracle_f_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared,
+                          &ds_div_dr, &dsdr, t_warm_start, &f);
+#endif
         if (fabs(f) > abs_tol){ // warm start
-            double rho_l, rho_h;
-            rho_bound_diagonal(&r0, &s0, &t0, &pdist, &ddist, &dr, &ds, &dt, &ds_squared, &c1, &c2, &a3, &a4, &ds_div_dr, &ds_div_dr_squared, &dr_inv, &dsdr, &rho_l, &rho_h);
+            double rho_l, rho_h, rho_l_f, rho_h_f;
+            rho_bound_diagonal(&r0, &s0, &t0, &pdist, &ddist,
+                               &dr, &ds, &dt, &ds_squared, &c1, &c2,
+                               &a3, &a4, &ds_div_dr,
+                               &ds_div_dr_squared, &dr_inv, &dsdr,
+                               &rho_l, &rho_h, &rho_l_f, &rho_h_f);
             // if (rho_h - rho_l < 1e-10){
             //     printf("cuda rho_l: %f, rho_h: %f, r0: %f, s0: %f, t0: %f, dr: %f, ds: %f, dt: %f\n", rho_l, rho_h, r0, s0, t0, dr, ds, dt);
             // }
-            if (rho_l < t_warm_start[0] && rho_h > t_warm_start[0]){
+            const bool warm_inside =
+                rho_l < t_warm_start[0] && rho_h > t_warm_start[0];
+            if (warm_inside){
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
+                rho0 = pdcs_diagonal_exp_bisection_midpoint(rho_l, rho_h);
             }
-            newton_rootsearch_diagonal(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, &rho, abs_tol, rel_tol);
+            newton_rootsearch_diagonal(
+                &r0, &s0, &t0, &rho_l, &rho_h, &rho_l_f, &rho_h_f,
+                &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr,
+                &rho, f, warm_df,
+                PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE && warm_inside,
+                abs_tol, rel_tol);
             t_warm_start[0] = rho;
         }else{ // no warm start
             rho = t_warm_start[0];
@@ -1014,20 +1254,38 @@ __device__ void exponent_proj_diagonal_initial(double *v, double *D, double *t_w
     bool case3 = (inf_norm_vp_vd <= abs_tol && dot_vp_vd <= abs_tol);
     if (!case1 && !case2 && !case3){
         double f;
-        oracle_f_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, t_warm_start, &f);
+        double warm_df = CUDART_NAN;
+#if PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE
+        oracle_h_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared,
+                          &ds_div_dr, &dsdr, t_warm_start, &f, &warm_df);
+#else
+        oracle_f_diagonal(&r0, &s0, &t0, &dr, &dt, &ds_squared,
+                          &ds_div_dr, &dsdr, t_warm_start, &f);
+#endif
         if (fabs(f) > abs_tol){ // warm start
-            double rho_l, rho_h;
-            rho_bound_diagonal(&r0, &s0, &t0, &pdist, &ddist, &dr, &ds, &dt, &ds_squared, &c1, &c2, &a3, &a4, &ds_div_dr, &ds_div_dr_squared, &dr_inv, &dsdr, &rho_l, &rho_h);
+            double rho_l, rho_h, rho_l_f, rho_h_f;
+            rho_bound_diagonal(&r0, &s0, &t0, &pdist, &ddist,
+                               &dr, &ds, &dt, &ds_squared, &c1, &c2,
+                               &a3, &a4, &ds_div_dr,
+                               &ds_div_dr_squared, &dr_inv, &dsdr,
+                               &rho_l, &rho_h, &rho_l_f, &rho_h_f);
             // if (rho_h - rho_l < 1e-10){
             //     printf("cuda rho_l: %f, rho_h: %f, r0: %f, s0: %f, t0: %f, dr: %f, ds: %f, dt: %f\n", rho_l, rho_h, r0, s0, t0, dr, ds, dt);
             // }
-            if (rho_l < t_warm_start[0] && rho_h > t_warm_start[0]){
+            const bool warm_inside =
+                rho_l < t_warm_start[0] && rho_h > t_warm_start[0];
+            if (warm_inside){
                 rho0 = t_warm_start[0];
                 rho = rho0;
             }else{
-                rho0 = pdcs_exp_bisection_midpoint(rho_l, rho_h);
+                rho0 = pdcs_diagonal_exp_bisection_midpoint(rho_l, rho_h);
             }
-            newton_rootsearch_diagonal(&r0, &s0, &t0, &rho_l, &rho_h, &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr, &rho, abs_tol, rel_tol);
+            newton_rootsearch_diagonal(
+                &r0, &s0, &t0, &rho_l, &rho_h, &rho_l_f, &rho_h_f,
+                &rho0, &dr, &dt, &ds_squared, &ds_div_dr, &dsdr,
+                &rho, f, warm_df,
+                PDCS_ENABLE_DIAGONAL_EXP_REUSE_WARM_ORACLE && warm_inside,
+                abs_tol, rel_tol);
             t_warm_start[0] = rho;
         }else{ // no warm start
             rho = t_warm_start[0];

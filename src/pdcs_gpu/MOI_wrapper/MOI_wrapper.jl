@@ -638,15 +638,16 @@ function MOI.optimize!(
         end
     end
     if !haskey(options, :scalar_cone_rescaling)
-        options[:scalar_cone_rescaling] = false
+        options[:scalar_cone_rescaling] = DEFAULT_SCALAR_CONE_RESCALING
         if options[:verbose] > 0
             println("scalar_cone_rescaling is not set, using default value: false.")
         end
     end
     if !haskey(options, :use_adaptive_diagonal_scalar_rescaling)
-        options[:use_adaptive_diagonal_scalar_rescaling] = false
+        options[:use_adaptive_diagonal_scalar_rescaling] =
+            DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING
         if options[:verbose] > 0
-            println("use_adaptive_diagonal_scalar_rescaling is not set, using default value: false.")
+            println("use_adaptive_diagonal_scalar_rescaling is not set, using default value: true.")
         end
     end
     if !haskey(options, :use_adaptive_restart)
@@ -662,9 +663,9 @@ function MOI.optimize!(
         end
     end
     if !haskey(options, :use_adaptive_step)
-        options[:use_adaptive_step] = true
+        options[:use_adaptive_step] = DEFAULT_USE_ADAPTIVE_STEP
         if options[:verbose] > 0
-            println("use_adaptive_step is not set, using default value: true.")
+            println("use_adaptive_step is not set, using default value: false.")
         end
     end
     if !haskey(options, :adaptive_projection_tolerance)
@@ -674,7 +675,8 @@ function MOI.optimize!(
         end
     end
     if !haskey(options, :use_adaptive_step_size_weight)
-        options[:use_adaptive_step_size_weight] = true
+        options[:use_adaptive_step_size_weight] =
+            DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT
         if options[:verbose] > 0
             println("use_adaptive_step_size_weight is not set, using default value: true.")
         end

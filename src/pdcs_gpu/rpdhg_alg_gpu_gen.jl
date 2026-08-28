@@ -424,16 +424,17 @@ function rpdhg_gpu_solve_input_gpu_data(;
     Dl::CuArray{rpdhg_float} = CuArray(ones(m)),
     Dr::CuArray{rpdhg_float} = CuArray(ones(n)),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
-    scalar_cone_rescaling::Bool = false,
-    use_adaptive_diagonal_scalar_rescaling::Bool = false,
+    scalar_cone_rescaling::Bool = DEFAULT_SCALAR_CONE_RESCALING,
+    use_adaptive_diagonal_scalar_rescaling::Bool =
+        DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
-    use_adaptive_step_size_weight::Bool = true,
+    use_adaptive_step_size_weight::Bool = DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT,
     use_aggressive::Bool = true,
     use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
-    use_adaptive_step::Bool = true,
+    use_adaptive_step::Bool = DEFAULT_USE_ADAPTIVE_STEP,
     adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
     use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,
@@ -1284,13 +1285,14 @@ end # end rpdhg_cpu_solve
       `:ruiz_pock_chambolle_scalar_cone`.
     - `scalar_cone_rescaling`: if true, use one common Ruiz/Pock--Chambolle
       factor inside each SOC, rotated SOC, exponential, and dual exponential
-      cone. The default `false` preserves coordinate-wise diagonal rescaling.
+      cone. The default `false` leaves the adaptive policy in control.
       `rescaling_method=:ruiz_pock_chambolle_scalar_cone` is an equivalent
       explicit method for the combined rescaling pipeline.
     - `use_adaptive_diagonal_scalar_rescaling`: if true, inspect each
       structured cone block in the original constraint matrix. Blocks whose
       stored coefficients are all `-1`, `0`, or `1` use one scalar rescaling
       factor; all other blocks retain coordinate-wise diagonal rescaling.
+      This is enabled by default.
       `scalar_cone_rescaling=true` takes precedence and scalarizes every cone.
     - `use_preconditioner`: whether to use the preconditioner
     - `adaptive_projection_tolerance`: projection root-search tolerance policy.
@@ -1362,16 +1364,17 @@ function rpdhg_gpu_solve(;
     Dl::Vector{rpdhg_float} = ones(m),
     Dr::Vector{rpdhg_float} = ones(n),
     rescaling_method::Symbol = :ruiz_pock_chambolle,
-    scalar_cone_rescaling::Bool = false,
-    use_adaptive_diagonal_scalar_rescaling::Bool = false,
+    scalar_cone_rescaling::Bool = DEFAULT_SCALAR_CONE_RESCALING,
+    use_adaptive_diagonal_scalar_rescaling::Bool =
+        DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING,
     use_preconditioner::Bool = true,
     use_adaptive_restart::Bool = true,
-    use_adaptive_step_size_weight::Bool = true,
+    use_adaptive_step_size_weight::Bool = DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT,
     use_aggressive::Bool = true,
     use_accelerated::Bool = false, # Retained for API compatibility; ignored.
     use_resolving::Bool = true,
     use_restart::Bool = use_adaptive_restart,
-    use_adaptive_step::Bool = true,
+    use_adaptive_step::Bool = DEFAULT_USE_ADAPTIVE_STEP,
     adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
     use_weighted_average::Bool = true,
     use_reflection::Bool = use_aggressive,

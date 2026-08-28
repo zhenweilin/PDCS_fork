@@ -673,8 +673,9 @@ function rescale_problem!(;
   dual_sol::solVecDual,
   variable_rescaling::CuArray{Float64},
   constraint_rescaling_G::CuArray{Float64},
-  scalar_cone_rescaling::Bool = false,
-  use_adaptive_diagonal_scalar_rescaling::Bool = false
+  scalar_cone_rescaling::Bool = DEFAULT_SCALAR_CONE_RESCALING,
+  use_adaptive_diagonal_scalar_rescaling::Bool =
+      DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING
 )
     row_idx = similar(data.coeff.d_G.colVal, nnz(data.coeff.d_G))
     get_row_index(data.coeff.d_G, row_idx)

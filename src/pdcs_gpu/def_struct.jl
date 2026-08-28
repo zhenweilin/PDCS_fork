@@ -1432,16 +1432,18 @@ mutable struct PDCS_GPU_Solver
         Dl::Union{Vector{rpdhg_float}, CuArray} = ones(m),
         Dr::Union{Vector{rpdhg_float}, CuArray} = ones(n),
         rescaling_method::Symbol = :ruiz_pock_chambolle,
-        scalar_cone_rescaling::Bool = false,
-        use_adaptive_diagonal_scalar_rescaling::Bool = false,
+        scalar_cone_rescaling::Bool = DEFAULT_SCALAR_CONE_RESCALING,
+        use_adaptive_diagonal_scalar_rescaling::Bool =
+            DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING,
         use_preconditioner::Bool = true,
         use_adaptive_restart::Bool = true,
-        use_adaptive_step_size_weight::Bool = true,
+        use_adaptive_step_size_weight::Bool =
+            DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT,
         use_aggressive::Bool = true,
         use_accelerated::Bool = false, # Retained for API compatibility; ignored.
         use_resolving::Bool = true,
         use_restart::Bool = use_adaptive_restart,
-        use_adaptive_step::Bool = true,
+        use_adaptive_step::Bool = DEFAULT_USE_ADAPTIVE_STEP,
         adaptive_projection_tolerance::Union{Nothing,Bool} = nothing,
         use_weighted_average::Bool = true,
         use_reflection::Bool = use_aggressive,

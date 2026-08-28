@@ -30,7 +30,25 @@ const proj_rel_tol = 1e-12
 const proj_abs_tol = 1e-16
 const ThreadPerBlock = 256
 
+# Public-entry defaults shared by direct solves, solver structs, preprocessing,
+# and the MOI wrapper. Keeping these in one place prevents the entry points
+# from silently drifting apart.
+const DEFAULT_SCALAR_CONE_RESCALING = false
+const DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING = true
+const DEFAULT_USE_ADAPTIVE_STEP = false
+const DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT = true
+
 const MODULE_DIR = @__DIR__
+
+# cuBLAS reproducibility is process-wide because its workspace policy is read
+# from the environment and handles are cached. Configure it before the first
+# PDCS-owned handle is created. Users can opt out before importing PDCS.
+const _cublas_reproducible_enabled = Ref(true)
+
+@inline function _pdcs_env_enabled(name::String, default::Bool)
+    raw = lowercase(strip(get(ENV, name, default ? "1" : "0")))
+    return raw ∉ ("0", "false", "no", "off")
+end
 
 include("./csc_to_csr.jl")
 include("./plain_multi_logger.jl")
@@ -54,6 +72,20 @@ function __init__()
     _heterogeneous_projection_enabled[] =
         lowercase(get(ENV, "PDCS_ENABLE_HETEROGENEOUS_PROJECTION", "1")) ∉
         ("0", "false", "no", "off")
+    _cublas_reproducible_enabled[] =
+        _pdcs_env_enabled("PDCS_CUBLAS_REPRODUCIBLE", true)
+    if _cublas_reproducible_enabled[]
+        workspace_config = get(ENV, "CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        workspace_config in (":16:8", ":4096:8") || throw(ArgumentError(
+            "reproducible cuBLAS requires CUBLAS_WORKSPACE_CONFIG=:16:8 " *
+            "or :4096:8; got $(repr(workspace_config))",
+        ))
+        ENV["CUBLAS_WORKSPACE_CONFIG"] = workspace_config
+        # Apply the same prescribed-precision policy to CUDA.jl-managed
+        # cuBLAS handles. The separately owned grid-wise handle is configured
+        # explicitly when it is created in gpu_kernel.jl.
+        CUDA.math_mode!(CUDA.PEDANTIC_MATH)
+    end
     CUDA.functional() || return
     # Open your own kernel library (NOT libcublas)
     # Replace with the actual .so path in your project

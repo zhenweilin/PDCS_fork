@@ -1132,7 +1132,7 @@ function pdhg_one_iter_diagonal_rescaling_adaptive_step_size!(; solver::rpdhgSol
     primal_sol_change::primalVector,
     dual_sol_change::dualVector,
     random_check::Bool,
-    use_adaptive_step::Bool = true)
+    use_adaptive_step::Bool = DEFAULT_USE_ADAPTIVE_STEP)
     eta = use_adaptive_step ? max(eta, 1e-6) : max(eta, 1e-30)
     x.primal_sol_lag.x .= x.primal_sol.x
     y.dual_sol_lag.y .= y.dual_sol.y

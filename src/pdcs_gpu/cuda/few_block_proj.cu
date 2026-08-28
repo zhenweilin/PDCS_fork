@@ -139,6 +139,17 @@ __global__ void positive_proj(double *sol, long *n){
     }
 }
 
+// Keep the grid-wise diagonal-SOC normalization on the same CUDA launch
+// stream as the root-search and recovery kernels. Issuing this operation via
+// a cuBLAS handle created by another shared-library instance can leave the
+// Dscal unordered with respect to the CUDA C++ kernels, which makes recovery
+// apply minVal without the matching minVal_inv normalization.
+__global__ void scale_vector(
+    double* __restrict__ values, long length, double factor) {
+  long index = (long)blockIdx.x * blockDim.x + threadIdx.x;
+  if (index < length) values[index] *= factor;
+}
+
 // `exponent_proj_diagonal_kernel` consumes the inverse diagonal. The PTX
 // block/warp/thread-wise kernels perform this conversion before calling their
 // device function; grid-wise must use the same convention.
@@ -581,13 +592,9 @@ __global__ void oracle_soc_logit_z_f_reduce_kernel(
   double local_value = 0.0;
   for (long j = (long)blockIdx.x * blockDim.x + threadIdx.x;
        j < len; j += (long)gridDim.x * blockDim.x) {
-    double value;
-    double derivative;
-    double second;
-    pdcs_soc_logit_term(
+    local_value += pdcs_soc_logit_term_f(
         D_scaled_mul_x_part[j], D_scaled_squared_part[j], s, v,
-        negative_branch, &value, &derivative, &second);
-    local_value += value;
+        negative_branch);
   }
   partial[threadIdx.x] = local_value;
   __syncthreads();
@@ -874,7 +881,10 @@ static double soc_logit_z_solve_host(
   double left_f = -t_squared;
   double right_f = endpoint_norm * endpoint_norm - t_squared;
   const bool valid_warm =
-      isfinite(warm_z) && warm_z > left && warm_z < right;
+      isfinite(warm_z) && warm_z > left && warm_z < right &&
+      warm_z != PDCS_SOC_WARM_START_SENTINEL;
+  const bool use_halley =
+      !PDCS_ENABLE_ADAPTIVE_LOGIT_NEWTON || !valid_warm;
   double z = valid_warm ? warm_z : 0.0;
   if (valid_warm) GRID_SOC_PROFILE_ADD(warm_start_attempts, 1);
 
@@ -908,7 +918,8 @@ static double soc_logit_z_solve_host(
     }
     double candidate;
     if (!pdcs_soc_logit_candidate(
-            z, f, h, h2, left, right, left_f, right_f, &candidate)) break;
+            z, f, h, h2, left, right, left_f, right_f, use_halley,
+            &candidate)) break;
     GRID_SOC_PROFILE_ADD(newton_attempts, 1);
     double candidate_f;
     double candidate_h;
@@ -975,14 +986,6 @@ static double soc_logit_z_solve_host(
 }
 #endif
 
-static __forceinline__ bool soc_bounded_u_residual_converged(
-    double f, double sol0, double abs_tol) {
-  // F is a difference of squared norms.  Scale the absolute threshold by the
-  // squared right-hand side so the test remains meaningful after the cone's
-  // homogeneous 1e3 numerical scaling.
-  return fabs(f) <= abs_tol * (1.0 + sol0 * sol0);
-}
-
 static double soc_bounded_u_solve_host(
     double sol0, bool increasing, double warm_u,
     double* D_scaled_mul_x_part, double* D_scaled_squared_part,
@@ -1011,7 +1014,8 @@ static double soc_bounded_u_solve_host(
       u, sol0, increasing, D_scaled_mul_x_part, D_scaled_squared_part,
       len, nThread, nBlock, oracle_gpu, &f, &h);
 #endif
-  if (valid_warm && soc_bounded_u_residual_converged(f, sol0, abs_tol)) {
+  if (valid_warm && pdcs_bounded_soc_projection_converged(
+          f, h, u, sol0, abs_tol, rel_tol)) {
     GRID_SOC_PROFILE_ADD(warm_start_direct_accepts, 1);
     return u;
   }
@@ -1028,8 +1032,9 @@ static double soc_bounded_u_solve_host(
        iter < PDCS_SOC_BOUNDED_NEWTON_STEPS &&
        PDCS_ENABLE_SAFEGUARDED_NEWTON;
        ++iter) {
-    if (soc_bounded_u_residual_converged(f, sol0, abs_tol) ||
-        right - left <= rel_tol) {
+    if (pdcs_bounded_soc_projection_converged(
+            f, h, u, sol0, abs_tol, rel_tol) ||
+        pdcs_bounded_soc_bracket_converged(left, right, rel_tol)) {
       newton_converged = true;
       break;
     }
@@ -1038,12 +1043,8 @@ static double soc_bounded_u_solve_host(
     if (!pdcs_bounded_soc_candidate(
             u, f, h, h2, left, right, left_f, right_f, &candidate)) break;
 #else
-    if (!isfinite(f) || !isfinite(h) || fabs(h) <= 1e-18) break;
-    candidate = u - f / h;
-    const double guard = fmax(64.0 * 2.220446049250313e-16,
-                              1e-8 * (right - left));
-    if (!isfinite(candidate) || candidate <= left + guard ||
-        candidate >= right - guard) break;
+    if (!pdcs_bounded_soc_newton_candidate(
+            u, f, h, left, right, &candidate)) break;
 #endif
 
     GRID_SOC_PROFILE_ADD(newton_attempts, 1);
@@ -1074,7 +1075,9 @@ static double soc_bounded_u_solve_host(
     }
     if (!isfinite(candidate_f)) break;
 #if PDCS_ENABLE_BOUNDED_SOC_HALLEY
-    if (soc_bounded_u_residual_converged(candidate_f, sol0, abs_tol)) {
+    if (pdcs_bounded_soc_projection_converged(
+            candidate_f, candidate_h, candidate, sol0,
+            abs_tol, rel_tol)) {
       GRID_SOC_PROFILE_ADD(newton_accepts, 1);
       u = candidate;
       f = candidate_f;
@@ -1094,39 +1097,57 @@ static double soc_bounded_u_solve_host(
 #if PDCS_ENABLE_BOUNDED_SOC_HALLEY
     h2 = candidate_h2;
 #endif
+    if (pdcs_bounded_soc_projection_converged(
+            f, h, u, sol0, abs_tol, rel_tol) ||
+        pdcs_bounded_soc_bracket_converged(left, right, rel_tol)) {
+      newton_converged = true;
+      break;
+    }
   }
   if (newton_converged ||
-      soc_bounded_u_residual_converged(f, sol0, abs_tol) ||
-      right - left <= rel_tol) {
+      pdcs_bounded_soc_projection_converged(
+          f, h, u, sol0, abs_tol, rel_tol) ||
+      pdcs_bounded_soc_bracket_converged(left, right, rel_tol)) {
     GRID_SOC_PROFILE_ADD(newton_converged_events, 1);
     return u;
   }
 
-  // Illinois regula falsi uses only F, so each fallback point costs the same
-  // single vector reduction as bisection while exploiting the endpoint
-  // magnitudes.  If interpolation becomes unsafe, the point is replaced by
-  // the arithmetic midpoint and the strict bracket is preserved.
+  // Illinois regula falsi keeps the inexpensive F-only oracle in the
+  // well-conditioned region. Near an endpoint it uses the fused F+F' oracle
+  // so the recovered projection, rather than only the root residual, controls
+  // termination. If interpolation becomes unsafe, a strict midpoint is used.
   bool used_fallback = false;
   int last_updated_side = 0;  // -1: left, +1: right.
-  for (int iter = 0; iter < 128 && right - left > rel_tol; ++iter) {
+  for (int iter = 0;
+       iter < 128 && !pdcs_bounded_soc_bracket_converged(
+           left, right, rel_tol);
+       ++iter) {
     used_fallback = true;
     GRID_SOC_PROFILE_ADD(bisection_iterations, 1);
     const double denominator = right_f - left_f;
     double candidate = left - left_f * (right - left) / denominator;
-    const double guard = fmax(64.0 * 2.220446049250313e-16,
-                              1e-6 * (right - left));
+    const double guard = fmax(
+        pdcs_bounded_soc_coordinate_resolution(0.5 * (left + right)),
+        1e-6 * (right - left));
     if (!isfinite(candidate) || !isfinite(denominator) ||
         fabs(denominator) <= 1e-300 || candidate <= left + guard ||
         candidate >= right - guard) {
-      candidate = 0.5 * (left + right);
+      candidate = pdcs_bounded_soc_bisection_midpoint(left, right);
       last_updated_side = 0;
     }
-    f = oracle_soc_bounded_u_f_host(
-        candidate, sol0, increasing, D_scaled_mul_x_part,
-        D_scaled_squared_part, len, nThread, nBlock, oracle_gpu);
+    if (pdcs_bounded_soc_near_endpoint(candidate, rel_tol)) {
+      oracle_soc_bounded_u_h_host(
+          candidate, sol0, increasing, D_scaled_mul_x_part,
+          D_scaled_squared_part, len, nThread, nBlock, oracle_gpu, &f, &h);
+    } else {
+      f = oracle_soc_bounded_u_f_host(
+          candidate, sol0, increasing, D_scaled_mul_x_part,
+          D_scaled_squared_part, len, nThread, nBlock, oracle_gpu);
+    }
     u = candidate;
     if (!isfinite(f) ||
-        soc_bounded_u_residual_converged(f, sol0, abs_tol)) break;
+        pdcs_bounded_soc_projection_converged(
+            f, h, u, sol0, abs_tol, rel_tol)) break;
 
     const bool update_right =
         (increasing && f > 0.0) || (!increasing && f < 0.0);
@@ -1143,8 +1164,9 @@ static double soc_bounded_u_solve_host(
     }
   }
   if (used_fallback) GRID_SOC_PROFILE_ADD(bisection_events, 1);
-  if (!isfinite(f) || !soc_bounded_u_residual_converged(f, sol0, abs_tol)) {
-    u = 0.5 * (left + right);
+  if (!isfinite(f) || !pdcs_bounded_soc_projection_converged(
+          f, h, u, sol0, abs_tol, rel_tol)) {
+    u = pdcs_bounded_soc_bisection_midpoint(left, right);
   }
   return fmin(fmax(u, 64.0 * 2.220446049250313e-16),
               1.0 - 64.0 * 2.220446049250313e-16);
@@ -1474,10 +1496,8 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   // large-vector reductions while small kernels only evaluate/recover the
   // scalar root.  The temporary root bounds must not alias D_scaled[0] or
   // D_scaled_squared[0], which are persistent solver scaling data.
-  cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
-  const double scale_factor_inv = minVal_inv;
-  cublasDscal_v2(handle, *n_cpu, &scale_factor_inv, sol_gpu, 1);
-  cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
+  const int scale_blocks = (*n_cpu + nThread - 1) / nThread;
+  scale_vector<<<scale_blocks, nThread>>>(sol_gpu, *n_cpu, minVal_inv);
 
   double* x_tail = sol_gpu + 1;
   double* d_tail = D_scaled_gpu + 1;
@@ -1545,10 +1565,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
 #endif
   if (weighted_norm <= sol0) {
     GRID_SOC_PROFILE_ADD(interior_events, 1);
-    const double scale_factor = minVal;
-    cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
-    cublasDscal_v2(handle, *n_cpu, &scale_factor, sol_gpu, 1);
-    cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
+    scale_vector<<<scale_blocks, nThread>>>(sol_gpu, *n_cpu, minVal);
     return;
   }
 #else
@@ -1556,10 +1573,7 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   soc_cone_heuristic<<<1, 1>>>(sol_gpu, oracle, d_return_flag);
   cudaMemcpy(&host_flag, d_return_flag, sizeof(bool), cudaMemcpyDeviceToHost);
   if (host_flag) {
-    const double scale_factor = minVal;
-    cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST);
-    cublasDscal_v2(handle, *n_cpu, &scale_factor, sol_gpu, 1);
-    cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
+    scale_vector<<<scale_blocks, nThread>>>(sol_gpu, *n_cpu, minVal);
     return;
   }
 #endif
@@ -1568,7 +1582,9 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
   cudaMemcpy(&warm_x, t_warm_start_gpu, sizeof(double), cudaMemcpyDeviceToHost);
 
 #if PDCS_ENABLE_BOUNDED_SOC_LOGIT_ROOT
-  if (sol0 >= rel_tol || sol0 <= -rel_tol) {
+  if (PDCS_ENABLE_GRID_SOC_LOGIT_ROOT &&
+      *n_cpu >= PDCS_SOC_LOGIT_MIN_DIMENSION &&
+      (sol0 >= rel_tol || sol0 <= -rel_tol)) {
     GRID_SOC_PROFILE_ADD(root_events, 1);
     const bool negative_branch = sol0 < 0.0;
     if (negative_branch) {
@@ -1585,7 +1601,8 @@ extern "C" void soc_proj_diagonal(cublasHandle_t handle,
         sol_gpu, z, negative_branch, D_scaled_squared_gpu, n_gpu);
     return;
   }
-#elif PDCS_ENABLE_BOUNDED_SOC_ROOT
+#endif
+#if PDCS_ENABLE_BOUNDED_SOC_ROOT
   if (sol0 >= rel_tol || sol0 <= -rel_tol) {
     GRID_SOC_PROFILE_ADD(root_events, 1);
     const bool increasing = sol0 < 0.0;

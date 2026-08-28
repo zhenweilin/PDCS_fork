@@ -491,6 +491,10 @@ struct HeterogeneousProjectionPlan
 end
 
 const _heterogeneous_projection_enabled = Ref(true)
+# The endpoint-safe compact diagonal-SOC path passes the full joint_FC_12
+# regression.  Keep a mutable switch for benchmark A/Bs against the native
+# cooperative reduction without disabling production compaction.
+const _diagonal_soc_compaction_enabled = Ref(true)
 const _heterogeneous_projection_plans = IdDict{Any,HeterogeneousProjectionPlan}()
 const _heterogeneous_projection_plan_lock = ReentrantLock()
 const _serial_compaction_minimum = 768
@@ -508,6 +512,9 @@ const _warp_soc_compaction_minimum = 64
 
 @inline _is_soc_projection_code(code::Int64) =
     code in (5, 6, 7, 20, 21, 22)
+
+@inline _is_diagonal_soc_projection_code(code::Int64) =
+    code in (6, 22)
 
 @inline _is_rsoc_projection_code(code::Int64) =
     code in (8, 9, 10, 23, 24, 25)
@@ -549,9 +556,13 @@ function _get_heterogeneous_projection_plan(
                    (_is_simple_projection_code(code) && dimension <= 32)
                 push!(serial_indices, Int64(julia_idx - 1))
             elseif _is_soc_projection_code(code) &&
+                   (!_is_diagonal_soc_projection_code(code) ||
+                    _diagonal_soc_compaction_enabled[]) &&
                    dimension <= _thread_soc_dimension_limit
                 push!(tiny_soc_indices, Int64(julia_idx - 1))
             elseif _is_soc_projection_code(code) &&
+                   (!_is_diagonal_soc_projection_code(code) ||
+                    _diagonal_soc_compaction_enabled[]) &&
                    dimension <= _warp_soc_dimension_limit
                 push!(warp_soc_indices, Int64(julia_idx - 1))
             elseif _is_simple_projection_code(code)
@@ -563,10 +574,11 @@ function _get_heterogeneous_projection_plan(
 
         # Same-GPU dispatch sweeps on H100 show that packing a handful of EXP
         # cones loses to the native mapping; the serial path amortizes its
-        # launch/occupancy cost at roughly 512 cones.  SOCs of dimension <= 4
-        # use one thread once 256 are available. Dimensions 5--32 use one warp
-        # from 64 cones onward; assigning a dimension-8 root solve to one
-        # thread was consistently slower around the old 256-cone boundary.
+        # launch/occupancy cost at roughly 512 cones.  Standard SOCs of
+        # dimension <= 4 use one thread once 256 are available. Dimensions
+        # 5--32 use one warp from 64 cones onward. Diagonally rescaled SOCs
+        # may use the same compact mappings now that all four implementations
+        # apply the endpoint-safe forward-error stopping rule.
         primal_exp_count = count(
             index -> _is_primal_exp_projection_code(cpu_types[index + 1]),
             serial_indices,
@@ -1243,11 +1255,36 @@ function create_cublas_handle()
     # and uses exactly the same cuBLAS runtime as the CuArray arguments.
     h = CUDA.CUBLAS.cublasCreate()
     h != C_NULL || error("cublasCreate_v2 returned NULL handle")
+    if _cublas_reproducible_enabled[]
+        # `math_mode!` combines PEDANTIC_MATH with
+        # DISALLOW_REDUCED_PRECISION_REDUCTION. Atomics are disabled
+        # explicitly even though this is also the cuBLAS handle default.
+        CUDA.CUBLAS.math_mode!(h, CUDA.PEDANTIC_MATH)
+        CUDA.CUBLAS.cublasSetAtomicsMode(
+            h,
+            CUDA.CUBLAS.CUBLAS_ATOMICS_NOT_ALLOWED,
+        )
+    end
     # Keep the handle on CUDA's legacy default stream. The shared grid-wise
     # library launches CUDA C++ kernels and Thrust operations on that stream.
     # Binding this handle to CUDA.jl's task stream would make the C++ kernels
     # and cuBLAS reductions race each other.
     return CUBLASHandle(h)
+end
+
+"""Return the effective reproducibility settings of the grid-wise handle."""
+function gridWise_cublas_configuration()
+    wrapper = get_gridWise_cublas_handle()
+    atomics = Ref{CUDA.CUBLAS.cublasAtomicsMode_t}()
+    math_mode = Ref{UInt32}()
+    CUDA.CUBLAS.cublasGetAtomicsMode(wrapper.handle, atomics)
+    CUDA.CUBLAS.cublasGetMathMode(wrapper.handle, math_mode)
+    return (
+        reproducible = _cublas_reproducible_enabled[],
+        workspace_config = get(ENV, "CUBLAS_WORKSPACE_CONFIG", ""),
+        atomics_mode = atomics[],
+        math_mode = math_mode[],
+    )
 end
 
 """
