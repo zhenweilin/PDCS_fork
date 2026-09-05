@@ -1228,6 +1228,7 @@ library's internal state and resources.
 """
 mutable struct CUBLASHandle
     handle::cublasHandle_t  # Opaque pointer to cuBLAS context
+    workspace::CuArray      # Non-aliasing scratch space for grid-wise kernels
 end
 
 # The grid-wise kernel is the only projection strategy that needs a cuBLAS
@@ -1251,34 +1252,49 @@ function create_cublas_handle()
     # Ensure CUDA context exists (required before creating cuBLAS handle)
     CUDA.zeros(Float32, 1)
 
-    # Create it through CUDA.jl, so it belongs to the current CUDA context
-    # and uses exactly the same cuBLAS runtime as the CuArray arguments.
-    h = CUDA.CUBLAS.cublasCreate()
-    h != C_NULL || error("cublasCreate_v2 returned NULL handle")
-    if _cublas_reproducible_enabled[]
-        # `math_mode!` combines PEDANTIC_MATH with
-        # DISALLOW_REDUCED_PRECISION_REDUCTION. Atomics are disabled
-        # explicitly even though this is also the cuBLAS handle default.
-        CUDA.CUBLAS.math_mode!(h, CUDA.PEDANTIC_MATH)
-        CUDA.CUBLAS.cublasSetAtomicsMode(
-            h,
-            CUDA.CUBLAS.CUBLAS_ATOMICS_NOT_ALLOWED,
-        )
+    # Create and configure the handle through the same shared object that
+    # consumes it. CUDA.jl and the native projection library can resolve to
+    # different cuBLAS installations, whose opaque handles are not
+    # interchangeable.
+    h = Ref{cublasHandle_t}(C_NULL)
+    create_ptr = Libdl.dlsym(_kernlib_ref[], :create_cublas_handle_inner)
+    ccall(create_ptr, Cvoid, (Ref{cublasHandle_t},), h)
+    h[] != C_NULL || error("native cublasCreate_v2 returned NULL handle")
+    configure_ptr =
+        Libdl.dlsym(_kernlib_ref[], :configure_cublas_handle_inner)
+    status = ccall(
+        configure_ptr,
+        Cint,
+        (cublasHandle_t, Cint),
+        h[],
+        _cublas_reproducible_enabled[] ? 1 : 0,
+    )
+    if status != CUBLAS_STATUS_SUCCESS
+        destroy_ptr =
+            Libdl.dlsym(_kernlib_ref[], :destroy_cublas_handle_inner)
+        ccall(destroy_ptr, Cvoid, (cublasHandle_t,), h[])
+        error("native cuBLAS handle configuration failed with status $status")
     end
-    # Keep the handle on CUDA's legacy default stream. The shared grid-wise
-    # library launches CUDA C++ kernels and Thrust operations on that stream.
-    # Binding this handle to CUDA.jl's task stream would make the C++ kernels
-    # and cuBLAS reductions race each other.
-    return CUBLASHandle(h)
+    return CUBLASHandle(h[], CUDA.zeros(Float64, 0))
 end
 
 """Return the effective reproducibility settings of the grid-wise handle."""
 function gridWise_cublas_configuration()
     wrapper = get_gridWise_cublas_handle()
-    atomics = Ref{CUDA.CUBLAS.cublasAtomicsMode_t}()
-    math_mode = Ref{UInt32}()
-    CUDA.CUBLAS.cublasGetAtomicsMode(wrapper.handle, atomics)
-    CUDA.CUBLAS.cublasGetMathMode(wrapper.handle, math_mode)
+    atomics = Ref{Cint}()
+    math_mode = Ref{Cint}()
+    configuration_ptr =
+        Libdl.dlsym(_kernlib_ref[], :cublas_handle_configuration_inner)
+    status = ccall(
+        configuration_ptr,
+        Cint,
+        (cublasHandle_t, Ref{Cint}, Ref{Cint}),
+        wrapper.handle,
+        atomics,
+        math_mode,
+    )
+    status == CUBLAS_STATUS_SUCCESS ||
+        error("native cuBLAS configuration query failed with status $status")
     return (
         reproducible = _cublas_reproducible_enabled[],
         workspace_config = get(ENV, "CUBLAS_WORKSPACE_CONFIG", ""),
@@ -1323,9 +1339,9 @@ function destroy_cublas_handle(ch::CUBLASHandle)
     # Early return if handle is already null
     ch.handle == C_NULL && return nothing
 
-    # Destroy through CUDA.jl's cuBLAS wrapper, matching the Julia-side
-    # creation above.
-    CUDA.CUBLAS.cublasDestroy_v2(ch.handle)
+    # Destroy through the same native library that created and consumed it.
+    destroy_ptr = Libdl.dlsym(_kernlib_ref[], :destroy_cublas_handle_inner)
+    ccall(destroy_ptr, Cvoid, (cublasHandle_t,), ch.handle)
     # Mark handle as destroyed
     ch.handle = C_NULL
     return nothing
@@ -1419,9 +1435,16 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
     # Get function pointer (must be initialized elsewhere, e.g., in __init__)
     fptr = few_block_proj_ptr[]
     fptr != C_NULL || error("few_block_proj not initialized. Did __init__() run?")
-    # This persistent Julia-owned handle is created only on the first
+    # This persistent native-library-owned handle is created only on the first
     # grid-wise projection and reused throughout the optimization.
     gridWise_handle = get_gridWise_cublas_handle()
+    projection_temp = temp
+    if vec === temp
+        if length(gridWise_handle.workspace) < length(vec)
+            gridWise_handle.workspace = CUDA.zeros(eltype(vec), length(vec))
+        end
+        projection_temp = gridWise_handle.workspace
+    end
     # CUDA.jl kernels may have been queued on a task-local stream. Complete
     # them before entering libfew_block_proj.so, whose C++ launches and
     # default-stream cuBLAS handle are ordered with each other.
@@ -1429,14 +1452,14 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
     
     # Call C function from shared library using @ccall macro
     # The function signature matches the C function in libfew_block_proj.so
-    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # Julia-owned cuBLAS handle
+    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # native cuBLAS handle
                              vec::CuPtr{Cdouble},   # Vector to project
                              bl::CuPtr{Cdouble},    # Lower bounds
                              bu::CuPtr{Cdouble},    # Upper bounds
                              D_scaled::CuPtr{Cdouble}, 
                              D_scaled_squared::CuPtr{Cdouble}, 
                              D_scaled_mul_x::CuPtr{Cdouble}, 
-                             temp::CuPtr{Cdouble}, 
+                             projection_temp::CuPtr{Cdouble},
                              t_warm_start::CuPtr{Cdouble}, 
                              cpu_head_start::Ptr{Clong},      # CPU array
                              gpu_ns::CuPtr{Clong},            # GPU array
@@ -1465,7 +1488,14 @@ gridWise_block_proj(args...) = few_block_proj(args...)
 # matrix operations. All kernels are loaded from a single PTX file: utils.ptx
 
 # Path to the shared PTX file containing all utility kernels
-utils_path = joinpath(MODULE_DIR, "cuda/utils.ptx")
+utils_path = joinpath(
+    get(
+        ENV,
+        "PDCS_CUDA_PROJECTION_ARTIFACT_DIR",
+        joinpath(MODULE_DIR, "cuda"),
+    ),
+    "utils.ptx",
+)
 
 # CUDA.jl's CPU CSC convenience upload and the historical utility PTX both
 # assume 32-bit sparse indices. These kernels are compiled by CUDA.jl for the

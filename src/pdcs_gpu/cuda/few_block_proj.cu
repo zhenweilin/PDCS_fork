@@ -67,6 +67,57 @@
 
 #include "exp_proj_kernel.cu"
 
+// A cuBLAS handle is only valid in the cuBLAS runtime that created it.  This
+// shared object may be linked against a different CUDA installation than the
+// one selected internally by CUDA.jl, so create, configure, query, and destroy
+// the grid-wise handle here, next to all of its consumers.
+extern "C" void create_cublas_handle_inner(cublasHandle_t* handle) {
+  *handle = nullptr;
+  cublasStatus_t status = cublasCreate_v2(handle);
+  if (status != CUBLAS_STATUS_SUCCESS) {
+    fprintf(stderr, "few_block_proj: cublasCreate_v2 failed (%d)\n",
+            static_cast<int>(status));
+  }
+}
+
+extern "C" int configure_cublas_handle_inner(cublasHandle_t handle,
+                                                int reproducible) {
+  cublasStatus_t status = cublasSetStream_v2(handle, nullptr);
+  if (status != CUBLAS_STATUS_SUCCESS) return static_cast<int>(status);
+  status = cublasSetAtomicsMode(handle, CUBLAS_ATOMICS_NOT_ALLOWED);
+  if (status != CUBLAS_STATUS_SUCCESS) return static_cast<int>(status);
+  if (reproducible) {
+    cublasMath_t mode = static_cast<cublasMath_t>(
+        CUBLAS_PEDANTIC_MATH |
+        CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    status = cublasSetMathMode(handle, mode);
+  }
+  return static_cast<int>(status);
+}
+
+extern "C" int cublas_handle_configuration_inner(cublasHandle_t handle,
+                                                    int* atomics_mode,
+                                                    int* math_mode) {
+  cublasAtomicsMode_t atomics;
+  cublasMath_t math;
+  cublasStatus_t status = cublasGetAtomicsMode(handle, &atomics);
+  if (status != CUBLAS_STATUS_SUCCESS) return static_cast<int>(status);
+  status = cublasGetMathMode(handle, &math);
+  if (status != CUBLAS_STATUS_SUCCESS) return static_cast<int>(status);
+  *atomics_mode = static_cast<int>(atomics);
+  *math_mode = static_cast<int>(math);
+  return static_cast<int>(CUBLAS_STATUS_SUCCESS);
+}
+
+extern "C" void destroy_cublas_handle_inner(cublasHandle_t handle) {
+  if (handle == nullptr) return;
+  cublasStatus_t status = cublasDestroy_v2(handle);
+  if (status != CUBLAS_STATUS_SUCCESS) {
+    fprintf(stderr, "few_block_proj: cublasDestroy_v2 failed (%d)\n",
+            static_cast<int>(status));
+  }
+}
+
 #if PDCS_PROFILE_GRID_ROOT_SEARCH
 struct GridSocProfileCounters {
   uint64_t projection_events;
@@ -182,11 +233,20 @@ __global__ void soc_proj_scale_kernel(double* sol, double* temp, long* n){
 
 extern void soc_proj(cublasHandle_t handle, double* __restrict__ sol, long* __restrict__ n_cpu, long* __restrict__ n_gpu, long* __restrict__ len_cpu, double* __restrict__ temp, int ThreadPerBlock, int nBlock)
 {
-
+  // Keep the cuBLAS reduction, scalar branch, and cuBLAS scaling in one
+  // stream.  The handle is owned by Julia and is not guaranteed to use the
+  // CUDA C++ translation unit's implicit default stream.  Launching the
+  // scalar kernel without this explicit stream made it observe the previous
+  // projection's workspace value on H100.
+  cudaStream_t stream = nullptr;
+  if (cublasGetStream_v2(handle, &stream) != CUBLAS_STATUS_SUCCESS) {
+    fprintf(stderr, "few_block_proj: cublasGetStream_v2 failed\n");
+    return;
+  }
   cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
   // temp for storing the norm of the vector
   cublasDnrm2(handle, *len_cpu, sol + 1, 1, temp);
-  soc_proj_scale_kernel<<<1, 1>>>(sol, temp, n_gpu);
+  soc_proj_scale_kernel<<<1, 1, 0, stream>>>(sol, temp, n_gpu);
   cublasDscal(handle, *n_cpu, temp, sol, 1);
 
 
@@ -1875,11 +1935,10 @@ extern "C" void few_block_proj(cublasHandle_t handle,
     }
     else if (cpu_proj_type[i] == 5 || cpu_proj_type[i] == 7 || cpu_proj_type[i] == 20 || cpu_proj_type[i] == 21){
       long len_cpu = n_cpu - 1;
-      // sub_temp is already device memory supplied by the caller.  The old
-      // code passed it as a host source to cudaMemcpy, which is invalid, and
-      // allocated/freed a scalar on every projection. cublasDnrm2 overwrites
-      // the workspace before it is read, so use the existing device scalar.
-      soc_proj(handle, sol, &n_cpu, n_gpu, &len_cpu, sub_temp, ThreadPerBlock, nBlock);
+      // The Julia wrapper guarantees that `temp` does not alias `arr`.
+      // Preserve the cone's warm-start value for diagonal projections.
+      soc_proj(handle, sol, &n_cpu, n_gpu, &len_cpu, sub_temp,
+               ThreadPerBlock, nBlock);
     }
     else if (cpu_proj_type[i] == 6 || cpu_proj_type[i] == 22){
       long len_cpu = n_cpu - 1;

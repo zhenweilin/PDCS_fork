@@ -707,36 +707,9 @@ function sufficient_con_proj!(y::dualVector; abs_tol::Float64 = 1e-12, rel_tol::
     global time_proj += time_end - time_start
 end
 
-# `few_con_proj!` used to pass `y.y` as every argument of `few_block_proj`.
-# For an SOC, cublasDnrm2 writes its result to `temp[0]`; aliasing `temp` with
-# `y.y` overwrites the cone's t coordinate before the projection branch is
-# chosen.  Keep one independent GPU workspace per dual vector and reuse it
-# throughout all convergence/restart checks.
-# A weak-key cache retains the workspace while its owning solver vector is
-# alive, without accumulating GPU allocations across independent solves.
-const _few_con_workspace = WeakKeyDict{dualVector,CuArray}()
-const _few_con_workspace_lock = SpinLock()
-
-function few_con_workspace(y::dualVector)
-    workspace = get(_few_con_workspace, y, nothing)
-    workspace !== nothing && length(workspace) == length(y.y) && return workspace
-    lock(_few_con_workspace_lock)
-    try
-        workspace = get(_few_con_workspace, y, nothing)
-        if workspace === nothing || length(workspace) != length(y.y)
-            workspace = CUDA.zeros(eltype(y.y), length(y.y))
-            _few_con_workspace[y] = workspace
-        end
-        return workspace
-    finally
-        unlock(_few_con_workspace_lock)
-    end
-end
-
 function few_con_proj!(y::dualVector; abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12)
     time_start = time()
-    workspace = few_con_workspace(y)
-    few_block_proj(y.y, y.y, y.y, y.y, y.y, y.y, workspace,
+    few_block_proj(y.y, y.y, y.y, y.y, y.y, y.y, y.y,
                    y.t_warm_start_device, y.cone_index_start_cpu,
                    y.y_slice_length, y.y_slice_length_cpu, y.blkLen,
                    y.y_slice_con_proj_kernel, abs_tol, rel_tol)
