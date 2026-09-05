@@ -31,6 +31,10 @@ CUDA.functional() || error("A functional CUDA device is required")
     @test first_handle !== nothing
     @test first_handle.handle != C_NULL
     @test all(isfinite, Array(x))
+    runtime = PDCS_GPU.gridWise_runtime_status()
+    @test runtime.native_enabled
+    @test runtime.state == :passed
+    @test runtime.configuration !== nothing
 
     # A second projection reuses the process-owned handle.
     copyto!(x, input)

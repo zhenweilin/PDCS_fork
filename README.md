@@ -107,6 +107,21 @@ julia ./test/test_soc_gpu.jl     # Test second-order cone solver (GPU)
 julia --project=. ./benchmark/random_soc_projection.jl  # Benchmark random SOC projections by size/count
 ```
 
+### Portable grid-wise CUDA projection
+
+Grid-wise SOC projection uses a native cuBLAS library and performs an
+environment/ABI check plus an alias-safe SOC self-test on first use.  This
+allows CUDA.jl and the native library to come from different toolkit versions
+(for example CUDA 13.x in a Julia artifact and CUDA 12.x for the compiled
+library).  Build artifacts into a separate directory and set
+`PDCS_CUDA_PROJECTION_ARTIFACT_DIR` before starting Julia.  If the check fails,
+the default `PDCS_GRIDWISE_MODE=auto` policy falls back to the block-wise
+projection; use `PDCS_GRIDWISE_MODE=native` to make such a failure fatal.
+
+The complete build, precompile, one-GPU execution, diagnostic, and regression
+instructions are in
+[`src/pdcs_gpu/cuda/README.md`](src/pdcs_gpu/cuda/README.md).
+
 ### PDCS CPU + JumpRW CBF Batch
 
 From the JumpRW repository root, instantiate the PDCS environment once:

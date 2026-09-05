@@ -67,6 +67,46 @@ include("./plain_multi_logger.jl")
 const _kernlib_ref = Ref{Ptr{Cvoid}}(C_NULL)
 const few_block_proj_ptr = Ref{Ptr{Cvoid}}(C_NULL)
 
+# Grid-wise projection is the only PDCS path that crosses a Julia/CUDA shared
+# library boundary.  Keep its state explicit so a stale or incompatible
+# artifact cannot turn a package import into an opaque CUDA failure.
+const _gridwise_native_enabled = Ref(false)
+const _gridwise_artifact_dir = Ref("")
+const _gridwise_native_failure = Ref{Union{Nothing,String}}(nothing)
+const _gridwise_runtime_state = Ref{Symbol}(:uninitialized)
+const _gridwise_fallback_warned = Ref(false)
+
+@inline function _gridwise_mode()
+    mode = lowercase(strip(get(ENV, "PDCS_GRIDWISE_MODE", "auto")))
+    mode in ("auto", "native", "block") && return mode
+    @warn "Invalid PDCS_GRIDWISE_MODE; using auto" mode
+    return "auto"
+end
+
+@inline function _gridwise_artifact_directory()
+    configured = strip(get(ENV, "PDCS_CUDA_PROJECTION_ARTIFACT_DIR", ""))
+    root = isempty(configured) ? joinpath(@__DIR__, "cuda") : configured
+    return normpath(abspath(root))
+end
+
+@inline function _gridwise_required_artifacts()
+    return (
+        "libfew_block_proj.so",
+        "moderate_block_proj.ptx",
+        "sufficient_block_proj.ptx",
+        "massive_block_proj.ptx",
+        "utils.ptx",
+    )
+end
+
+function _disable_gridwise_native!(reason::AbstractString)
+    _gridwise_native_enabled[] = false
+    _gridwise_runtime_state[] = :disabled
+    _gridwise_native_failure[] = String(reason)
+    @warn "Grid-wise native projection disabled; using block-wise fallback" reason
+    return nothing
+end
+
 
 function __init__()
     _heterogeneous_projection_enabled[] =
@@ -86,23 +126,94 @@ function __init__()
         # explicitly when it is created in gpu_kernel.jl.
         CUDA.math_mode!(CUDA.PEDANTIC_MATH)
     end
-    CUDA.functional() || return
-    # Open your own kernel library (NOT libcublas)
-    # Replace with the actual .so path in your project
-    artifact_dir = get(
-        ENV,
-        "PDCS_CUDA_PROJECTION_ARTIFACT_DIR",
-        joinpath(MODULE_DIR, "cuda"),
-    )
+    artifact_dir = _gridwise_artifact_directory()
+    _gridwise_artifact_dir[] = artifact_dir
+    mode = _gridwise_mode()
+    if mode == "block"
+        _disable_gridwise_native!("PDCS_GRIDWISE_MODE=block")
+        return
+    end
+    CUDA.functional() || begin
+        _gridwise_runtime_state[] = :unavailable
+        _gridwise_native_failure[] = "CUDA is not functional"
+        return
+    end
+
+    # Open the projection library, but do not assume that a library with the
+    # right filename has the current ABI.  In particular, old builds created
+    # the cuBLAS handle through CUDA.jl and do not export the native ownership
+    # helpers required by the current implementation.
     libpath = joinpath(artifact_dir, "libfew_block_proj.so")
+    if !isfile(libpath)
+        _disable_gridwise_native!("missing native projection library: $libpath")
+        mode == "native" && error(_gridwise_native_failure[])
+        return
+    end
+    try
+        _kernlib_ref[] = Libdl.dlopen(libpath)
+        few_block_proj_ptr[] = Libdl.dlsym(_kernlib_ref[], :few_block_proj)
+        few_block_proj_ptr[] != C_NULL ||
+            error("symbol few_block_proj is NULL in $libpath")
+        for symbol in (
+            :create_cublas_handle_inner,
+            :configure_cublas_handle_inner,
+            :cublas_handle_configuration_inner,
+            :destroy_cublas_handle_inner,
+        )
+            Libdl.dlsym(_kernlib_ref[], symbol)
+        end
+        _gridwise_native_enabled[] = true
+        _gridwise_runtime_state[] = :uninitialized
+        register_gridWise_cublas_cleanup!()
+    catch err
+        _kernlib_ref[] = C_NULL
+        few_block_proj_ptr[] = C_NULL
+        _disable_gridwise_native!(
+            "incompatible native projection library $libpath: " *
+            sprint(showerror, err),
+        )
+        mode == "native" && rethrow()
+    end
+end
 
-    _kernlib_ref[] = Libdl.dlopen(libpath)
+"""Return non-invasive grid-wise artifact and runtime diagnostics."""
+function gridWise_runtime_status()
+    artifact_dir = isempty(_gridwise_artifact_dir[]) ?
+        _gridwise_artifact_directory() : _gridwise_artifact_dir[]
+    required = _gridwise_required_artifacts()
+    missing = String[
+        joinpath(artifact_dir, name) for name in required
+        if !isfile(joinpath(artifact_dir, name))
+    ]
+    configuration = nothing
+    if _gridwise_runtime_state[] === :passed &&
+       isdefined(@__MODULE__, :_gridWise_cublas_handle)
+        handle = _gridWise_cublas_handle[]
+        if handle !== nothing && handle.handle != C_NULL
+            try
+                configuration = gridWise_cublas_configuration()
+            catch
+                configuration = nothing
+            end
+        end
+    end
+    return (
+        mode = _gridwise_mode(),
+        artifact_dir = artifact_dir,
+        missing_artifacts = missing,
+        native_enabled = _gridwise_native_enabled[],
+        state = _gridwise_runtime_state[],
+        failure = _gridwise_native_failure[],
+        configuration = configuration,
+    )
+end
 
-    # IMPORTANT: symbol name must match EXACTLY what is exported by the .so
-    few_block_proj_ptr[] = Libdl.dlsym(_kernlib_ref[], :few_block_proj)
-
-    few_block_proj_ptr[] != C_NULL || error("Cannot find symbol `few_block_proj` in $libpath")
-    register_gridWise_cublas_cleanup!()
+"""Run the one-time grid-wise cuBLAS/alias self-test and return its status."""
+function check_gridWise_runtime!()
+    isdefined(@__MODULE__, :_ensure_gridwise_runtime!) ||
+        error("PDCS_GPU projection code has not finished loading")
+    _ensure_gridwise_runtime!()
+    return gridWise_runtime_status()
 end
 
 
@@ -134,13 +245,22 @@ include("./cvxpy_wrapper/data_updating.jl")
 include("./precompile.jl")
 redirect_stdout(devnull) do; 
     SnoopPrecompile.@precompile_all_calls begin
-        if CUDA.has_cuda() && get(ENV, "PDCS_SKIP_GPU_PRECOMPILE", "0") != "1"
+        if CUDA.has_cuda() &&
+           get(ENV, "PDCS_SKIP_GPU_PRECOMPILE", "0") != "1" &&
+           _precompile_projection_artifacts_ready()
             @info "============precompile PDCS_GPU============"
-            __precompile_gpu()
-            __precompile_gpu_clean_pointer()
-            @info "============precompile PDCS_GPU done============"
+            try
+                __precompile_gpu()
+                __precompile_gpu_clean_pointer()
+                @info "============precompile PDCS_GPU done============"
+            catch err
+                # GPU contexts and native handles are machine-local.  A
+                # package precompile must remain usable when the build host
+                # has a different driver, device, or CUDA.jl artifact.
+                @warn "GPU precompile smoke test skipped; runtime self-test will run after loading PDCS" exception = (err, catch_backtrace())
+            end
         else
-            @info "============ PDCS_GPU need cuda to precompile ============"
+            @info "============ PDCS_GPU GPU precompile skipped ============"
         end
     end
 end
@@ -148,6 +268,7 @@ end
 export rpdhg_gpu_solve, conic_cache_from_data, model_from_conic_data
 export enable_projection_work_profile!, disable_projection_work_profile!
 export reset_projection_work_profile!, projection_work_profile_summary
+export gridWise_runtime_status, check_gridWise_runtime!
 
 
 end

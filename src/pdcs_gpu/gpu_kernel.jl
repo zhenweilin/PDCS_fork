@@ -86,10 +86,15 @@ const _projection_work_profile_counts =
 const _projection_work_profile_lock = ReentrantLock()
 const _projection_profile_states = Dict{Symbol,ProjectionProfileKernelState}()
 
+@inline _projection_artifact_path(filename) = joinpath(
+    get(ENV, "PDCS_CUDA_PROJECTION_ARTIFACT_DIR", joinpath(MODULE_DIR, "cuda")),
+    filename,
+)
+
 const _projection_profile_paths = Dict(
-    :threadWise => joinpath(MODULE_DIR, "cuda/massive_block_proj_profile.ptx"),
-    :blockWise => joinpath(MODULE_DIR, "cuda/moderate_block_proj_profile.ptx"),
-    :warpWise => joinpath(MODULE_DIR, "cuda/sufficient_block_proj_profile.ptx"),
+    :threadWise => _projection_artifact_path("massive_block_proj_profile.ptx"),
+    :blockWise => _projection_artifact_path("moderate_block_proj_profile.ptx"),
+    :warpWise => _projection_artifact_path("sufficient_block_proj_profile.ptx"),
 )
 const _projection_profile_kernel_names = Dict(
     :threadWise => "massive_block_proj",
@@ -462,10 +467,6 @@ const _simple_block_proj_indexed_kernel = Ref{Union{Nothing,CuFunction}}(nothing
 const _massive_block_proj_lock   = SpinLock()
 
 # Path to the PTX file containing the compiled CUDA kernel
-@inline _projection_artifact_path(filename) = joinpath(
-    get(ENV, "PDCS_CUDA_PROJECTION_ARTIFACT_DIR", joinpath(MODULE_DIR, "cuda")),
-    filename,
-)
 # Name of the kernel function within the PTX file
 const _massive_block_proj_name = "massive_block_proj"
 const _massive_soc_block_proj_name = "massive_soc_block_proj"
@@ -1237,6 +1238,10 @@ end
 const _gridWise_cublas_handle = Ref{Union{Nothing,CUBLASHandle}}(nothing)
 const _gridWise_cublas_handle_lock = SpinLock()
 const _gridWise_cublas_atexit_registered = Ref(false)
+const _gridwise_runtime_lock = SpinLock()
+const _gridwise_fallback_workspace = Ref{Any}(nothing)
+const _gridwise_fallback_metadata_cache = Ref{Any}(nothing)
+const _gridwise_fallback_lock = SpinLock()
 
 """
     create_cublas_handle() -> CUBLASHandle
@@ -1374,6 +1379,171 @@ function register_gridWise_cublas_cleanup!()
     return nothing
 end
 
+"""Emit one explicit warning when a grid-wise call switches to block-wise."""
+function _warn_gridwise_fallback_once!()
+    _gridwise_fallback_warned[] && return nothing
+    lock(_gridwise_runtime_lock)
+    try
+        _gridwise_fallback_warned[] && return nothing
+        @warn(
+            "Using block-wise projection fallback for grid-wise request",
+            mode = _gridwise_mode(),
+            state = _gridwise_runtime_state[],
+            reason = _gridwise_native_failure[],
+        )
+        _gridwise_fallback_warned[] = true
+    finally
+        unlock(_gridwise_runtime_lock)
+    end
+    return nothing
+end
+
+"""Return a persistent non-aliasing workspace on the active CUDA device."""
+function _gridwise_workspace!(n::Integer, ::Type{T}; handle = nothing) where {T}
+    if handle !== nothing
+        workspace = handle.workspace
+        if !(workspace isa CuArray) || eltype(workspace) !== T || length(workspace) < n
+            handle.workspace = CUDA.zeros(T, n)
+        end
+        return handle.workspace
+    end
+    workspace = _gridwise_fallback_workspace[]
+    if !(workspace isa CuArray) || eltype(workspace) !== T || length(workspace) < n
+        workspace = CUDA.zeros(T, n)
+        _gridwise_fallback_workspace[] = workspace
+    end
+    return workspace
+end
+
+"""Upload CPU cone metadata once and refresh it when the caller mutates it."""
+function _gridwise_fallback_metadata(
+    cpu_head_start::Vector{Int64}, cpu_proj_type::Vector{Int64},
+)
+    lock(_gridwise_fallback_lock)
+    try
+        cached = _gridwise_fallback_metadata_cache[]
+        if cached === nothing || cached[1] !== cpu_head_start ||
+           cached[2] !== cpu_proj_type
+            gpu_head_start = CuArray(cpu_head_start)
+            gpu_proj_type = CuArray(cpu_proj_type)
+            _gridwise_fallback_metadata_cache[] =
+                (cpu_head_start, cpu_proj_type, gpu_head_start, gpu_proj_type)
+        else
+            gpu_head_start, gpu_proj_type = cached[3], cached[4]
+            copyto!(gpu_head_start, cpu_head_start)
+            copyto!(gpu_proj_type, cpu_proj_type)
+        end
+        cached = _gridwise_fallback_metadata_cache[]
+        return cached[3], cached[4]
+    finally
+        unlock(_gridwise_fallback_lock)
+    end
+end
+
+"""Invoke the native entry point after all arguments have been validated."""
+function _call_native_few_block_proj!(
+    fptr, handle::CUBLASHandle, vec::T, bl::T, bu::T,
+    D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T,
+    t_warm_start::T, cpu_head_start::Vector{Int64},
+    gpu_ns::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}, cpu_ns::Vector{Int64},
+    blkNum::Int64, cpu_proj_type::Vector{Int64},
+    abs_tol::Float64, rel_tol::Float64,
+) where {T<:CuArray}
+    nThread = Int64(ThreadPerBlock)
+    nBlock = cld(maximum(cpu_ns) + ThreadPerBlock + 1, ThreadPerBlock)
+    @ccall $fptr(
+        handle.handle::Ptr{Nothing},
+        vec::CuPtr{Cdouble}, bl::CuPtr{Cdouble}, bu::CuPtr{Cdouble},
+        D_scaled::CuPtr{Cdouble}, D_scaled_squared::CuPtr{Cdouble},
+        D_scaled_mul_x::CuPtr{Cdouble}, temp::CuPtr{Cdouble},
+        t_warm_start::CuPtr{Cdouble}, cpu_head_start::Ptr{Clong},
+        gpu_ns::CuPtr{Clong}, cpu_ns::Ptr{Clong}, blkNum::Cint,
+        cpu_proj_type::Ptr{Clong}, nThread::Cint, nBlock::Cint,
+        abs_tol::Cdouble, rel_tol::Cdouble,
+    )::Cvoid
+    CUDA.synchronize()
+    return nothing
+end
+
+"""Check the native SOC reduction, scaling, and alias-safe workspace once."""
+function _gridwise_native_selftest!(handle::CUBLASHandle)
+    n = 3
+    expected = (1.0, 1.0, 0.0)
+    bl = CUDA.fill(-Inf, n)
+    bu = CUDA.fill(Inf, n)
+    d = CUDA.ones(Float64, n)
+    d2 = d .* d
+    dmx = CUDA.zeros(Float64, n)
+    warm = CUDA.ones(Float64, 1)
+    starts = Int64[0]
+    sizes = Int64[n]
+    gpu_sizes = CuArray(sizes)
+    types = Int64[20] # ordinary SOC
+
+    for aliases in (false, true)
+        vec = CuArray([0.0, 2.0, 0.0])
+        temp = aliases ?
+            _gridwise_workspace!(n, Float64; handle = handle) :
+            CUDA.zeros(Float64, n)
+        _call_native_few_block_proj!(
+            few_block_proj_ptr[], handle, vec, bl, bu, d, d2, dmx, temp,
+            warm, starts, gpu_sizes, sizes, Int64(1), types, 1e-12, 1e-12,
+        )
+        result = Array(vec)
+        err = maximum(abs.(result .- collect(expected)))
+        isfinite(err) && err <= 1e-10 || error(
+            "grid-wise SOC self-test failed (aliases=$aliases, error=$err, " *
+            "result=$(repr(result)), expected=$(repr(expected)))",
+        )
+    end
+    return nothing
+end
+
+"""Run the native self-test once; return false when block-wise fallback is safer."""
+function _ensure_gridwise_runtime!()
+    if !_gridwise_native_enabled[]
+        _gridwise_mode() == "native" && error(
+            "grid-wise native projection is unavailable: " *
+            string(_gridwise_native_failure[]),
+        )
+        return false
+    end
+    state = _gridwise_runtime_state[]
+    state === :passed && return true
+    state === :failed && return false
+
+    lock(_gridwise_runtime_lock)
+    try
+        state = _gridwise_runtime_state[]
+        state === :passed && return true
+        state === :failed && return false
+        try
+            handle = get_gridWise_cublas_handle()
+            # This query is deliberately made through the same shared object
+            # that creates the handle. It catches stale ABIs before a solver
+            # iteration can silently consume an invalid opaque pointer.
+            gridWise_cublas_configuration()
+            if _pdcs_env_enabled("PDCS_GRIDWISE_SELFTEST", true)
+                _gridwise_native_selftest!(handle)
+            end
+            _gridwise_runtime_state[] = :passed
+            return true
+        catch err
+            reason = sprint(showerror, err, catch_backtrace())
+            _gridwise_native_enabled[] = false
+            _gridwise_runtime_state[] = :failed
+            _gridwise_native_failure[] = reason
+            strict = _gridwise_mode() == "native" ||
+                     _pdcs_env_enabled("PDCS_GRIDWISE_STRICT", false)
+            strict && rethrow()
+            @warn "Grid-wise runtime self-test failed; using block-wise fallback" reason
+            return false
+        end
+    finally
+        unlock(_gridwise_runtime_lock)
+    end
+end
+
 
 # ============================================================================
 # Section 3: Few Block Projection (Shared Library Function)
@@ -1407,10 +1577,13 @@ The native function pointer is initialized by the module's `__init__()` method.
 The cuBLAS handle is initialized lazily on the first grid-wise projection.
 """
 function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, cpu_head_start::Vector{Int64}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, cpu_ns::Vector{Int64}, blkNum::Int64, cpu_proj_type::Vector{Int64}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
+    blkNum == 0 && return nothing
     if _projection_work_profile_should_record()
         # The grid-wise implementation lives in a shared library rather than
         # profile PTX. In diagnostic mode only, execute the same projection
         # formulas through the instrumented block-wise kernel.
+        profile_temp = vec === temp ?
+            _gridwise_workspace!(length(vec), eltype(vec)) : temp
         return moderate_block_proj(
             vec,
             bl,
@@ -1418,7 +1591,7 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
             D_scaled,
             D_scaled_squared,
             D_scaled_mul_x,
-            temp,
+            profile_temp,
             t_warm_start,
             CuArray(cpu_head_start),
             gpu_ns,
@@ -1428,51 +1601,42 @@ function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, 
             rel_tol,
         )
     end
-    # Calculate number of thread blocks based on maximum block size
-    nThread = Int64(ThreadPerBlock)
-    nBlock = cld(maximum(cpu_ns) + ThreadPerBlock + 1, ThreadPerBlock)
-    
-    # Get function pointer (must be initialized elsewhere, e.g., in __init__)
-    fptr = few_block_proj_ptr[]
-    fptr != C_NULL || error("few_block_proj not initialized. Did __init__() run?")
-    # This persistent native-library-owned handle is created only on the first
-    # grid-wise projection and reused throughout the optimization.
-    gridWise_handle = get_gridWise_cublas_handle()
-    projection_temp = temp
-    if vec === temp
-        if length(gridWise_handle.workspace) < length(vec)
-            gridWise_handle.workspace = CUDA.zeros(eltype(vec), length(vec))
+    # A stale .so, a missing artifact, or a cuBLAS runtime mismatch must not
+    # reach the opaque native call.  The one-time self-test either validates
+    # the native path or selects the semantically equivalent block-wise path.
+    _ensure_gridwise_runtime!() || begin
+        _warn_gridwise_fallback_once!()
+        gpu_head_start, gpu_proj_type = _gridwise_fallback_metadata(
+            cpu_head_start, cpu_proj_type,
+        )
+        fallback_temp = temp
+        if vec === temp
+            fallback_temp = _gridwise_workspace!(length(vec), eltype(vec))
         end
-        projection_temp = gridWise_handle.workspace
+        return moderate_block_proj(
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x,
+            fallback_temp, t_warm_start, gpu_head_start, gpu_ns, blkNum,
+            gpu_proj_type, abs_tol, rel_tol,
+        )
     end
-    # CUDA.jl kernels may have been queued on a task-local stream. Complete
-    # them before entering libfew_block_proj.so, whose C++ launches and
-    # default-stream cuBLAS handle are ordered with each other.
+
+    fptr = few_block_proj_ptr[]
+    fptr != C_NULL || error(
+        "grid-wise native projection is enabled but few_block_proj is unavailable",
+    )
+    gridWise_handle = get_gridWise_cublas_handle()
+    projection_temp = vec === temp ?
+        _gridwise_workspace!(length(vec), eltype(vec); handle = gridWise_handle) :
+        temp
+    # CUDA.jl may queue work on a task-local stream.  The native library uses
+    # its own handle/stream, so complete producer work before crossing the ABI.
     CUDA.synchronize()
-    
-    # Call C function from shared library using @ccall macro
-    # The function signature matches the C function in libfew_block_proj.so
-    @ccall $fptr(gridWise_handle.handle::Ptr{Nothing}, # native cuBLAS handle
-                             vec::CuPtr{Cdouble},   # Vector to project
-                             bl::CuPtr{Cdouble},    # Lower bounds
-                             bu::CuPtr{Cdouble},    # Upper bounds
-                             D_scaled::CuPtr{Cdouble}, 
-                             D_scaled_squared::CuPtr{Cdouble}, 
-                             D_scaled_mul_x::CuPtr{Cdouble}, 
-                             projection_temp::CuPtr{Cdouble},
-                             t_warm_start::CuPtr{Cdouble}, 
-                             cpu_head_start::Ptr{Clong},      # CPU array
-                             gpu_ns::CuPtr{Clong},            # GPU array
-                             cpu_ns::Ptr{Clong},              # CPU array
-                             blkNum::Cint, 
-                             cpu_proj_type::Ptr{Clong}, 
-                             nThread::Cint, 
-                             nBlock::Cint,
-                             abs_tol::Cdouble,
-                             rel_tol::Cdouble)::Cvoid
-    
-    # Synchronize to ensure kernel completion
-    CUDA.synchronize()
+    _call_native_few_block_proj!(
+        fptr, gridWise_handle, vec, bl, bu, D_scaled, D_scaled_squared,
+        D_scaled_mul_x, projection_temp, t_warm_start, cpu_head_start,
+        gpu_ns, cpu_ns, blkNum, cpu_proj_type, abs_tol, rel_tol,
+    )
+    return nothing
 end
 
 """Grid-wise projection: the GPU grid cooperates on a small number of cones."""

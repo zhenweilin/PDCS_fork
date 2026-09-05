@@ -216,6 +216,51 @@ function exponent_proj_cpu!(v::AbstractVector{rpdhg_float}, tol = 1e-10)
     return
 end
 
+"""Check that the selected artifact directory is complete before GPU precompile.
+
+GPU handles and CUDA modules must never be serialized into Julia's precompile
+cache.  The artifact/ABI check is therefore limited to files and exported
+symbols; the native cuBLAS/alias self-test runs once after package
+initialization, on the actual device and runtime selected by the user.
+"""
+function _precompile_projection_artifacts_ready()
+    artifact_dir = _gridwise_artifact_directory()
+    missing = String[
+        joinpath(artifact_dir, name) for name in _gridwise_required_artifacts()
+        if !isfile(joinpath(artifact_dir, name))
+    ]
+    libpath = joinpath(artifact_dir, "libfew_block_proj.so")
+    if isfile(libpath)
+        library = nothing
+        try
+            # Inspect the ABI during precompile, but do not create a CUDA
+            # context or a cuBLAS handle here.  Handles must be recreated by
+            # __init__ on the target machine.
+            library = Libdl.dlopen(libpath)
+            for symbol in (
+                :few_block_proj,
+                :create_cublas_handle_inner,
+                :configure_cublas_handle_inner,
+                :cublas_handle_configuration_inner,
+                :destroy_cublas_handle_inner,
+            )
+                Libdl.dlsym(library, symbol)
+            end
+        catch err
+            push!(missing, "native ABI check failed: " * sprint(showerror, err))
+        finally
+            library === nothing || Libdl.dlclose(library)
+        end
+    end
+    isempty(missing) && return true
+    @warn(
+        "Skipping GPU precompile: projection artifacts are incomplete",
+        artifact_dir = artifact_dir,
+        missing = missing,
+    )
+    return false
+end
+
 function __precompile_gpu()
     basedim = Int64(3)
     n = 2 * basedim # number of variables
