@@ -401,6 +401,13 @@ function infoSummary(;info::PDHGCLPInfo)
     @info ("---------------------------------------------------")
 end
 
+"""Write a labeled snapshot of device and CUDA-pool memory to the active logger."""
+function log_cuda_memory_status(stage::AbstractString)
+    status = chomp(sprint(CUDA.pool_status))
+    @info "CUDA memory status ($stage):\n$status"
+    return nothing
+end
+
 
 function rpdhg_gpu_solve_input_gpu_data(;
     n::Integer,
@@ -1201,11 +1208,11 @@ dGType<:Union{
         printInfo(infoAll = sol.info);
     end
     if verbose > 0
-        CUDA.memory_status()
+        log_cuda_memory_status("before main loop")
     end
     main_loop!(solver = solver)
     if verbose > 0
-        CUDA.memory_status()
+        log_cuda_memory_status("after main loop")
     end
     if verbose > 0
         @info ("===============================================")
@@ -2143,13 +2150,13 @@ function rpdhg_gpu_solve(;
     if verbose > 0
         printInfo(infoAll = sol.info);
     end
-    # if verbose > 0
-    #     @info CUDA.memory_status()
-    # end
+    if verbose > 0
+        log_cuda_memory_status("before main loop")
+    end
     main_loop!(solver = solver)
-    # if verbose > 0
-    #     @info CUDA.memory_status()
-    # end
+    if verbose > 0
+        log_cuda_memory_status("after main loop")
+    end
     if verbose > 0
         @info ("===============================================")
         infoSummary(info = sol.info)
