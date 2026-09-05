@@ -428,6 +428,35 @@ function exit_condition_check_diagonal!(; sol::Solution, solver::rpdhgSolver, du
         )
         sol.info.pObj = sol.info.convergeInfo[1].primal_objective
         sol.info.dObj = sol.info.convergeInfo[1].dual_objective
+
+        # Candidate selection above changes the point represented by
+        # convergeInfo[1].  Its status was assigned before this final residual
+        # calculation, so an :optimal status is valid only if the exported
+        # point still satisfies the requested tolerances.
+        if termination_result == :optimal
+            optimality_criteria_met(
+                rel_tol = sol.params.rel_tol,
+                abs_tol = sol.params.abs_tol,
+                info = sol.info.convergeInfo[1],
+            )
+            final_status = sol.info.convergeInfo[1].status
+            if final_status == :optimal
+                sol.info.exit_status = :optimal
+                sol.info.exit_code = 0
+            elseif final_status == :numerical_error_nan
+                sol.info.exit_status = :numerical_error_nan
+                sol.info.exit_code = 8
+                termination_result = :numerical_error_nan
+            elseif final_status == :numerical_error_inf
+                sol.info.exit_status = :numerical_error_inf
+                sol.info.exit_code = 9
+                termination_result = :numerical_error_inf
+            else
+                sol.info.exit_status = :continue
+                sol.info.exit_code = 7
+                termination_result = :continue
+            end
+        end
     end
     return termination_result
 end

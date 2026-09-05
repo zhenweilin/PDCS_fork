@@ -1138,14 +1138,14 @@ dGType<:Union{
                                             primal_sol = sol.x.recovered_primal.primal_sol,
                                             dual_sol = sol.y.recovered_dual.dual_sol,
                                             slack = sol.y.slack,
-                                            dual_sol_temp = sol.y,
+                                            dual_sol_temp = sol.dual_sol_temp,
                                             converge_info = sol.info.convergeInfo[1])
     else
         converge_info_calculation(solver = solver,
                                 primal_sol = sol.x.primal_sol,
                                 dual_sol = sol.y.dual_sol,
                                 slack = sol.y.slack,
-                                dual_sol_temp = sol.y,
+                                dual_sol_temp = sol.dual_sol_temp,
                                 converge_info = sol.info.convergeInfo[1])
     end
     sol.info.start_time = solver_start_time;
@@ -2076,7 +2076,7 @@ function rpdhg_gpu_solve(;
                                             primal_sol = sol.x.recovered_primal.primal_sol,
                                             dual_sol = sol.y.recovered_dual.dual_sol,
                                             slack = sol.y.slack,
-                                            dual_sol_temp = sol.y,
+                                            dual_sol_temp = sol.dual_sol_temp,
                                             converge_info = sol.info.convergeInfo[1])
         # println("norm(sol.x.recovered_primal.primal_sol.x, Inf): $(norm(sol.x.recovered_primal.primal_sol.x, Inf))")
         # println("norm(sol.y.recovered_dual.dual_sol.y, Inf): $(norm(sol.y.recovered_dual.dual_sol.y, Inf))")
@@ -2088,7 +2088,7 @@ function rpdhg_gpu_solve(;
                                 primal_sol = sol.x.primal_sol,
                                 dual_sol = sol.y.dual_sol,
                                 slack = sol.y.slack,
-                                dual_sol_temp = sol.y,
+                                dual_sol_temp = sol.dual_sol_temp,
                                 converge_info = sol.info.convergeInfo[1])
     end
     sol.info.start_time = solver_start_time;

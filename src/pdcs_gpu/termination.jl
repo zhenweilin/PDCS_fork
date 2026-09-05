@@ -88,6 +88,10 @@ function optimality_criteria_met(;
     abs_tol::Float64,
     info::PDHGCLPConvergeInfo,
 )
+    # A convergence record is reused at every termination check.  Do not let a
+    # status from an earlier calculation survive after its residual fields have
+    # been recomputed for a different candidate.
+    info.status = :continue
     if max(info.l_inf_rel_primal_res, info.l_inf_rel_dual_res, info.rel_gap) < rel_tol
         info.status = :optimal;
     end
