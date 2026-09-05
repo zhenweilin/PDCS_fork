@@ -36,12 +36,14 @@ end
 
 function rsoc_cone_proj_diagonal!(x::T, x_part::T, D_scaled::T, D_scaled_part::T, D_scaled_squared_part::T, temp_all_part::T, temp_all2_part::T, dummy1::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 25
-    rsoc_proj_diagonal!(x, x_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_all_part, temp_all2_part, t_warm_start, i)
+    @assert false "rsoc_cone_proj_diagonal! is not implemented"
+    # rsoc_proj_diagonal!(x, x_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_all_part, temp_all2_part, t_warm_start, i)
 end
 
 function rsoc_cone_proj_const_scale_diagonal!(x::T, x_part::T, D_scaled::T, D_scaled_part::T, D_scaled_squared_part::T, temp_all_part::T, temp_all2_part::T, dummy1::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 24
-    rsoc_proj_const_scale!(x, x_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_all_part, temp_all2_part, t_warm_start, i)
+    @assert false "rsoc_cone_proj_const_scale_diagonal! is not implemented"
+    # rsoc_proj_const_scale!(x, x_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_all_part, temp_all2_part, t_warm_start, i)
 end
 
 function EXP_proj_diagonal!(x::T, dummy1::T, dummy2::T, dummy3::T, dummy5::T, dummy6::T, dummy7::T, D::T, solDummy::solVecPrimal, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
@@ -238,7 +240,8 @@ end
 
 function rsoc_cone_proj!(x::T, solDummy::solVecPrimal) where T<:CuArray    
     # code: 23
-    rsoc_proj!(x)
+    @assert false "rsoc_cone_proj! is not implemented"
+    # rsoc_proj!(x)
 end
 
 function EXP_proj!(x::T, solDummy::solVecPrimal) where T<:CuArray
@@ -390,6 +393,7 @@ function setFunctionPointerPrimal!(sol::solVecPrimal, primalConstScale::Vector{B
             sol.primal_sol.x_slice_proj_slack![i] = soc_cone_proj!
             sol.primal_sol.x_slice_proj_kernel_slack[i] = 20
         elseif sol.primal_sol.x_slice_func_symbol[i] == :proj_rsoc_cone!
+            @assert false "rsoc_cone_proj! is not implemented"
             sol.primal_sol.x_slice_proj![i] = rsoc_cone_proj!
             sol.primal_sol.x_slice_proj_kernel[i] = 23
             if primalConstScale[i]
@@ -484,12 +488,14 @@ end
 
 function dual_rsoc_proj_diagonal!(y::T, y_part::T, D_scaled::T, D_scaled_part::T, D_scaled_squared_part::T, temp_part::T, temp2_part::T, Dummy::T, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 9
-    rsoc_proj_diagonal!(y, y_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_part, temp2_part, t_warm_start, i, projInfo)
+    @assert false "rsoc_cone_proj_diagonal! is not implemented"
+    # rsoc_proj_diagonal!(y, y_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_part, temp2_part, t_warm_start, i, projInfo)
 end
 
 function dual_rsoc_proj_const_scale_diagonal!(y::T, y_part::T, D_scaled::T, D_scaled_part::T, D_scaled_squared_part::T, temp_part::T, temp2_part::T, Dummy::T, t_warm_start::Vector{rpdhg_float}, i::Integer, projInfo::timesInfo, vector_length::Integer) where T<:CuArray
     # code: 10
-    rsoc_proj_const_scale!(y, y_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_part, temp2_part, t_warm_start, i, projInfo)
+    @assert false "rsoc_cone_proj_const_scale_diagonal! is not implemented"
+    # rsoc_proj_const_scale!(y, y_part, D_scaled, D_scaled_part, D_scaled_squared_part, temp_part, temp2_part, t_warm_start, i, projInfo)
 end
 
 
@@ -581,7 +587,8 @@ end
 
 function dual_rsoc_proj!(y::T) where T<:CuArray
     # code: 8
-    rsoc_proj!(y)
+    @assert false "dual_rsoc_proj! is not implemented"
+    # rsoc_proj!(y)
 end
 
 function dual_EXP_proj!(y::T) where T<:CuArray
@@ -840,6 +847,7 @@ function setFunctionPointerDual!(dualSol::solVecDual, primalConstScale::Vector{B
             dualSol.dual_sol_mean.y_slice_con_proj_kernel[i] = 5
             dualSol.dual_sol_temp.y_slice_con_proj_kernel[i] = 5
         elseif dualSol.dual_sol.y_slice_func_symbol[i] == :dual_rsoc_proj!
+            @assert false "dual_rsoc_proj! is not implemented"
             dualSol.dual_sol.y_slice_proj![i] = dual_rsoc_proj!
             dualSol.dual_sol_lag.y_slice_proj![i] = dual_rsoc_proj!
             dualSol.dual_sol_mean.y_slice_proj![i] = dual_rsoc_proj!

@@ -31,6 +31,9 @@ mutable struct primalVector
     cone_index_start::CuArray{Int64}
     cone_index_start_cpu::Vector{Int64}
     function primalVector(; x, box_index, soc_cone_indices_start, soc_cone_indices_end, rsoc_cone_indices_start, rsoc_cone_indices_end, exp_cone_indices_start, exp_cone_indices_end, dual_exp_cone_indices_start, dual_exp_cone_indices_end, x_slice_length_cpu = nothing, x_slice_length = nothing, cone_index_start_cpu = nothing, cone_index_start = nothing, place_holder = false)
+        if length(rsoc_cone_indices_start) > 0
+            @assert false "rsoc_cone is not implemented"
+        end
         if !place_holder
             blkLen = length(soc_cone_indices_start) + length(rsoc_cone_indices_start) + length(exp_cone_indices_start) + length(dual_exp_cone_indices_start)
             first_init = true
@@ -119,6 +122,7 @@ mutable struct primalVector
                 end
             end
             if length(rsoc_cone_indices_start) > 0
+                @assert false "rsoc_cone is not implemented"
                 for (start_idx, end_idx) in zip(rsoc_cone_indices_start, rsoc_cone_indices_end)
                     x_slice[baseIndex] = @view x[start_idx:end_idx]
                     x_slice_proj![baseIndex] = x -> println("proj_rsoc_cone! not implemented");

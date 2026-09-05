@@ -15,7 +15,7 @@ where $\mathcal{K}_d$ and $\mathcal{K}_p$ are closed convex cones.
 ### Features
 
 The solver supports the following cone types:
-- **Second-order cone** (SOC) and **rotated second-order cone** (RSOC)
+- **Second-order cone** (SOC)
 - **Exponential cone** and **dual exponential cone**
 
 The implementation provides both CPU and GPU-accelerated solvers, with the GPU version leveraging CUDA for enhanced computational performance on large-scale problems.
@@ -113,10 +113,13 @@ Grid-wise SOC projection uses a native cuBLAS library and performs an
 environment/ABI check plus an alias-safe SOC self-test on first use.  This
 allows CUDA.jl and the native library to come from different toolkit versions
 (for example CUDA 13.x in a Julia artifact and CUDA 12.x for the compiled
-library).  Build artifacts into a separate directory and set
-`PDCS_CUDA_PROJECTION_ARTIFACT_DIR` before starting Julia.  If the check fails,
-the default `PDCS_GRIDWISE_MODE=auto` policy falls back to the block-wise
-projection; use `PDCS_GRIDWISE_MODE=native` to make such a failure fatal.
+library). Build artifacts into a separate directory and set
+`PDCS_CUDA_PROJECTION_ARTIFACT_DIR` before starting Julia. The default
+`PDCS_GRIDWISE_MODE=native` policy is strict: a missing/stale ABI, failed
+self-test, unsupported native layout, or CUDA/cuBLAS runtime error stops the
+solve instead of silently changing projection strategies. Compatibility
+fallback is available only through explicit `PDCS_GRIDWISE_MODE=auto` or
+`PDCS_GRIDWISE_MODE=block` configuration.
 
 The complete build, precompile, one-GPU execution, diagnostic, and regression
 instructions are in

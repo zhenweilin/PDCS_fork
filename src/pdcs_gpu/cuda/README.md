@@ -31,10 +31,9 @@ The production grid-wise path has four independent safeguards:
 3. If the caller passes `temp === vec`, Julia substitutes a persistent,
    non-aliasing workspace.  This prevents `cublasDnrm2` from overwriting the
    SOC head before the projection branch reads it.
-4. The first grid-wise call performs a small SOC projection self-test (both
-   independent and aliasing workspaces).  If it fails, PDCS automatically uses
-   the semantically equivalent block-wise implementation instead of silently
-   returning an invalid projection.
+4. The first grid-wise call performs a small SOC projection self-test. In the
+   default strict `native` mode a failure stops the run. A block-wise fallback
+   is allowed only when the caller explicitly selects `auto` or `block` mode.
 
 The self-test runs after package loading on the actual GPU.  CUDA contexts and
 native handles are deliberately not serialized in Julia's precompile cache.
@@ -75,13 +74,13 @@ Check the native ABI before running a solver:
 
 ```bash
 nm -D "$artifact_dir/libfew_block_proj.so" | grep -E \
-  'few_block_proj|create_cublas|configure_cublas|configuration_inner|destroy_cublas'
+  'few_block_proj|pdcs_gridwise_abi_version|create_cublas|configure_cublas|configuration_inner|destroy_cublas'
 ldd "$artifact_dir/libfew_block_proj.so" | grep -E 'cublas|cudart|cuda'
 ```
 
-The four handle helper symbols are required.  An old `.so` that only exports
-`few_block_proj` is rejected in native mode and automatically falls back in
-`auto` mode.
+The four handle helper symbols and `pdcs_gridwise_abi_version` are required.
+ABI version 2 makes `few_block_proj` return a checked status. An old
+void-returning `.so` is rejected before any solver iteration.
 
 ## Runtime configuration
 
@@ -97,8 +96,8 @@ export PDCS_SKIP_GPU_PRECOMPILE=1       # useful on shared clusters
 
 | Value | Behavior |
 |---|---|
-| `auto` (default) | Run the ABI/self-test; fall back to block-wise on failure. |
-| `native` | Require the native path; any missing symbol or failed self-test is an error. |
+| `native` (default) | Require the native path; any missing symbol, ABI mismatch, failed self-test, unsupported layout, or runtime error is fatal. |
+| `auto` | Run the ABI/self-test; explicitly permit block-wise compatibility fallback on failure. |
 | `block` | Do not load/use the grid-wise library; always use block-wise projection. |
 
 Whenever a grid-wise call actually takes the block-wise fallback, PDCS emits a
@@ -160,8 +159,15 @@ PDCS_GPU.check_gridWise_runtime!()
 println(PDCS_GPU.gridWise_runtime_status())
 ```
 
-The status reports the artifact directory, missing files, native/fallback
-state, failure reason, and effective cuBLAS reproducibility configuration.
+The status reports the artifact directory, missing files, required/loaded ABI
+version, native/fallback state, failure reason, and effective cuBLAS
+reproducibility configuration.
+
+Before entering the native ABI, the wrapper validates Float64 storage, device
+ownership, cone ranges, dimensions, projection codes, and tolerances. Native
+calls are serialized because they share one process-owned cuBLAS handle and
+workspace. CUDA and cuBLAS failures are returned as checked status codes rather
+than only being printed to stderr.
 
 ## Regression test
 
@@ -187,10 +193,9 @@ dimension=10002: independent/alias max error = 0
 native configuration: reproducible=true, atomics_mode=0, math_mode=18
 ```
 
-The same test can be run with `PDCS_GRIDWISE_MODE=block` to verify the safe
-fallback path.  Fallback is intended for compatibility/correctness, not for
-publication timing; rebuild a matching native artifact to restore peak
-grid-wise performance.
+The same test can be run with `PDCS_GRIDWISE_MODE=block` to verify the explicit
+compatibility path. Fallback must not be used to certify or time grid-wise
+projection; rebuild a matching native artifact instead.
 
 ## Comparing another machine
 
@@ -212,3 +217,11 @@ Also record loaded modules, `LD_LIBRARY_PATH`,
 Julia project/manifest.  A CUDA toolkit used by `nvcc` is not necessarily the
 CUDA runtime selected by CUDA.jl; that distinction is precisely why native
 handle ownership is required.
+
+H100 artifacts must be rebuilt with `ARCH=sm_90`; A100 artifacts must be
+rebuilt with `ARCH=sm_80`. Do not copy a machine-specific `.so`/PTX directory
+to a different GPU architecture and treat a successful package import as a
+runtime test. Run `test/test_gridwise_robustness_gpu.jl` on the target GPU after
+each rebuild; it covers simple cones, SOC, primal/dual EXP,
+diagonal variants, repeated calls, aliasing, concurrent Julia tasks, teardown,
+and invalid-layout rejection for grid-wise and thread-wise paths.

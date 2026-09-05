@@ -243,9 +243,16 @@ function _precompile_projection_artifacts_ready()
                 :configure_cublas_handle_inner,
                 :cublas_handle_configuration_inner,
                 :destroy_cublas_handle_inner,
+                :pdcs_gridwise_abi_version,
             )
                 Libdl.dlsym(library, symbol)
             end
+            abi_ptr = Libdl.dlsym(library, :pdcs_gridwise_abi_version)
+            abi_version = Int(ccall(abi_ptr, Cint, ()))
+            abi_version == _GRIDWISE_NATIVE_ABI_VERSION || error(
+                "native grid-wise ABI version $abi_version does not match " *
+                "required version $(_GRIDWISE_NATIVE_ABI_VERSION)",
+            )
         catch err
             push!(missing, "native ABI check failed: " * sprint(showerror, err))
         finally

@@ -1872,7 +1872,7 @@ massive_block_proj(double* arr, double* bl, double* bu, double* D_scaled, double
       sol[i] = fmax(sol[i], 0.0);
     }
   }
-  if (proj_type[1] == 3 || proj_type[1] == 4){
+  if (blkNum > 1 && (proj_type[1] == 3 || proj_type[1] == 4)){
     // all threads for positive projection
     long n = ns[1];
     double *sol = arr + gpu_head_start[1];
@@ -1891,11 +1891,21 @@ massive_block_proj(double* arr, double* bl, double* bu, double* D_scaled, double
     double *sub_D_scaled_squared = D_scaled_squared + gpu_head_start[i];
     double *sub_D_scaled_mul_x = D_scaled_mul_x + gpu_head_start[i];
     double *sub_temp = temp + gpu_head_start[i];
-    // double *sub_bl = bl + gpu_head_start[i];
-    // double *sub_bu = bu + gpu_head_start[i];
+    double *sub_bl = bl + gpu_head_start[i];
+    double *sub_bu = bu + gpu_head_start[i];
     if (proj_type[i] == 0 || proj_type[i] == 1){
       // dual_free_proj
       ;
+    }
+    else if ((proj_type[i] == 17 || proj_type[i] == 18 ||
+              proj_type[i] == 19) && i != 0) {
+      box_proj(sol, sub_bl, sub_bu, &n);
+    }
+    else if (proj_type[i] == 2 && i != 0) {
+      for (long j = 0; j < n; ++j) sol[j] = 0.0;
+    }
+    else if ((proj_type[i] == 3 || proj_type[i] == 4) && i > 1) {
+      positive_proj(sol, &n);
     }
     // else if (proj_type[i] == 17 || proj_type[i] == 19 || proj_type[i] == 18){
     //   // box_proj

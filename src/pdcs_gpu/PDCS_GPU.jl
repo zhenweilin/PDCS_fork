@@ -66,6 +66,8 @@ include("./plain_multi_logger.jl")
 
 const _kernlib_ref = Ref{Ptr{Cvoid}}(C_NULL)
 const few_block_proj_ptr = Ref{Ptr{Cvoid}}(C_NULL)
+const _GRIDWISE_NATIVE_ABI_VERSION = 2
+const _gridwise_native_abi_version = Ref{Union{Nothing,Int}}(nothing)
 
 # Grid-wise projection is the only PDCS path that crosses a Julia/CUDA shared
 # library boundary.  Keep its state explicit so a stale or incompatible
@@ -77,10 +79,12 @@ const _gridwise_runtime_state = Ref{Symbol}(:uninitialized)
 const _gridwise_fallback_warned = Ref(false)
 
 @inline function _gridwise_mode()
-    mode = lowercase(strip(get(ENV, "PDCS_GRIDWISE_MODE", "auto")))
+    # Scientific runs must exercise the requested grid-wise implementation.
+    # Compatibility fallback remains available, but only by explicit opt-in.
+    mode = lowercase(strip(get(ENV, "PDCS_GRIDWISE_MODE", "native")))
     mode in ("auto", "native", "block") && return mode
-    @warn "Invalid PDCS_GRIDWISE_MODE; using auto" mode
-    return "auto"
+    @warn "Invalid PDCS_GRIDWISE_MODE; using strict native mode" mode
+    return "native"
 end
 
 @inline function _gridwise_artifact_directory()
@@ -103,12 +107,18 @@ function _disable_gridwise_native!(reason::AbstractString)
     _gridwise_native_enabled[] = false
     _gridwise_runtime_state[] = :disabled
     _gridwise_native_failure[] = String(reason)
-    @warn "Grid-wise native projection disabled; using block-wise fallback" reason
+    _gridwise_native_abi_version[] = nothing
+    @warn "Grid-wise native projection is unavailable" reason mode = _gridwise_mode()
     return nothing
 end
 
 
 function __init__()
+    _gridwise_native_enabled[] = false
+    _gridwise_native_abi_version[] = nothing
+    _gridwise_native_failure[] = nothing
+    _gridwise_runtime_state[] = :uninitialized
+    _gridwise_fallback_warned[] = false
     _heterogeneous_projection_enabled[] =
         lowercase(get(ENV, "PDCS_ENABLE_HETEROGENEOUS_PROJECTION", "1")) ∉
         ("0", "false", "no", "off")
@@ -159,9 +169,17 @@ function __init__()
             :configure_cublas_handle_inner,
             :cublas_handle_configuration_inner,
             :destroy_cublas_handle_inner,
+            :pdcs_gridwise_abi_version,
         )
             Libdl.dlsym(_kernlib_ref[], symbol)
         end
+        abi_ptr = Libdl.dlsym(_kernlib_ref[], :pdcs_gridwise_abi_version)
+        abi_version = Int(ccall(abi_ptr, Cint, ()))
+        abi_version == _GRIDWISE_NATIVE_ABI_VERSION || error(
+            "native grid-wise ABI version $abi_version does not match " *
+            "required version $(_GRIDWISE_NATIVE_ABI_VERSION)",
+        )
+        _gridwise_native_abi_version[] = abi_version
         _gridwise_native_enabled[] = true
         _gridwise_runtime_state[] = :uninitialized
         register_gridWise_cublas_cleanup!()
@@ -204,6 +222,8 @@ function gridWise_runtime_status()
         native_enabled = _gridwise_native_enabled[],
         state = _gridwise_runtime_state[],
         failure = _gridwise_native_failure[],
+        abi_version = _gridwise_native_abi_version[],
+        required_abi_version = _GRIDWISE_NATIVE_ABI_VERSION,
         configuration = configuration,
     )
 end
@@ -212,8 +232,13 @@ end
 function check_gridWise_runtime!()
     isdefined(@__MODULE__, :_ensure_gridwise_runtime!) ||
         error("PDCS_GPU projection code has not finished loading")
-    _ensure_gridwise_runtime!()
-    return gridWise_runtime_status()
+    lock(_gridwise_call_lock)
+    try
+        _ensure_gridwise_runtime!()
+        return gridWise_runtime_status()
+    finally
+        unlock(_gridwise_call_lock)
+    end
 end
 
 

@@ -273,7 +273,7 @@ function _profile_block_projection!(
             state.projection_kernel,
             (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
              CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
-             CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+             CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64}, Float64, Float64),
             vec,
             bl,
             bu,
@@ -284,7 +284,7 @@ function _profile_block_projection!(
             t_warm_start,
             gpu_head_start,
             gpu_ns,
-            blkNum,
+            Cint(blkNum),
             proj_type,
             abs_tol,
             rel_tol;
@@ -473,6 +473,143 @@ const _massive_soc_block_proj_name = "massive_soc_block_proj"
 const _massive_block_proj_indexed_name = "massive_block_proj_indexed"
 const _simple_block_proj_indexed_name = "simple_block_proj_indexed"
 
+struct ProjectionLayoutValidation
+    gpu_ns::Any
+    proj_type::Any
+    block_count::Int64
+    vector_length::Int
+    device::Any
+end
+
+const _projection_layout_validations = IdDict{Any,ProjectionLayoutValidation}()
+const _projection_layout_validation_lock = ReentrantLock()
+
+"""Copy and validate immutable cone metadata once per device layout."""
+function _validate_device_projection_layout_once(
+    gpu_head_start::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    gpu_ns::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    proj_type::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    blkNum::Int64, vector_length::Int,
+)
+    blkNum == 0 && return nothing
+    lock(_projection_layout_validation_lock)
+    try
+        cached = get(_projection_layout_validations, gpu_head_start, nothing)
+        active_device = CUDA.device()
+        if cached !== nothing && cached.gpu_ns === gpu_ns &&
+           cached.proj_type === proj_type && cached.block_count == blkNum &&
+           cached.vector_length == vector_length &&
+           cached.device == active_device
+            return nothing
+        end
+        heads = Array(@view gpu_head_start[1:blkNum])
+        sizes = Array(@view gpu_ns[1:blkNum])
+        types = Array(@view proj_type[1:blkNum])
+        previous_stop = 0
+        for index in 1:blkNum
+            head = heads[index]
+            dimension = sizes[index]
+            code = types[index]
+            head >= previous_stop || throw(ArgumentError(
+                "cone $index starts at $head and overlaps or precedes the prior cone",
+            ))
+            dimension > 0 || throw(ArgumentError(
+                "cone $index must have positive size; got $dimension",
+            ))
+            head <= vector_length - dimension || throw(DimensionMismatch(
+                "cone $index range [$head, $(head + dimension)) exceeds " *
+                "vector length $vector_length",
+            ))
+            0 <= code <= 29 || throw(ArgumentError(
+                "cone $index has unknown projection type $code",
+            ))
+            if _is_soc_projection_code(code)
+                dimension >= 2 || throw(DimensionMismatch(
+                    "SOC cone $index must have at least two entries",
+                ))
+            elseif _is_exp_projection_code(code)
+                dimension == 3 || throw(DimensionMismatch(
+                    "exponential cone $index must have exactly three entries; " *
+                    "got $dimension",
+                ))
+            end
+            previous_stop = head + dimension
+        end
+        _projection_layout_validations[gpu_head_start] =
+            ProjectionLayoutValidation(
+                gpu_ns, proj_type, blkNum, vector_length, active_device,
+            )
+        return nothing
+    finally
+        unlock(_projection_layout_validation_lock)
+    end
+end
+
+"""Validate device-buffer ABI invariants shared by PTX projection wrappers."""
+function _validate_device_projection_arguments(
+    vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T,
+    D_scaled_mul_x::T, temp::T, t_warm_start::T,
+    gpu_head_start::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    gpu_ns::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}, blkNum::Int64,
+    proj_type::CUDA.CuArray{Int64,1,CUDA.DeviceMemory},
+    abs_tol::Float64, rel_tol::Float64,
+) where {T<:CuArray}
+    0 <= blkNum <= typemax(Cint) || throw(ArgumentError(
+        "projection block count must be in 0:$(typemax(Cint)); got $blkNum",
+    ))
+    for (name, values) in (
+        ("gpu_head_start", gpu_head_start), ("gpu_ns", gpu_ns),
+        ("proj_type", proj_type),
+    )
+        length(values) >= blkNum || throw(DimensionMismatch(
+            "$name has length $(length(values)), but blkNum=$blkNum",
+        ))
+    end
+    length(t_warm_start) >= blkNum || throw(DimensionMismatch(
+        "t_warm_start has length $(length(t_warm_start)), but blkNum=$blkNum",
+    ))
+    isfinite(abs_tol) && abs_tol > 0 || throw(ArgumentError(
+        "projection abs_tol must be finite and positive; got $abs_tol",
+    ))
+    isfinite(rel_tol) && rel_tol > 0 || throw(ArgumentError(
+        "projection rel_tol must be finite and positive; got $rel_tol",
+    ))
+    active_device = CUDA.device()
+    required_length = length(vec)
+    for (name, values) in (
+        ("vec", vec), ("bl", bl), ("bu", bu),
+        ("D_scaled", D_scaled),
+        ("D_scaled_squared", D_scaled_squared),
+        ("D_scaled_mul_x", D_scaled_mul_x), ("temp", temp),
+    )
+        ndims(values) == 1 || throw(DimensionMismatch(
+            "$name must be a one-dimensional CuArray",
+        ))
+        eltype(values) === Float64 || throw(ArgumentError(
+            "$name must use Float64 storage for the PTX ABI; got " *
+            "$(eltype(values))",
+        ))
+        length(values) >= required_length || throw(DimensionMismatch(
+            "$name has length $(length(values)); expected at least $required_length",
+        ))
+        CUDA.device(values) == active_device || throw(ArgumentError(
+            "$name is not allocated on the active CUDA device",
+        ))
+    end
+    for (name, values) in (
+        ("gpu_head_start", gpu_head_start), ("gpu_ns", gpu_ns),
+        ("proj_type", proj_type),
+    )
+        CUDA.device(values) == active_device || throw(ArgumentError(
+            "$name is not allocated on the active CUDA device",
+        ))
+    end
+    _validate_device_projection_layout_once(
+        gpu_head_start, gpu_ns, proj_type, blkNum, required_length,
+    )
+    return nothing
+end
+
 struct HeterogeneousProjectionPlan
     masked_projection_types::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
     thread_cone_indices::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}
@@ -496,7 +633,14 @@ const _heterogeneous_projection_enabled = Ref(true)
 # regression.  Keep a mutable switch for benchmark A/Bs against the native
 # cooperative reduction without disabling production compaction.
 const _diagonal_soc_compaction_enabled = Ref(true)
-const _heterogeneous_projection_plans = IdDict{Any,HeterogeneousProjectionPlan}()
+struct CachedHeterogeneousProjectionPlan
+    gpu_ns::Any
+    blk_num::Int64
+    plan::HeterogeneousProjectionPlan
+end
+
+const _heterogeneous_projection_plans =
+    IdDict{Any,CachedHeterogeneousProjectionPlan}()
 const _heterogeneous_projection_plan_lock = ReentrantLock()
 const _serial_compaction_minimum = 768
 const _primal_exp_compaction_minimum = 512
@@ -530,18 +674,50 @@ function _get_heterogeneous_projection_plan(
 )
     lock(_heterogeneous_projection_plan_lock)
     try
-        haskey(_heterogeneous_projection_plans, proj_type) &&
-            return _heterogeneous_projection_plans[proj_type]
+        cached = get(_heterogeneous_projection_plans, proj_type, nothing)
+        if cached !== nothing && cached.gpu_ns === gpu_ns &&
+           cached.blk_num == blkNum
+            return cached.plan
+        end
 
-        cpu_ns = Array(gpu_ns)
-        cpu_types = Array(proj_type)
+        0 <= blkNum <= typemax(Cint) || throw(ArgumentError(
+            "projection block count must fit Cint; got $blkNum",
+        ))
+        length(gpu_ns) >= blkNum || throw(DimensionMismatch(
+            "gpu_ns has length $(length(gpu_ns)), but blkNum=$blkNum",
+        ))
+        length(proj_type) >= blkNum || throw(DimensionMismatch(
+            "proj_type has length $(length(proj_type)), but blkNum=$blkNum",
+        ))
+        cpu_ns = Array(@view gpu_ns[1:blkNum])
+        cpu_types = Array(@view proj_type[1:blkNum])
+        for index in 1:blkNum
+            dimension = cpu_ns[index]
+            code = cpu_types[index]
+            dimension > 0 || throw(ArgumentError(
+                "cone $index must have positive size; got $dimension",
+            ))
+            0 <= code <= 29 || throw(ArgumentError(
+                "cone $index has unknown projection type $code",
+            ))
+            if _is_soc_projection_code(code)
+                dimension >= 2 || throw(DimensionMismatch(
+                    "SOC cone $index must have at least two entries",
+                ))
+            elseif _is_exp_projection_code(code)
+                dimension == 3 || throw(DimensionMismatch(
+                    "exponential cone $index must have exactly three entries; " *
+                    "got $dimension",
+                ))
+            end
+        end
         soc_only = all(
             code -> _is_simple_projection_code(code) ||
                     _is_soc_projection_code(code) ||
                     _is_rsoc_projection_code(code),
             cpu_types,
         )
-        cone_count = min(Int(blkNum), length(cpu_types), length(cpu_ns))
+        cone_count = Int(blkNum)
         serial_indices = Int64[]
         tiny_soc_indices = Int64[]
         warp_soc_indices = Int64[]
@@ -655,7 +831,8 @@ function _get_heterogeneous_projection_plan(
             fully_compacted,
             soc_only,
         )
-        _heterogeneous_projection_plans[proj_type] = plan
+        _heterogeneous_projection_plans[proj_type] =
+            CachedHeterogeneousProjectionPlan(gpu_ns, blkNum, plan)
         return plan
     finally
         unlock(_heterogeneous_projection_plan_lock)
@@ -773,11 +950,11 @@ function _launch_indexed_thread_projection!(
         get_massive_block_proj_indexed_kernel(),
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
-         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64},
          Float64, Float64),
         vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
         t_warm_start, gpu_head_start, gpu_ns, plan.thread_cone_indices,
-        plan.thread_cone_count, proj_type, abs_tol, rel_tol;
+        Cint(plan.thread_cone_count), proj_type, abs_tol, rel_tol;
         blocks = cld(plan.thread_cone_count, ThreadPerBlock),
         threads = ThreadPerBlock,
     )
@@ -795,11 +972,11 @@ function _launch_indexed_compact_soc_projection!(
         get_massive_block_proj_indexed_kernel(),
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
-         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64},
          Float64, Float64),
         vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
         t_warm_start, gpu_head_start, gpu_ns,
-        plan.compact_soc_cone_indices, plan.compact_soc_cone_count,
+        plan.compact_soc_cone_indices, Cint(plan.compact_soc_cone_count),
         proj_type, abs_tol, rel_tol;
         blocks = cld(plan.compact_soc_cone_count, ThreadPerBlock),
         threads = ThreadPerBlock,
@@ -815,9 +992,9 @@ function _launch_indexed_simple_projection!(
     CUDA.cudacall(
         get_simple_block_proj_indexed_kernel(),
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64},
-         CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}),
+         CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64}),
         vec, bl, bu, gpu_head_start, gpu_ns, plan.simple_cone_indices,
-        plan.simple_cone_count, proj_type;
+        Cint(plan.simple_cone_count), proj_type;
         blocks = plan.simple_cone_count,
         threads = ThreadPerBlock,
     )
@@ -850,6 +1027,12 @@ The kernel computes the projection onto constraint sets defined by the bounds
 and scaling matrices, using the specified projection types for each block.
 """
 function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
+    _validate_device_projection_arguments(
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+        abs_tol, rel_tol,
+    )
+    blkNum == 0 && return nothing
     # Calculate number of thread blocks needed
     # cld(x, y) = ceil(x/y) = smallest integer >= x/y
     nBlock = max(1, cld(blkNum, ThreadPerBlock))
@@ -880,9 +1063,9 @@ function massive_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared:
         CUDA.cudacall(
         projection_kernel,
         # Kernel function signature: all pointers to device memory
-        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+        (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64}, Float64, Float64),
         # Kernel arguments
-        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type, abs_tol, rel_tol;
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, Cint(blkNum), proj_type, abs_tol, rel_tol;
         # Launch configuration: nBlock blocks, ThreadPerBlock threads per block
         blocks = nBlock, threads = ThreadPerBlock
         )
@@ -969,13 +1152,13 @@ function _launch_indexed_block_projection!(
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Int64}, CuPtr{Int64},
-         CuPtr{Int64}, Int64, CuPtr{Int64}, Int64,
-         CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
+         CuPtr{Int64}, Cint, CuPtr{Int64}, Cint,
+         CuPtr{Int64}, Cint, CuPtr{Int64}, Float64, Float64),
         vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
         t_warm_start, gpu_head_start, gpu_ns,
-        plan.native_cone_indices, plan.native_cone_count,
-        plan.simple_cone_indices, plan.simple_cone_count,
-        plan.serial_cone_indices, plan.serial_cone_count,
+        plan.native_cone_indices, Cint(plan.native_cone_count),
+        plan.simple_cone_indices, Cint(plan.simple_cone_count),
+        plan.serial_cone_indices, Cint(plan.serial_cone_count),
         proj_type, abs_tol, rel_tol;
         blocks = total_blocks,
         threads = ThreadPerBlock,
@@ -991,6 +1174,12 @@ Similar to massive_block_proj but uses a different block configuration:
 nBlock = blkNum + 1 (one block per constraint block plus one extra).
 """
 function moderate_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
+    _validate_device_projection_arguments(
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+        abs_tol, rel_tol,
+    )
+    blkNum == 0 && return nothing
     # For moderate blocks, use one block per constraint block plus one
     nBlock = blkNum + 1
     if _projection_work_profile_should_record()
@@ -1012,8 +1201,8 @@ function moderate_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared
         if plan === nothing || !plan.fully_compacted
             CUDA.cudacall(
             get_moderate_block_proj_kernel(),
-            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
-            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, launch_projection_types, abs_tol, rel_tol;
+            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64}, Float64, Float64),
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, Cint(blkNum), launch_projection_types, abs_tol, rel_tol;
             blocks = nBlock, threads = ThreadPerBlock
             )
         else
@@ -1113,11 +1302,11 @@ function _launch_indexed_warp_projection!(
         get_sufficient_block_proj_indexed_kernel(),
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
-         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64},
          Float64, Float64),
         vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
         t_warm_start, gpu_head_start, gpu_ns, plan.native_cone_indices,
-        plan.native_cone_count, proj_type, abs_tol, rel_tol;
+        Cint(plan.native_cone_count), proj_type, abs_tol, rel_tol;
         blocks = cld(plan.native_cone_count * 32, ThreadPerBlock),
         threads = ThreadPerBlock,
     )
@@ -1135,12 +1324,12 @@ function _launch_indexed_compact_warp_soc_projection!(
         get_sufficient_block_proj_indexed_kernel(),
         (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
          CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64},
-         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64},
+         CuPtr{Int64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64},
          Float64, Float64),
         vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
         t_warm_start, gpu_head_start, gpu_ns,
         plan.compact_warp_soc_cone_indices,
-        plan.compact_warp_soc_cone_count, proj_type, abs_tol, rel_tol;
+        Cint(plan.compact_warp_soc_cone_count), proj_type, abs_tol, rel_tol;
         blocks = cld(plan.compact_warp_soc_cone_count * 32, ThreadPerBlock),
         threads = ThreadPerBlock,
     )
@@ -1155,6 +1344,12 @@ Uses a different block configuration: nBlock = ceil((blkNum + 1) * 32 / ThreadPe
 which provides more blocks for better GPU utilization.
 """
 function sufficient_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, gpu_head_start::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, blkNum::Int64, proj_type::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
+    _validate_device_projection_arguments(
+        vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+        t_warm_start, gpu_head_start, gpu_ns, blkNum, proj_type,
+        abs_tol, rel_tol,
+    )
+    blkNum == 0 && return nothing
     # Calculate blocks: (blkNum + 1) * 32 elements distributed across thread blocks
     nBlock = cld((blkNum + 1) * 32, ThreadPerBlock)
     if _projection_work_profile_should_record()
@@ -1176,8 +1371,8 @@ function sufficient_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squar
         if plan === nothing || !plan.fully_compacted
             CUDA.cudacall(
             get_sufficient_block_proj_kernel(),
-            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Int64, CuPtr{Int64}, Float64, Float64),
-            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, blkNum, launch_projection_types, abs_tol, rel_tol;
+            (CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Float64}, CuPtr{Int64}, CuPtr{Int64}, Cint, CuPtr{Int64}, Float64, Float64),
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp, t_warm_start, gpu_head_start, gpu_ns, Cint(blkNum), launch_projection_types, abs_tol, rel_tol;
             blocks = nBlock, threads = ThreadPerBlock
             )
         else
@@ -1230,6 +1425,7 @@ library's internal state and resources.
 mutable struct CUBLASHandle
     handle::cublasHandle_t  # Opaque pointer to cuBLAS context
     workspace::CuArray      # Non-aliasing scratch space for grid-wise kernels
+    device::Any             # CUDA device on which the handle was created
 end
 
 # The grid-wise kernel is the only projection strategy that needs a cuBLAS
@@ -1239,6 +1435,7 @@ const _gridWise_cublas_handle = Ref{Union{Nothing,CUBLASHandle}}(nothing)
 const _gridWise_cublas_handle_lock = SpinLock()
 const _gridWise_cublas_atexit_registered = Ref(false)
 const _gridwise_runtime_lock = SpinLock()
+const _gridwise_call_lock = ReentrantLock()
 const _gridwise_fallback_workspace = Ref{Any}(nothing)
 const _gridwise_fallback_metadata_cache = Ref{Any}(nothing)
 const _gridwise_fallback_lock = SpinLock()
@@ -1280,7 +1477,7 @@ function create_cublas_handle()
         ccall(destroy_ptr, Cvoid, (cublasHandle_t,), h[])
         error("native cuBLAS handle configuration failed with status $status")
     end
-    return CUBLASHandle(h[], CUDA.zeros(Float64, 0))
+    return CUBLASHandle(h[], CUDA.zeros(Float64, 0), CUDA.device())
 end
 
 """Return the effective reproducibility settings of the grid-wise handle."""
@@ -1317,7 +1514,14 @@ iteration of the solve.
 """
 function get_gridWise_cublas_handle()
     current = _gridWise_cublas_handle[]
-    current !== nothing && current.handle != C_NULL && return current
+    if current !== nothing && current.handle != C_NULL
+        current.device == CUDA.device() || error(
+            "grid-wise cuBLAS handle belongs to CUDA device " *
+            "$(current.device), but the active device is $(CUDA.device()); " *
+            "release the handle before switching devices",
+        )
+        return current
+    end
 
     lock(_gridWise_cublas_handle_lock)
     try
@@ -1360,13 +1564,18 @@ this between projections: the handle is intentionally reused for the whole
 optimization. It is available for explicit teardown after the final solve.
 """
 function release_gridWise_cublas_handle!()
-    lock(_gridWise_cublas_handle_lock)
+    lock(_gridwise_call_lock)
     try
-        current = _gridWise_cublas_handle[]
-        current === nothing || destroy_cublas_handle(current)
-        _gridWise_cublas_handle[] = nothing
+        lock(_gridWise_cublas_handle_lock)
+        try
+            current = _gridWise_cublas_handle[]
+            current === nothing || destroy_cublas_handle(current)
+            _gridWise_cublas_handle[] = nothing
+        finally
+            unlock(_gridWise_cublas_handle_lock)
+        end
     finally
-        unlock(_gridWise_cublas_handle_lock)
+        unlock(_gridwise_call_lock)
     end
     return nothing
 end
@@ -1380,7 +1589,7 @@ function register_gridWise_cublas_cleanup!()
 end
 
 """Emit one explicit warning when a grid-wise call switches to block-wise."""
-function _warn_gridwise_fallback_once!()
+function _warn_gridwise_fallback_once!(reason = _gridwise_native_failure[])
     _gridwise_fallback_warned[] && return nothing
     lock(_gridwise_runtime_lock)
     try
@@ -1389,7 +1598,7 @@ function _warn_gridwise_fallback_once!()
             "Using block-wise projection fallback for grid-wise request",
             mode = _gridwise_mode(),
             state = _gridwise_runtime_state[],
-            reason = _gridwise_native_failure[],
+            reason = reason,
         )
         _gridwise_fallback_warned[] = true
     finally
@@ -1401,14 +1610,19 @@ end
 """Return a persistent non-aliasing workspace on the active CUDA device."""
 function _gridwise_workspace!(n::Integer, ::Type{T}; handle = nothing) where {T}
     if handle !== nothing
+        handle.device == CUDA.device() || error(
+            "grid-wise workspace requested on a different CUDA device",
+        )
         workspace = handle.workspace
-        if !(workspace isa CuArray) || eltype(workspace) !== T || length(workspace) < n
+        if !(workspace isa CuArray) || eltype(workspace) !== T ||
+           length(workspace) < n || CUDA.device(workspace) != CUDA.device()
             handle.workspace = CUDA.zeros(T, n)
         end
         return handle.workspace
     end
     workspace = _gridwise_fallback_workspace[]
-    if !(workspace isa CuArray) || eltype(workspace) !== T || length(workspace) < n
+    if !(workspace isa CuArray) || eltype(workspace) !== T ||
+       length(workspace) < n || CUDA.device(workspace) != CUDA.device()
         workspace = CUDA.zeros(T, n)
         _gridwise_fallback_workspace[] = workspace
     end
@@ -1422,12 +1636,14 @@ function _gridwise_fallback_metadata(
     lock(_gridwise_fallback_lock)
     try
         cached = _gridwise_fallback_metadata_cache[]
+        active_device = CUDA.device()
         if cached === nothing || cached[1] !== cpu_head_start ||
-           cached[2] !== cpu_proj_type
+           cached[2] !== cpu_proj_type || cached[5] != active_device
             gpu_head_start = CuArray(cpu_head_start)
             gpu_proj_type = CuArray(cpu_proj_type)
             _gridwise_fallback_metadata_cache[] =
-                (cpu_head_start, cpu_proj_type, gpu_head_start, gpu_proj_type)
+                (cpu_head_start, cpu_proj_type, gpu_head_start, gpu_proj_type,
+                 active_device)
         else
             gpu_head_start, gpu_proj_type = cached[3], cached[4]
             copyto!(gpu_head_start, cpu_head_start)
@@ -1438,6 +1654,132 @@ function _gridwise_fallback_metadata(
     finally
         unlock(_gridwise_fallback_lock)
     end
+end
+
+const _GRIDWISE_SOC_TYPES = (5, 6, 7, 20, 21, 22)
+const _GRIDWISE_EXP_TYPES = (11, 12, 13, 14, 15, 16, 26, 27, 28, 29)
+
+"""Validate the host layout and device buffers before crossing the C ABI."""
+function _validate_gridwise_arguments(
+    vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T,
+    D_scaled_mul_x::T, temp::T, t_warm_start::T,
+    cpu_head_start::Vector{Int64},
+    gpu_ns::CUDA.CuArray{Int64,1,CUDA.DeviceMemory}, cpu_ns::Vector{Int64},
+    blkNum::Int64, cpu_proj_type::Vector{Int64},
+    abs_tol::Float64, rel_tol::Float64,
+) where {T<:CuArray}
+    0 < blkNum <= typemax(Cint) || throw(ArgumentError(
+        "grid-wise block count must be in 1:$(typemax(Cint)); got $blkNum",
+    ))
+    for (name, values) in (
+        ("cpu_head_start", cpu_head_start),
+        ("gpu_ns", gpu_ns),
+        ("cpu_ns", cpu_ns),
+        ("cpu_proj_type", cpu_proj_type),
+    )
+        length(values) >= blkNum || throw(DimensionMismatch(
+            "$name has length $(length(values)), but blkNum=$blkNum",
+        ))
+    end
+    length(t_warm_start) >= blkNum || throw(DimensionMismatch(
+        "t_warm_start has length $(length(t_warm_start)), but blkNum=$blkNum",
+    ))
+    isfinite(abs_tol) && abs_tol > 0 || throw(ArgumentError(
+        "grid-wise abs_tol must be finite and positive; got $abs_tol",
+    ))
+    isfinite(rel_tol) && rel_tol > 0 || throw(ArgumentError(
+        "grid-wise rel_tol must be finite and positive; got $rel_tol",
+    ))
+
+    active_device = CUDA.device()
+    required_length = length(vec)
+    for (name, values) in (
+        ("vec", vec), ("bl", bl), ("bu", bu),
+        ("D_scaled", D_scaled),
+        ("D_scaled_squared", D_scaled_squared),
+        ("D_scaled_mul_x", D_scaled_mul_x), ("temp", temp),
+    )
+        ndims(values) == 1 || throw(DimensionMismatch(
+            "$name must be a one-dimensional CuArray",
+        ))
+        eltype(values) === Float64 || throw(ArgumentError(
+            "$name must use Float64 storage for the native C ABI; got " *
+            "$(eltype(values))",
+        ))
+        CUDA.device(values) == active_device || throw(ArgumentError(
+            "$name is allocated on $(CUDA.device(values)), but the active " *
+            "CUDA device is $active_device",
+        ))
+    end
+    CUDA.device(gpu_ns) == active_device || throw(ArgumentError(
+        "gpu_ns is not allocated on the active CUDA device",
+    ))
+
+    required_bl = 1
+    required_bu = 1
+    required_D_scaled = 1
+    required_D_scaled_squared = 1
+    required_D_scaled_mul_x = 1
+    required_temp = 1
+    previous_stop = 0
+    for index in 1:blkNum
+        head = cpu_head_start[index]
+        size = cpu_ns[index]
+        head >= previous_stop || throw(ArgumentError(
+            "cone $index starts at $head and overlaps or precedes the prior cone",
+        ))
+        size > 0 || throw(ArgumentError(
+            "cone $index must have positive size; got $size",
+        ))
+        head <= required_length - size || throw(DimensionMismatch(
+            "cone $index range [$head, $(head + size)) exceeds vector length " *
+            "$required_length",
+        ))
+        projection_type = cpu_proj_type[index]
+        0 <= projection_type <= 29 || throw(ArgumentError(
+            "cone $index has unknown projection type $projection_type",
+        ))
+        stop = head + size
+        if projection_type in (17, 18, 19)
+            required_bl = max(required_bl, stop)
+            required_bu = max(required_bu, stop)
+        elseif projection_type in (5, 7, 20, 21)
+            required_temp = max(required_temp, stop)
+        elseif projection_type in (6, 22)
+            required_D_scaled = max(required_D_scaled, stop)
+            required_D_scaled_squared = max(required_D_scaled_squared, stop)
+            required_D_scaled_mul_x = max(required_D_scaled_mul_x, stop)
+            required_temp = max(required_temp, stop)
+        elseif projection_type in (12, 15, 27, 29)
+            required_D_scaled = max(required_D_scaled, stop)
+            required_temp = max(required_temp, stop)
+        end
+        if projection_type in _GRIDWISE_SOC_TYPES
+            size >= 2 || throw(DimensionMismatch(
+                "SOC cone $index must have at least two entries",
+            ))
+        elseif projection_type in _GRIDWISE_EXP_TYPES
+            size == 3 || throw(DimensionMismatch(
+                "exponential cone $index must have exactly three entries; got $size",
+            ))
+        end
+        previous_stop = head + size
+    end
+    for (name, values, required) in (
+        ("vec", vec, required_length),
+        ("bl", bl, required_bl),
+        ("bu", bu, required_bu),
+        ("D_scaled", D_scaled, required_D_scaled),
+        ("D_scaled_squared", D_scaled_squared, required_D_scaled_squared),
+        ("D_scaled_mul_x", D_scaled_mul_x, required_D_scaled_mul_x),
+        ("temp", temp, required_temp),
+    )
+        length(values) >= required || throw(DimensionMismatch(
+            "$name has length $(length(values)); expected at least $required " *
+            "for the active grid-wise projection types",
+        ))
+    end
+    return nothing
 end
 
 """Invoke the native entry point after all arguments have been validated."""
@@ -1451,7 +1793,7 @@ function _call_native_few_block_proj!(
 ) where {T<:CuArray}
     nThread = Int64(ThreadPerBlock)
     nBlock = cld(maximum(cpu_ns) + ThreadPerBlock + 1, ThreadPerBlock)
-    @ccall $fptr(
+    status = @ccall $fptr(
         handle.handle::Ptr{Nothing},
         vec::CuPtr{Cdouble}, bl::CuPtr{Cdouble}, bu::CuPtr{Cdouble},
         D_scaled::CuPtr{Cdouble}, D_scaled_squared::CuPtr{Cdouble},
@@ -1460,41 +1802,59 @@ function _call_native_few_block_proj!(
         gpu_ns::CuPtr{Clong}, cpu_ns::Ptr{Clong}, blkNum::Cint,
         cpu_proj_type::Ptr{Clong}, nThread::Cint, nBlock::Cint,
         abs_tol::Cdouble, rel_tol::Cdouble,
-    )::Cvoid
-    CUDA.synchronize()
+    )::Cint
+    if status != 0
+        reason = if status >= 2000
+            "native grid-wise cuBLAS failure (status $(status - 2000))"
+        elseif status >= 1000
+            "native grid-wise CUDA failure (status $(status - 1000))"
+        else
+            "native grid-wise projection failure (status $status)"
+        end
+        _gridwise_native_enabled[] = false
+        _gridwise_runtime_state[] = :failed
+        _gridwise_native_failure[] = reason
+        error(reason)
+    end
     return nothing
 end
 
 """Check the native SOC reduction, scaling, and alias-safe workspace once."""
 function _gridwise_native_selftest!(handle::CUBLASHandle)
     n = 3
-    expected = (1.0, 1.0, 0.0)
     bl = CUDA.fill(-Inf, n)
     bu = CUDA.fill(Inf, n)
     d = CUDA.ones(Float64, n)
     d2 = d .* d
     dmx = CUDA.zeros(Float64, n)
-    warm = CUDA.ones(Float64, 1)
     starts = Int64[0]
     sizes = Int64[n]
     gpu_sizes = CuArray(sizes)
     types = Int64[20] # ordinary SOC
 
-    for aliases in (false, true)
-        vec = CuArray([0.0, 2.0, 0.0])
-        temp = aliases ?
-            _gridwise_workspace!(n, Float64; handle = handle) :
-            CUDA.zeros(Float64, n)
-        _call_native_few_block_proj!(
-            few_block_proj_ptr[], handle, vec, bl, bu, d, d2, dmx, temp,
-            warm, starts, gpu_sizes, sizes, Int64(1), types, 1e-12, 1e-12,
-        )
-        result = Array(vec)
-        err = maximum(abs.(result .- collect(expected)))
-        isfinite(err) && err <= 1e-10 || error(
-            "grid-wise SOC self-test failed (aliases=$aliases, error=$err, " *
-            "result=$(repr(result)), expected=$(repr(expected)))",
-        )
+    cases = (
+        (name = "interior", input = [2.0, 1.0, 0.0], expected = [2.0, 1.0, 0.0]),
+        (name = "exterior", input = [0.0, 2.0, 0.0], expected = [1.0, 1.0, 0.0]),
+        (name = "polar", input = [-2.0, 1.0, 0.0], expected = zeros(3)),
+    )
+    for case in cases
+        vec = CuArray(case.input)
+        warm = CUDA.ones(Float64, 1)
+        temp = _gridwise_workspace!(n, Float64; handle = handle)
+        for repetition in 1:3
+            _call_native_few_block_proj!(
+                few_block_proj_ptr[], handle, vec, bl, bu, d, d2, dmx,
+                temp, warm, starts, gpu_sizes, sizes, Int64(1), types,
+                1e-12, 1e-12,
+            )
+            result = Array(vec)
+            err = maximum(abs.(result .- case.expected))
+            isfinite(err) && err <= 1e-10 || error(
+                "grid-wise SOC self-test failed (case=$(case.name), " *
+                "repetition=$repetition, error=$err, " *
+                "result=$(repr(result)), expected=$(repr(case.expected)))",
+            )
+        end
     end
     return nothing
 end
@@ -1578,65 +1938,80 @@ The cuBLAS handle is initialized lazily on the first grid-wise projection.
 """
 function few_block_proj(vec::T, bl::T, bu::T, D_scaled::T, D_scaled_squared::T, D_scaled_mul_x::T, temp::T, t_warm_start::T, cpu_head_start::Vector{Int64}, gpu_ns::CUDA.CuArray{Int64, 1, CUDA.DeviceMemory}, cpu_ns::Vector{Int64}, blkNum::Int64, cpu_proj_type::Vector{Int64}, abs_tol::Float64 = 1e-12, rel_tol::Float64 = 1e-12) where T<:CuArray
     blkNum == 0 && return nothing
-    if _projection_work_profile_should_record()
-        # The grid-wise implementation lives in a shared library rather than
-        # profile PTX. In diagnostic mode only, execute the same projection
-        # formulas through the instrumented block-wise kernel.
-        profile_temp = vec === temp ?
-            _gridwise_workspace!(length(vec), eltype(vec)) : temp
-        return moderate_block_proj(
-            vec,
-            bl,
-            bu,
-            D_scaled,
-            D_scaled_squared,
-            D_scaled_mul_x,
-            profile_temp,
-            t_warm_start,
-            CuArray(cpu_head_start),
-            gpu_ns,
-            blkNum,
-            CuArray(cpu_proj_type),
-            abs_tol,
-            rel_tol,
+    lock(_gridwise_call_lock)
+    try
+        _validate_gridwise_arguments(
+            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x, temp,
+            t_warm_start, cpu_head_start, gpu_ns, cpu_ns, blkNum,
+            cpu_proj_type, abs_tol, rel_tol,
         )
-    end
-    # A stale .so, a missing artifact, or a cuBLAS runtime mismatch must not
-    # reach the opaque native call.  The one-time self-test either validates
-    # the native path or selects the semantically equivalent block-wise path.
-    _ensure_gridwise_runtime!() || begin
-        _warn_gridwise_fallback_once!()
-        gpu_head_start, gpu_proj_type = _gridwise_fallback_metadata(
-            cpu_head_start, cpu_proj_type,
-        )
-        fallback_temp = temp
-        if vec === temp
-            fallback_temp = _gridwise_workspace!(length(vec), eltype(vec))
+        aliases_workspace = pointer(vec) == pointer(temp)
+        if _projection_work_profile_should_record()
+            # The grid-wise implementation lives in a shared library rather
+            # than profile PTX. In diagnostic mode only, execute the same
+            # formulas through the instrumented block-wise kernel.
+            profile_temp = aliases_workspace ?
+                _gridwise_workspace!(length(vec), eltype(vec)) : temp
+            return moderate_block_proj(
+                vec,
+                bl,
+                bu,
+                D_scaled,
+                D_scaled_squared,
+                D_scaled_mul_x,
+                profile_temp,
+                t_warm_start,
+                CuArray(cpu_head_start),
+                gpu_ns,
+                blkNum,
+                CuArray(cpu_proj_type),
+                abs_tol,
+                rel_tol,
+            )
         end
-        return moderate_block_proj(
-            vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x,
-            fallback_temp, t_warm_start, gpu_head_start, gpu_ns, blkNum,
-            gpu_proj_type, abs_tol, rel_tol,
-        )
-    end
 
-    fptr = few_block_proj_ptr[]
-    fptr != C_NULL || error(
-        "grid-wise native projection is enabled but few_block_proj is unavailable",
-    )
-    gridWise_handle = get_gridWise_cublas_handle()
-    projection_temp = vec === temp ?
-        _gridwise_workspace!(length(vec), eltype(vec); handle = gridWise_handle) :
-        temp
-    # CUDA.jl may queue work on a task-local stream.  The native library uses
-    # its own handle/stream, so complete producer work before crossing the ABI.
-    CUDA.synchronize()
-    _call_native_few_block_proj!(
-        fptr, gridWise_handle, vec, bl, bu, D_scaled, D_scaled_squared,
-        D_scaled_mul_x, projection_temp, t_warm_start, cpu_head_start,
-        gpu_ns, cpu_ns, blkNum, cpu_proj_type, abs_tol, rel_tol,
-    )
-    return nothing
+        # A stale .so, a missing artifact, or a cuBLAS runtime mismatch must
+        # never reach the opaque native call. Native mode fails explicitly;
+        # auto/block mode is an opt-in compatibility policy.
+        native_ready = _ensure_gridwise_runtime!()
+        fallback_reason = _gridwise_native_failure[]
+        if !native_ready
+            _warn_gridwise_fallback_once!(fallback_reason)
+            gpu_head_start, gpu_proj_type = _gridwise_fallback_metadata(
+                cpu_head_start, cpu_proj_type,
+            )
+            fallback_temp = aliases_workspace ?
+                _gridwise_workspace!(length(vec), eltype(vec)) : temp
+            return moderate_block_proj(
+                vec, bl, bu, D_scaled, D_scaled_squared, D_scaled_mul_x,
+                fallback_temp, t_warm_start, gpu_head_start, gpu_ns, blkNum,
+                gpu_proj_type, abs_tol, rel_tol,
+            )
+        end
+
+        fptr = few_block_proj_ptr[]
+        fptr != C_NULL || error(
+            "grid-wise native projection is enabled but few_block_proj is unavailable",
+        )
+        gridWise_handle = get_gridWise_cublas_handle()
+        projection_temp = aliases_workspace ?
+            _gridwise_workspace!(
+                length(vec), eltype(vec); handle = gridWise_handle,
+            ) : temp
+        # CUDA.jl may queue work on a task-local stream. The native library
+        # uses its own handle/stream, so complete producer work before crossing
+        # the ABI. The C entry point synchronizes again and returns any runtime
+        # failure as a checked status code.
+        CUDA.synchronize()
+        _call_native_few_block_proj!(
+            fptr, gridWise_handle, vec, bl, bu, D_scaled, D_scaled_squared,
+            D_scaled_mul_x, projection_temp, t_warm_start, cpu_head_start,
+            gpu_ns, cpu_ns, blkNum, cpu_proj_type, abs_tol, rel_tol,
+        )
+        return nothing
+    finally
+        unlock(_gridwise_call_lock)
+    end
 end
 
 """Grid-wise projection: the GPU grid cooperates on a small number of cones."""
