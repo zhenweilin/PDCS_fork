@@ -104,6 +104,7 @@ function main()
     result = Dict{String,Any}(
         "allocation_count" => entry["m"] * entry["n"],
         "cuda_visible_devices" => options["--gpu"],
+        "gpu_name" => get(ENV, "FISHER_GPU_NAME", ""),
         "density" => entry["density"],
         "driver_recorded" => true,
         "elapsed_wall_seconds" => time_limit + setup_grace,
@@ -125,6 +126,10 @@ function main()
             "external timeout after $(time_limit + setup_grace) seconds",
         "replicate" => entry["replicate"],
         "run_status" => "driver_timeout",
+        "status_accepted" => false,
+        "validation_accepted" => false,
+        "solver_tolerance_accepted" => false,
+        "validation_tolerance" => parse(Float64, options["--tolerance"]),
         "schema_version" => 1,
         "seed" => entry["seed"],
         "setup_seconds" => setup_seconds,

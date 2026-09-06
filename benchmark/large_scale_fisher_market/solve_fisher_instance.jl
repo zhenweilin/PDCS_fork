@@ -7,6 +7,8 @@ using TOML
 include(joinpath(@__DIR__, "fisher_market_common.jl"))
 using .FisherMarketCommon
 
+const REPO_ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+
 function parse_cli(arguments)
     options = Dict{String,String}()
     index = 1
@@ -45,7 +47,7 @@ function parse_cli(arguments)
         required_julia_version = get(
             options,
             "--required-julia-version",
-            "1.12.5",
+            "1.10.4",
         ),
     )
 end
@@ -54,7 +56,7 @@ const OPTIONS = parse_cli(ARGS)
 
 if OPTIONS.solver == :cupdcs
     @eval using CUDA
-    @eval using PDCS
+    Base.include(Main, joinpath(REPO_ROOT, "src", "pdcs_gpu", "PDCS_GPU.jl"))
 elseif OPTIONS.solver == :scs_gpu
     @eval using SCS
     @eval using SCS_GPU_jll
@@ -140,7 +142,7 @@ function solve_cupdcs(instance, options)
     formulation = build_pdcs_formulation(instance)
     setup_seconds = time() - setup_started
     solve_started = time()
-    solution = PDCS.PDCS_GPU.rpdhg_gpu_solve(
+    solution = PDCS_GPU.rpdhg_gpu_solve(
         n = formulation.variable_count,
         m = formulation.row_count,
         nb = formulation.variable_count,
@@ -194,7 +196,7 @@ function solve_cupdcs(instance, options)
         "solver_dual_residual" =>
             converge_info.l_inf_rel_dual_res,
         "solver_relative_gap" => converge_info.rel_gap,
-        "gpu_backend" => "PDCS.PDCS_GPU.rpdhg_gpu_solve",
+        "gpu_backend" => "PDCS_GPU.rpdhg_gpu_solve",
         "cuda_device" => CUDA.name(CUDA.device()),
     )
     return (
@@ -349,17 +351,24 @@ function main()
         "instance_id" => OPTIONS.instance_id,
         "solver" => string(OPTIONS.solver),
         "tolerance" => OPTIONS.tolerance,
+        "validation_tolerance" => OPTIONS.tolerance,
         "time_limit_seconds" => OPTIONS.time_limit,
         "verbose_level" => OPTIONS.verbose_level,
         "julia_version" => string(VERSION),
         "cuda_visible_devices" => get(ENV, "CUDA_VISIBLE_DEVICES", ""),
+        "gpu_name" => get(ENV, "FISHER_GPU_NAME", ""),
         "started_utc" => string(started),
         "run_status" => "runtime_error",
         "termination_status" => "EXCEPTION",
         "error" => "",
+        "status_accepted" => false,
+        "validation_accepted" => false,
+        "solver_tolerance_accepted" => false,
     )
     exit_code = 1
     try
+        occursin("H100", result["gpu_name"]) ||
+            error("expected an H100, found '$(result["gpu_name"])'")
         entry = load_entry(OPTIONS)
         m = Int(entry["m"])
         n = Int(entry["n"])
@@ -404,9 +413,38 @@ function main()
         instance = nothing
         GC.gc()
 
-        result["run_status"] =
-            result["termination_status"] in ("OPTIMAL", "ALMOST_OPTIMAL") ?
-            "completed" : "solver_stopped"
+        validation_values = Float64[
+            result["supply_rel_residual"],
+            result["utility_rel_residual"],
+            result["nonnegative_violation"],
+            result["exponential_log_violation"],
+        ]
+        result["normalized_violation"] = maximum(validation_values)
+        solver_values = abs.(Float64[
+            result["solver_primal_residual"],
+            result["solver_dual_residual"],
+            result["solver_relative_gap"],
+        ])
+        result["solver_relative_kkt_max"] = maximum(solver_values)
+        result["status_accepted"] =
+            result["termination_status"] in ("OPTIMAL", "ALMOST_OPTIMAL")
+        result["validation_accepted"] =
+            all(isfinite, validation_values) &&
+            result["normalized_violation"] <= OPTIONS.tolerance
+        # cuPDCS reports the same normalized KKT quantities used by its
+        # stopping rule, so enforce the requested tolerance directly.  SCS
+        # and Clarabel expose residual fields with solver-specific scalings;
+        # their common cross-solver acceptance test is the independently
+        # recomputed primal violation above.
+        result["solver_tolerance_accepted"] =
+            OPTIONS.solver != :cupdcs ||
+            (all(isfinite, solver_values) &&
+             result["solver_relative_kkt_max"] <= OPTIONS.tolerance)
+        passed = result["status_accepted"] &&
+            result["validation_accepted"] &&
+            result["solver_tolerance_accepted"] &&
+            isfinite(result["objective_value"])
+        result["run_status"] = passed ? "passed" : "failed"
         result["finished_utc"] = string(now(UTC))
         result["elapsed_wall_seconds"] =
             Dates.value(now(UTC) - started) / 1_000.0
@@ -414,13 +452,16 @@ function main()
             "FISHER_SOLVE_RESULT solver=$(OPTIONS.solver) " *
             "instance=$(OPTIONS.instance_id) " *
             "termination=$(result["termination_status"]) " *
+            "run_status=$(result["run_status"]) " *
+            "normalized_violation=$(result["normalized_violation"]) " *
+            "solver_kkt=$(result["solver_relative_kkt_max"]) " *
             "iterations=$(result["iterations"]) " *
             "objective=$(result["objective_value"]) " *
             "supply_rel=$(result["supply_rel_residual"]) " *
             "utility_rel=$(result["utility_rel_residual"]) " *
             "exp_log_violation=$(result["exponential_log_violation"])",
         )
-        exit_code = result["run_status"] == "completed" ? 0 : 3
+        exit_code = passed ? 0 : 3
     catch error_value
         result["error"] = sprint(showerror, error_value, catch_backtrace())
         result["finished_utc"] = string(now(UTC))

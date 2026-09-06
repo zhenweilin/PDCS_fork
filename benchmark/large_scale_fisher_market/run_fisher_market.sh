@@ -4,13 +4,14 @@ set -uo pipefail
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${BASE_DIR}/../.." && pwd)"
 
-JULIA_BIN="${JULIA_BIN:-julia}"
+LOCAL_JULIA="${ROOT_DIR}/benchmark/large_scale_lasso/.tools/julia-1.10.4/bin/julia"
+JULIA_BIN="${JULIA_BIN:-${LOCAL_JULIA}}"
 CONFIG="${CONFIG:-${BASE_DIR}/fisher_market_cases.toml}"
 SOLVE_SCRIPT="${BASE_DIR}/solve_fisher_instance.jl"
 REPORT_SCRIPT="${BASE_DIR}/fisher_market_report.jl"
 DRIVER_TIMEOUT_SCRIPT="${BASE_DIR}/write_driver_timeout_result.jl"
 RESULT_ROOT="${RESULT_ROOT:-${BASE_DIR}/results}"
-REQUIRED_JULIA_VERSION="${REQUIRED_JULIA_VERSION:-1.12.5}"
+REQUIRED_JULIA_VERSION="${REQUIRED_JULIA_VERSION:-1.10.4}"
 GPU_INDEX="${GPU_INDEX:-0}"
 SOLVERS="${SOLVERS:-cupdcs,scs_gpu,cuclarabel}"
 INSTANCES="${INSTANCES:-all}"
@@ -22,10 +23,14 @@ VERBOSE_LEVEL="${VERBOSE_LEVEL:-2}"
 RERUN="${RERUN:-0}"
 RUN_ID="${RUN_ID_OVERRIDE:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
-PDCS_DEPOT="${PDCS_DEPOT:-${ROOT_DIR}/.julia-depot}"
-CUPDCS_PROJECT="${CUPDCS_PROJECT:-${ROOT_DIR}}"
-SCS_GPU_DEPOT="${SCS_GPU_DEPOT:-/tmp/pdcs_scs_gpu_depot}"
-CUCLARABEL_DEPOT="${CUCLARABEL_DEPOT:-/tmp/pdcs_cuclarabel_depot}"
+FISHER_DEPOT="${FISHER_DEPOT:-${BASE_DIR}/.julia-depot}"
+PYTHONCALL_EXE="${JULIA_PYTHONCALL_EXE:-/usr/bin/python3.12}"
+PDCS_DEPOT="${PDCS_DEPOT:-${FISHER_DEPOT}}"
+CUPDCS_PROJECT="${CUPDCS_PROJECT:-${BASE_DIR}/.envs/cupdcs}"
+SCS_GPU_PROJECT="${SCS_GPU_PROJECT:-${BASE_DIR}/.envs/scs_gpu}"
+CUCLARABEL_PROJECT="${CUCLARABEL_PROJECT:-${BASE_DIR}/.envs/cuclarabel}"
+SCS_GPU_DEPOT="${SCS_GPU_DEPOT:-${FISHER_DEPOT}}"
+CUCLARABEL_DEPOT="${CUCLARABEL_DEPOT:-${FISHER_DEPOT}}"
 
 usage() {
     cat <<EOF
@@ -115,8 +120,8 @@ done
 solver_project() {
     case "$1" in
         cupdcs) printf '%s\n' "${CUPDCS_PROJECT}" ;;
-        scs_gpu) printf '%s\n' "${ROOT_DIR}/benchmark/scs_gpu_env" ;;
-        cuclarabel) printf '%s\n' "${ROOT_DIR}/benchmark/cuclarabel_env" ;;
+        scs_gpu) printf '%s\n' "${SCS_GPU_PROJECT}" ;;
+        cuclarabel) printf '%s\n' "${CUCLARABEL_PROJECT}" ;;
         *) return 1 ;;
     esac
 }
@@ -166,7 +171,7 @@ check_no_problem_data() {
 }
 
 prepare() {
-    local version formal_count smoke_count gpu_state
+    local version formal_count smoke_count gpu_state gpu_names gpu_count
     version="$("${JULIA_BIN}" --version 2>&1)" || return 1
     printf 'JULIA_VERSION %s\n' "${version}"
     [[ "${version}" == "julia version ${REQUIRED_JULIA_VERSION}" ]] || {
@@ -179,7 +184,7 @@ prepare() {
             using TOML
             manifest = TOML.parsefile(ARGS[1])
             @assert manifest["replicates"] == 5
-            @assert manifest["julia_version"] == "1.12.5"
+            @assert manifest["julia_version"] == "1.10.4"
             instances = manifest["instances"]
             @assert length(instances) == 30
             @assert length(unique(entry["id"] for entry in instances)) == 30
@@ -203,9 +208,17 @@ prepare() {
     printf 'FISHER_MANIFEST_VALID formal=%s smoke=%s\n' \
         "${formal_count}" "${smoke_count}"
     check_no_problem_data || return 1
+    gpu_names="$(nvidia-smi --query-gpu=name --format=csv,noheader)" ||
+        return 1
+    gpu_count="$(printf '%s\n' "${gpu_names}" | sed '/^[[:space:]]*$/d' | wc -l)"
+    [[ "${gpu_count}" == "1" && "${gpu_names}" == *H100* ]] || {
+        printf 'Expected exactly one H100, found: %s\n' "${gpu_names}" >&2
+        return 1
+    }
+    export FISHER_GPU_NAME="${gpu_names}"
     gpu_state="$(
-        nvidia-smi -i "${GPU_INDEX}" \
-            --query-gpu=index,name,memory.used,memory.free,utilization.gpu \
+        nvidia-smi \
+            --query-gpu=index,name,memory.total,memory.used,memory.free,utilization.gpu \
             --format=csv,noheader
     )" || return 1
     printf 'GPU_PREFLIGHT %s\n' "${gpu_state}"
@@ -237,13 +250,17 @@ result_status() {
     local path="$1"
     "${JULIA_BIN}" --startup-file=no --project="${ROOT_DIR}" -e '
         using TOML
-        print(get(TOML.parsefile(ARGS[1]), "termination_status", "MISSING"))
+        result = TOML.parsefile(ARGS[1])
+        print(
+            get(result, "run_status", "MISSING"), "|",
+            get(result, "termination_status", "MISSING"),
+        )
     ' "${path}"
 }
 
 successful_status() {
     case "$1" in
-        OPTIMAL|ALMOST_OPTIMAL) return 0 ;;
+        passed\|OPTIMAL|passed\|ALMOST_OPTIMAL) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -298,8 +315,11 @@ run_one() {
         env \
             "JULIA_DEPOT_PATH=${depot}" \
             "CUDA_VISIBLE_DEVICES=${GPU_INDEX}" \
+            "FISHER_GPU_NAME=${FISHER_GPU_NAME:-}" \
             "PDCS_SKIP_GPU_PRECOMPILE=1" \
             "JULIA_PKG_PRECOMPILE_AUTO=0" \
+            "JULIA_CONDAPKG_BACKEND=Null" \
+            "JULIA_PYTHONCALL_EXE=${PYTHONCALL_EXE}" \
         "${JULIA_BIN}" \
             --startup-file=no \
             --project="${project}" \
@@ -316,7 +336,7 @@ run_one() {
             2>&1 | tee "${raw_log}"
     local return_code=${PIPESTATUS[0]}
     printf '%s\n' "${return_code}" > "${attempt}/exit_status.txt"
-    nvidia-smi -i "${GPU_INDEX}" \
+    nvidia-smi \
         --query-gpu=timestamp,index,name,memory.used,memory.free,utilization.gpu \
         --format=csv,noheader > "${attempt}/gpu_after.txt" 2>&1 || true
     if [[ ! -f "${result}" && "${return_code}" == "124" ]]; then
