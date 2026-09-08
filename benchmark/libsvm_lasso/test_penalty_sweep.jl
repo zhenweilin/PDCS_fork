@@ -18,6 +18,8 @@ include(joinpath(@__DIR__, "run_penalty_sweep.jl"))
     @test resolve_compact_zero_columns("auto")
     @test resolve_compact_zero_columns("true")
     @test !resolve_compact_zero_columns("false")
+    @test safe_run_tag("slurm/123 bad") == "slurm_123_bad"
+    @test safe_run_tag("   ") == "local"
 
     A = SparseMatrixCSC{Float32, Int32}(sparse(
         [1, 2, 2],
@@ -48,4 +50,36 @@ include(joinpath(@__DIR__, "run_penalty_sweep.jl"))
         penalty_ratio = 0.1,
         workers = 1,
     )
+end
+
+@testset "penalty sweep resume metadata" begin
+    mktempdir() do directory
+        path = joinpath(directory, "resume.toml")
+        expected = Dict{String,Any}(
+            "dataset" => "tiny",
+            "mode" => "pdcs-gpu",
+            "modeling" => "bulk",
+            "index_type" => "int32",
+            "time_limit_seconds" => 3600.0,
+            "relative_tolerance" => 1e-6,
+            "absolute_tolerance" => 1e-6,
+            "alphas" => [0.1, 1.0],
+            "runs" => Any[
+                Dict("alpha" => 0.1, "termination_status" => "OPTIMAL"),
+                Dict("alpha" => 1.0, "termination_status" => "SCRIPT_ERROR"),
+            ],
+        )
+        atomic_toml_write(path, expected)
+        completed = completed_resume_runs(path, expected, [0.1, 1.0])
+        @test collect(keys(completed)) == [0.1]
+        @test completed[0.1]["termination_status"] == "OPTIMAL"
+
+        mismatched = copy(expected)
+        mismatched["relative_tolerance"] = 1e-5
+        @test_throws ErrorException completed_resume_runs(
+            path,
+            mismatched,
+            [0.1, 1.0],
+        )
+    end
 end

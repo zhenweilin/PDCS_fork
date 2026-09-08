@@ -20,6 +20,8 @@ function parse_cli(arguments)
         "--result",
         "--time-limit",
         "--setup-grace",
+        "--driver-exit-code",
+        "--driver-elapsed-seconds",
         "--tolerance",
         "--gpu",
         "--verbose-level",
@@ -51,6 +53,9 @@ function main()
     solver = options["--solver"]
     time_limit = parse(Float64, options["--time-limit"])
     setup_grace = parse(Float64, options["--setup-grace"])
+    driver_exit_code = parse(Int, options["--driver-exit-code"])
+    driver_elapsed_seconds =
+        parse(Float64, options["--driver-elapsed-seconds"])
     status, setup_seconds, solve_seconds, explanation =
         if solver == "scs_gpu"
             (
@@ -106,8 +111,11 @@ function main()
         "cuda_visible_devices" => options["--gpu"],
         "gpu_name" => get(ENV, "FISHER_GPU_NAME", ""),
         "density" => entry["density"],
+        "driver_elapsed_seconds" => driver_elapsed_seconds,
+        "driver_exit_code" => driver_exit_code,
         "driver_recorded" => true,
-        "elapsed_wall_seconds" => time_limit + setup_grace,
+        "driver_timeout_limit_seconds" => time_limit + setup_grace,
+        "elapsed_wall_seconds" => driver_elapsed_seconds,
         "error" => explanation,
         "finished_utc" => string(Dates.now(Dates.UTC)),
         "generation_seconds" => generation_seconds,
@@ -122,6 +130,22 @@ function main()
         "m" => entry["m"],
         "n" => entry["n"],
         "numerical_digest" => digest,
+        "measurement_schema_version" => 2,
+        "comparison_metric" =>
+            "original_scale_linf_1_plus_max_v1",
+        "comparison_measurement_source" =>
+            "unavailable_no_candidate_solution",
+        "comparison_error" => explanation,
+        "comparison_primal_objective" => NaN,
+        "comparison_dual_objective" => NaN,
+        "comparison_primal_infeasibility_abs" => NaN,
+        "comparison_primal_infeasibility_rel" => NaN,
+        "comparison_dual_infeasibility_abs" => NaN,
+        "comparison_dual_infeasibility_rel" => NaN,
+        "comparison_primal_dual_gap_abs" => NaN,
+        "comparison_primal_dual_gap_rel" => NaN,
+        "comparison_relative_kkt_max" => NaN,
+        "comparison_tolerance_accepted" => false,
         "raw_status" =>
             "external timeout after $(time_limit + setup_grace) seconds",
         "replicate" => entry["replicate"],
@@ -129,6 +153,7 @@ function main()
         "status_accepted" => false,
         "validation_accepted" => false,
         "solver_tolerance_accepted" => false,
+        "native_solver_tolerance_accepted" => false,
         "validation_tolerance" => parse(Float64, options["--tolerance"]),
         "schema_version" => 1,
         "seed" => entry["seed"],
@@ -142,9 +167,17 @@ function main()
         "verbose_level" => parse(Int, options["--verbose-level"]),
     )
     result_path = options["--result"]
-    mkpath(dirname(result_path))
-    open(result_path, "w") do stream
+    result_directory = dirname(result_path)
+    mkpath(result_directory)
+    temporary_path, stream = mktemp(result_directory)
+    try
         TOML.print(stream, result; sorted = true)
+        close(stream)
+        mv(temporary_path, result_path; force = true)
+    catch
+        isopen(stream) && close(stream)
+        isfile(temporary_path) && rm(temporary_path)
+        rethrow()
     end
     println(
         "FISHER_DRIVER_TIMEOUT_RESULT solver=$solver " *

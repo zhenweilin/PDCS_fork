@@ -59,13 +59,53 @@ function format_number(value; digits = 6)
     return @sprintf("%.*g", digits, value)
 end
 
+function comparison_value(row, name)
+    row.result === nothing && return ""
+    haskey(row.result, name) && return row.result[name]
+    # Legacy cuPDCS result files already stored these three values with the
+    # same original-scale definitions under solver_* names.  Never apply this
+    # fallback to SCS or Clarabel because their native scalings differ.
+    row.solver == "cupdcs" || return ""
+    legacy_name = get(
+        Dict(
+            "comparison_primal_infeasibility_rel" =>
+                "solver_primal_residual",
+            "comparison_dual_infeasibility_rel" =>
+                "solver_dual_residual",
+            "comparison_primal_dual_gap_rel" =>
+                "solver_relative_gap",
+        ),
+        name,
+        "",
+    )
+    isempty(legacy_name) && return ""
+    return get(row.result, legacy_name, "")
+end
+
 function same_scale(first, second)
     return first["m"] == second["m"] &&
            first["n"] == second["n"] &&
            first["density"] == second["density"]
 end
 
-function skipped_after_scale_failure(row, rows)
+function result_is_memory_failure(result)
+    result === nothing && return false
+    text = lowercase(
+        string(
+            get(result, "termination_status", ""),
+            " ",
+            get(result, "error", ""),
+        ),
+    )
+    return occursin("out_of_memory", text) ||
+           occursin("outofmemoryerror", text) ||
+           occursin("out of memory", text) ||
+           occursin("cudaerrormemoryallocation", text) ||
+           occursin("cumemalloc", text) ||
+           occursin("failed to allocate", text)
+end
+
+function skipped_after_memory_failure(row, rows)
     row.result === nothing || return false
     row.solver in ("scs_gpu", "cuclarabel") || return false
     return any(rows) do previous
@@ -73,14 +113,13 @@ function skipped_after_scale_failure(row, rows)
         same_scale(previous.entry, row.entry) || return false
         previous.entry["replicate"] < row.entry["replicate"] || return false
         previous.result === nothing && return false
-        return get(previous.result, "termination_status", "") ∉
-               ("OPTIMAL", "ALMOST_OPTIMAL")
+        return result_is_memory_failure(previous.result)
     end
 end
 
 function missing_status(row, rows)
-    return skipped_after_scale_failure(row, rows) ?
-           "SKIPPED_AFTER_SCALE_FAILURE" : row.path
+    return skipped_after_memory_failure(row, rows) ?
+           "SKIPPED_AFTER_MEMORY_FAILURE" : row.path
 end
 
 function digest_errors(rows)
@@ -114,7 +153,7 @@ function append_coverage!(lines, label, rows; show_skipped = false)
         rows,
     )
     skipped = show_skipped ?
-              count(row -> skipped_after_scale_failure(row, rows), rows) : 0
+              count(row -> skipped_after_memory_failure(row, rows), rows) : 0
     push!(
         lines,
         "- $label: $recorded/$(length(rows)) recorded, " *
@@ -130,6 +169,11 @@ function write_report(manifest, smoke_rows, formal_rows, output)
         "Instances are regenerated deterministically in memory and passed " *
         "directly to each solver source API. No JuMP model, CBF, JLD2, NPZ, " *
         "or matrix-data file is used.",
+        "The `comparison_*` errors use the same original-scale infinity-norm " *
+        "normalization as cuPDCS: each absolute residual is divided by " *
+        "`1 + max` of its corresponding unscaled problem quantities. The " *
+        "three solvers' native residual fields are retained in result.toml " *
+        "but are not used for cross-solver comparison.",
         "",
         "## Coverage",
         "",
@@ -144,16 +188,17 @@ function write_report(manifest, smoke_rows, formal_rows, output)
         "",
         "## Small correctness case",
         "",
-        "| Solver | Status | Iterations | Objective | Supply rel. residual " *
-        "| Utility rel. residual | Exp-cone log violation | Wall time (s) |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Solver | Status | Iterations | Objective | Primal infeas. rel. " *
+        "| Dual infeas. rel. | P-D gap rel. | EXP log abs. " *
+        "| EXP rel. upper bound | Wall time (s) |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     )
     for row in smoke_rows
         result = row.result
         if result === nothing
             push!(
                 lines,
-                "| $(row.solver) | $(row.path) |  |  |  |  |  |  |",
+                "| $(row.solver) | $(row.path) |  |  |  |  |  |  |  |  |",
             )
             continue
         end
@@ -163,9 +208,11 @@ function write_report(manifest, smoke_rows, formal_rows, output)
             "| $(get(result, "termination_status", "")) " *
             "| $(get(result, "iterations", "")) " *
             "| $(format_number(get(result, "objective_value", ""))) " *
-            "| $(format_number(get(result, "supply_rel_residual", ""))) " *
-            "| $(format_number(get(result, "utility_rel_residual", ""))) " *
+            "| $(format_number(comparison_value(row, "comparison_primal_infeasibility_rel"))) " *
+            "| $(format_number(comparison_value(row, "comparison_dual_infeasibility_rel"))) " *
+            "| $(format_number(comparison_value(row, "comparison_primal_dual_gap_rel"))) " *
             "| $(format_number(get(result, "exponential_log_violation", ""))) " *
+            "| $(format_number(get(result, "exponential_cone_relative_violation_upper_bound", ""))) " *
             "| $(format_number(get(result, "solve_wall_seconds", ""); digits=5)) |",
         )
     end
@@ -195,8 +242,9 @@ function write_report(manifest, smoke_rows, formal_rows, output)
         "## Formal cases",
         "",
         "| Instance | Solver | Status | Iterations | Objective | " *
+        "Primal infeas. rel. | Dual infeas. rel. | P-D gap rel. | " *
         "Generation (s) | Setup (s) | Solve wall (s) |",
-        "|---|---|---|---:|---:|---:|---:|---:|",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     )
     for row in formal_rows
         result = row.result
@@ -205,7 +253,7 @@ function write_report(manifest, smoke_rows, formal_rows, output)
                 lines,
                 "| $(row.entry["id"]) | $(row.solver) " *
                 "| $(missing_status(row, formal_rows)) " *
-                "|  |  |  |  |  |",
+                "|  |  |  |  |  |  |  |  |",
             )
             continue
         end
@@ -216,6 +264,9 @@ function write_report(manifest, smoke_rows, formal_rows, output)
             "| $(get(result, "termination_status", "")) " *
             "| $(get(result, "iterations", "")) " *
             "| $(format_number(get(result, "objective_value", ""))) " *
+            "| $(format_number(comparison_value(row, "comparison_primal_infeasibility_rel"))) " *
+            "| $(format_number(comparison_value(row, "comparison_dual_infeasibility_rel"))) " *
+            "| $(format_number(comparison_value(row, "comparison_primal_dual_gap_rel"))) " *
             "| $(format_number(get(result, "generation_seconds", ""); digits=5)) " *
             "| $(format_number(get(result, "setup_seconds", ""); digits=5)) " *
             "| $(format_number(get(result, "solve_wall_seconds", ""); digits=5)) |",

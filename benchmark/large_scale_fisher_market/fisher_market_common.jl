@@ -10,6 +10,7 @@ export build_standard_formulation
 export empty_quadratic
 export generate_instance
 export independent_primal_metrics
+export standard_form_relative_errors
 
 const INDEX_TYPE = Int32
 
@@ -273,7 +274,12 @@ end
 Compute solver-independent primal checks without storing the primal vector.
 
 For `(t, 1, z) ∈ ExpCone`, the cone condition is checked in log space as
-`t <= log(z)`, avoiding overflow in `exp(t)`.
+`t <= log(z)`, avoiding overflow in `exp(t)`.  The raw log violation is kept
+as a diagnostic.  Acceptance uses a relative primal-feasibility upper bound
+with the same global `1 + max(||h||∞, ||Gx||∞)` scale as the solver's
+relative conic residual.  Decreasing `t` by the raw log violation produces a
+feasible exponential-cone point, so that quantity is a conservative upper
+bound on the cone distance rather than an unrelated absolute acceptance test.
 """
 function independent_primal_metrics(primal::AbstractVector, instance)
     m = Int(instance.summary.m)
@@ -300,14 +306,22 @@ function independent_primal_metrics(primal::AbstractVector, instance)
 
     utility_abs_residual = 0.0
     exponential_log_violation = 0.0
+    max_abs_t = 0.0
     max_abs_z = 0.0
+    max_abs_utility_row = 0.0
     for buyer in 1:m
         t_value = primal[allocation_count + 2buyer - 1]
         z_value = primal[allocation_count + 2buyer]
+        utility_row_value = utility_sums[buyer] - z_value
         utility_abs_residual = max(
             utility_abs_residual,
-            abs(utility_sums[buyer] - z_value),
+            abs(utility_row_value),
         )
+        max_abs_utility_row = max(
+            max_abs_utility_row,
+            abs(utility_row_value),
+        )
+        max_abs_t = max(max_abs_t, abs(t_value))
         max_abs_z = max(max_abs_z, abs(z_value))
         cone_violation = if z_value > 0.0
             max(0.0, t_value - log(z_value))
@@ -322,6 +336,44 @@ function independent_primal_metrics(primal::AbstractVector, instance)
 
     minimum_allocation = minimum(allocation)
     nonnegative_violation = max(0.0, -minimum_allocation)
+    max_abs_allocation = maximum(abs, allocation)
+    nonnegative_relative_violation =
+        nonnegative_violation / (1.0 + max_abs_allocation)
+
+    # In the PDCS formulation, Gx contains the supply sums, the utility
+    # equality rows, and the `(t, 0, z)` exponential-cone rows.  The right-hand
+    # side contains the per-good supply and `-1` in the middle coordinate of
+    # every exponential cone.  Use those original-scale quantities rather
+    # than a per-component absolute threshold.
+    gx_inf = max(
+        maximum(abs, supply_sums),
+        max_abs_utility_row,
+        max_abs_t,
+        max_abs_z,
+        max_abs_allocation,
+    )
+    h_inf = max(abs(instance.supply), 1.0)
+    conic_relative_scale = 1.0 + max(h_inf, gx_inf)
+    conic_absolute_violation_upper_bound = max(
+        supply_abs_residual,
+        utility_abs_residual,
+        exponential_log_violation,
+    )
+    conic_relative_violation_upper_bound =
+        conic_absolute_violation_upper_bound / conic_relative_scale
+    exponential_cone_relative_violation_upper_bound =
+        exponential_log_violation / conic_relative_scale
+    standard_form_absolute_violation_upper_bound = max(
+        conic_absolute_violation_upper_bound,
+        nonnegative_violation,
+    )
+    # Explicit nonnegative rows are part of the same standard-form residual
+    # as the zero and exponential-cone rows.  Normalize their maximum with the
+    # same global scale; a separate per-allocation scale would not match the
+    # cuPDCS criterion and can reject an otherwise sub-tolerance KKT point.
+    relative_primal_violation_upper_bound =
+        standard_form_absolute_violation_upper_bound /
+        conic_relative_scale
     objective_value = -dot(
         instance.weights,
         @view(
@@ -338,8 +390,95 @@ function independent_primal_metrics(primal::AbstractVector, instance)
         utility_abs_residual = utility_abs_residual,
         utility_rel_residual = utility_rel_residual,
         nonnegative_violation = nonnegative_violation,
+        nonnegative_relative_violation = nonnegative_relative_violation,
         exponential_log_violation = exponential_log_violation,
+        exponential_cone_relative_violation_upper_bound =
+            exponential_cone_relative_violation_upper_bound,
+        conic_absolute_violation_upper_bound =
+            conic_absolute_violation_upper_bound,
+        conic_relative_scale = conic_relative_scale,
+        conic_relative_violation_upper_bound =
+            conic_relative_violation_upper_bound,
+        standard_form_absolute_violation_upper_bound =
+            standard_form_absolute_violation_upper_bound,
+        relative_primal_violation_upper_bound =
+            relative_primal_violation_upper_bound,
         minimum_allocation = minimum_allocation,
+        max_abs_allocation = max_abs_allocation,
+    )
+end
+
+"""
+Compute original-scale KKT errors for the standard conic form
+
+    minimize c'x
+    subject to A*x + s = b,  s in K.
+
+The infinity-norm relative denominators follow the convention printed by
+cuPDCS: `1 + max` of the original-scale quantities.  The caller is
+responsible for supplying the solver's primal, dual, and slack vectors in the
+same standard-form sign convention.
+"""
+function standard_form_relative_errors(
+    formulation,
+    primal::AbstractVector,
+    dual::AbstractVector,
+    slack::AbstractVector,
+)
+    row_count, variable_count = size(formulation.A)
+    length(primal) == variable_count || error(
+        "primal length $(length(primal)) != $variable_count",
+    )
+    length(dual) == row_count || error(
+        "dual length $(length(dual)) != $row_count",
+    )
+    length(slack) == row_count || error(
+        "slack length $(length(slack)) != $row_count",
+    )
+
+    primal_infeasibility_abs, primal_infeasibility_rel = let
+        ax = Vector{Float64}(undef, row_count)
+        mul!(ax, formulation.A, primal)
+        ax_inf = maximum(abs, ax)
+        slack_inf = maximum(abs, slack)
+        b_inf = maximum(abs, formulation.b)
+        ax .+= slack
+        ax .-= formulation.b
+        residual = maximum(abs, ax)
+        scale = 1.0 + max(ax_inf, slack_inf, b_inf)
+        (residual, residual / scale)
+    end
+
+    # Release the row-sized work vector before allocating the column-sized
+    # stationarity vector on the largest Fisher instances.
+    GC.gc(false)
+
+    dual_infeasibility_abs, dual_infeasibility_rel = let
+        aty = Vector{Float64}(undef, variable_count)
+        mul!(aty, transpose(formulation.A), dual)
+        aty_inf = maximum(abs, aty)
+        c_inf = maximum(abs, formulation.c)
+        aty .+= formulation.c
+        residual = maximum(abs, aty)
+        scale = 1.0 + max(aty_inf, c_inf)
+        (residual, residual / scale)
+    end
+
+    primal_objective = dot(formulation.c, primal)
+    dual_objective = -dot(formulation.b, dual)
+    primal_dual_gap_abs = abs(primal_objective - dual_objective)
+    primal_dual_gap_rel = primal_dual_gap_abs /
+        (1.0 + max(abs(primal_objective), abs(dual_objective)))
+
+    return (
+        comparison_primal_objective = primal_objective,
+        comparison_dual_objective = dual_objective,
+        comparison_primal_infeasibility_abs = primal_infeasibility_abs,
+        comparison_primal_infeasibility_rel = primal_infeasibility_rel,
+        comparison_dual_infeasibility_abs = dual_infeasibility_abs,
+        comparison_dual_infeasibility_rel = dual_infeasibility_rel,
+        comparison_primal_dual_gap_abs = primal_dual_gap_abs,
+        comparison_primal_dual_gap_rel = primal_dual_gap_rel,
     )
 end
 

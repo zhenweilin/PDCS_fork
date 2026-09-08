@@ -152,7 +152,11 @@ validate_solver_list() {
 check_no_problem_data() {
     local count
     count="$(
-        find "${BASE_DIR}" -type f \
+        find "${BASE_DIR}" \
+            \( -path "${BASE_DIR}/.envs" -o \
+               -path "${BASE_DIR}/.julia-depot" -o \
+               -path "${BASE_DIR}/.tools" \) -prune -o \
+            -type f \
             \( -iname '*.cbf' -o -iname '*.cbf.gz' -o \
                -iname '*.jld2' -o -iname '*.npz' -o \
                -iname '*.mtx' -o -iname '*.mps' \) \
@@ -160,14 +164,18 @@ check_no_problem_data() {
     )"
     [[ "${count}" == "0" ]] || {
         printf 'Persistent Fisher problem-data files found:\n' >&2
-        find "${BASE_DIR}" -type f \
+        find "${BASE_DIR}" \
+            \( -path "${BASE_DIR}/.envs" -o \
+               -path "${BASE_DIR}/.julia-depot" -o \
+               -path "${BASE_DIR}/.tools" \) -prune -o \
+            -type f \
             \( -iname '*.cbf' -o -iname '*.cbf.gz' -o \
                -iname '*.jld2' -o -iname '*.npz' -o \
                -iname '*.mtx' -o -iname '*.mps' \) \
             -print >&2
         return 1
     }
-    printf 'FISHER_NO_PERSISTED_DATA verified=1\n'
+    printf 'FISHER_NO_PERSISTED_DATA verified=1 scope=benchmark_source\n'
 }
 
 prepare() {
@@ -265,6 +273,21 @@ successful_status() {
     esac
 }
 
+case_has_memory_failure() {
+    local mode="$1"
+    local solver="$2"
+    local instance_id="$3"
+    local case_dir="${RESULT_ROOT}/${mode}/${solver}/${instance_id}"
+    local attempt_name attempt
+    local memory_pattern='OUT_OF_MEMORY|OutOfMemoryError|out of memory|cudaErrorMemoryAllocation|cuMemAlloc|oom-kill|oom_kill|failed to allocate[^[:cntrl:]]*(memory|bytes)'
+    [[ -s "${case_dir}/DONE" ]] || return 1
+    attempt_name="$(<"${case_dir}/DONE")"
+    attempt="${case_dir}/${attempt_name}"
+    rg -i -m 1 "${memory_pattern}" \
+        "${attempt}/result.toml" "${attempt}/solver.raw.log" \
+        >/dev/null 2>&1
+}
+
 formal_scale_key() {
     local instance_id="$1"
     if [[ "${instance_id}" =~ ^fisher-m([0-9]+)-n([0-9]+)-r[0-9]+$ ]]; then
@@ -280,6 +303,8 @@ run_one() {
     local instance_id="$3"
     local case_dir="${RESULT_ROOT}/${mode}/${solver}/${instance_id}"
     local project depot attempt attempt_name result raw_log external_limit status
+    local driver_started_epoch driver_finished_epoch driver_elapsed_seconds
+    local timeout_observed
     if [[ -f "${case_dir}/DONE" && "${RERUN}" == "0" ]]; then
         attempt_name="$(<"${case_dir}/DONE")"
         result="${case_dir}/${attempt_name}/result.toml"
@@ -311,6 +336,7 @@ run_one() {
         "${mode}" "${solver}" "${instance_id}" "${GPU_INDEX}" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+    driver_started_epoch="$(date +%s)"
     timeout --signal=INT --kill-after=60 "${external_limit}" \
         env \
             "JULIA_DEPOT_PATH=${depot}" \
@@ -335,11 +361,29 @@ run_one() {
             --required-julia-version "${REQUIRED_JULIA_VERSION}" \
             2>&1 | tee "${raw_log}"
     local return_code=${PIPESTATUS[0]}
+    driver_finished_epoch="$(date +%s)"
+    driver_elapsed_seconds=$((driver_finished_epoch - driver_started_epoch))
     printf '%s\n' "${return_code}" > "${attempt}/exit_status.txt"
     nvidia-smi \
         --query-gpu=timestamp,index,name,memory.used,memory.free,utilization.gpu \
         --format=csv,noheader > "${attempt}/gpu_after.txt" 2>&1 || true
-    if [[ ! -f "${result}" && "${return_code}" == "124" ]]; then
+    # GNU timeout returns 124 when the child exits after the first signal, but
+    # returns 137 when --kill-after has to send SIGKILL.  Julia/SCS can remain
+    # inside a GPU linear-system call after SIGINT, so use both the return code
+    # and observed wall time.  The elapsed-time guard prevents an early OOM or
+    # unrelated signal from being mislabeled as a timeout.
+    timeout_observed=0
+    if [[ "${return_code}" == "124" ]]; then
+        timeout_observed=1
+    elif [[ "${return_code}" =~ ^(130|137|143)$ ]] &&
+         (( driver_elapsed_seconds >= external_limit ))
+    then
+        timeout_observed=1
+    fi
+    if [[ ! -f "${result}" && "${timeout_observed}" == "1" ]]; then
+        printf 'FISHER_EXTERNAL_TIMEOUT_DETECTED solver=%s instance=%s exit=%s elapsed=%s limit=%s\n' \
+            "${solver}" "${instance_id}" "${return_code}" \
+            "${driver_elapsed_seconds}" "${external_limit}"
         "${JULIA_BIN}" --startup-file=no --project="${ROOT_DIR}" \
             "${DRIVER_TIMEOUT_SCRIPT}" \
             --solver "${solver}" \
@@ -349,6 +393,8 @@ run_one() {
             --result "${result}" \
             --time-limit "${TIME_LIMIT}" \
             --setup-grace "${SETUP_GRACE}" \
+            --driver-exit-code "${return_code}" \
+            --driver-elapsed-seconds "${driver_elapsed_seconds}" \
             --tolerance "${TOLERANCE}" \
             --gpu "${GPU_INDEX}" \
             --verbose-level "${VERBOSE_LEVEL}" || true
@@ -370,7 +416,7 @@ run_group() {
     local mode="$1"
     local manifest_group="$2"
     local solver instance_id scale_key stop_key return_code failures=0
-    local -A failed_scales=()
+    local -A memory_failed_scales=()
     mapfile -t selected_instances < <(list_instances "${manifest_group}") ||
         return 2
     validate_solver_list || return 2
@@ -380,9 +426,9 @@ run_group() {
             stop_key="${solver}|${scale_key}"
             if [[ "${mode}" == "formal" &&
                   "${solver}" != "cupdcs" &&
-                  "${failed_scales[$stop_key]+present}" == "present" ]]
+                  "${memory_failed_scales[$stop_key]+present}" == "present" ]]
             then
-                printf 'FISHER_SKIP_SCALE_FAILURE solver=%s instance=%s scale=%s\n' \
+                printf 'FISHER_SKIP_REMAINING_AFTER_MEMORY_FAILURE solver=%s instance=%s scale=%s\n' \
                     "${solver}" "${instance_id}" "${scale_key}"
                 continue
             fi
@@ -391,10 +437,12 @@ run_group() {
             if (( return_code != 0 )); then
                 failures=$((failures + 1))
                 if [[ "${mode}" == "formal" &&
-                      "${solver}" != "cupdcs" ]]
+                      "${solver}" != "cupdcs" ]] &&
+                   case_has_memory_failure \
+                       "${mode}" "${solver}" "${instance_id}"
                 then
-                    failed_scales["${stop_key}"]=1
-                    printf 'FISHER_EARLY_STOP_SCALE solver=%s scale=%s after=%s exit=%s\n' \
+                    memory_failed_scales["${stop_key}"]=1
+                    printf 'FISHER_EARLY_STOP_MEMORY solver=%s scale=%s after=%s exit=%s\n' \
                         "${solver}" "${scale_key}" "${instance_id}" \
                         "${return_code}"
                 fi

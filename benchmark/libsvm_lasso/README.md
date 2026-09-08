@@ -127,3 +127,42 @@ Each dataset is loaded and modeled once per process. Updating alpha replaces
 only the objective coefficients; constraints and the CSC matrix are reused.
 PDCS clears solver state before each solve, avoiding warm-start contamination
 between alpha values.
+
+## Northwestern H100 campaign
+
+This campaign does not use JuMPRW. The full datasets use the direct sparse CSC
+builder (`--modeling bulk`) and the official JuMP/MathOptInterface API. The
+scalar official-JuMP path (`--modeling jump`) remains available for small
+cross-checks, but is not appropriate for the millions of columns in the full
+E2006 instance.
+
+The cluster scripts deliberately ignore this directory's standalone Julia
+project when selecting Julia. They use the exact executable and GPU project
+already validated by `benchmark/large_scale_lasso`:
+
+```text
+benchmark/large_scale_lasso/.tools/julia-1.10.4/bin/julia
+benchmark/large_scale_lasso/.gpu_solver_env
+```
+
+Download and byte-validate the three default LIBSVM archives with:
+
+```bash
+benchmark/libsvm_lasso/download_default_datasets.sh download
+```
+
+Submit one aggregate cuPDCS job requesting exactly one H100 with:
+
+```bash
+benchmark/libsvm_lasso/submit_cupdcs_h100.sh
+```
+
+The job runs `news20`, `E2006-log1p`, and `rcv1-train` sequentially. Each
+dataset is built once and reused for all nine penalty values. Every solve has a
+one-hour limit and absolute/relative tolerance `1e-6`; the aggregate Slurm job
+has a 48-hour limit. Results are written atomically below
+`results/current/cupdcs`, completed penalty values are skipped after a requeue
+or repair submission, and per-job GPU telemetry is recorded every five minutes.
+Result TOML files contain only scalar criteria and timings, including relative
+primal residual, relative dual residual, relative gap, and their maximum; they
+do not store primal, dual, or slack vectors.

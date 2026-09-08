@@ -136,6 +136,55 @@ function normalize_clarabel_status(status)
     return value
 end
 
+function standard_comparison_metadata(
+    formulation,
+    primal,
+    dual,
+    slack,
+)
+    metadata = Dict{String,Any}(
+        "comparison_metric" =>
+            "original_scale_linf_1_plus_max_v1",
+        "comparison_measurement_source" =>
+            "recomputed_from_A_b_c_x_y_s",
+        "comparison_error" => "",
+        "solution_primal_length" => length(primal),
+        "solution_dual_length" => length(dual),
+        "solution_slack_length" => length(slack),
+    )
+    try
+        metrics = standard_form_relative_errors(
+            formulation,
+            primal,
+            dual,
+            slack,
+        )
+        for (name, value) in pairs(metrics)
+            metadata[string(name)] = value
+        end
+        metadata["solution_vectors_finite"] =
+            all(isfinite, primal) &&
+            all(isfinite, dual) &&
+            all(isfinite, slack)
+    catch error_value
+        metadata["comparison_error"] = sprint(showerror, error_value)
+        metadata["solution_vectors_finite"] = false
+        for name in (
+            "comparison_primal_objective",
+            "comparison_dual_objective",
+            "comparison_primal_infeasibility_abs",
+            "comparison_primal_infeasibility_rel",
+            "comparison_dual_infeasibility_abs",
+            "comparison_dual_infeasibility_rel",
+            "comparison_primal_dual_gap_abs",
+            "comparison_primal_dual_gap_rel",
+        )
+            metadata[name] = NaN
+        end
+    end
+    return metadata
+end
+
 function solve_cupdcs(instance, options)
     CUDA.functional() || error("CUDA is not functional for cuPDCS")
     setup_started = time()
@@ -196,6 +245,29 @@ function solve_cupdcs(instance, options)
         "solver_dual_residual" =>
             converge_info.l_inf_rel_dual_res,
         "solver_relative_gap" => converge_info.rel_gap,
+        "comparison_metric" =>
+            "original_scale_linf_1_plus_max_v1",
+        "comparison_measurement_source" =>
+            "cupdcs_convergence_record",
+        "comparison_error" => "",
+        "comparison_primal_objective" =>
+            converge_info.primal_objective,
+        "comparison_dual_objective" =>
+            converge_info.dual_objective,
+        "comparison_primal_infeasibility_abs" =>
+            converge_info.l_inf_abs_primal_res,
+        "comparison_primal_infeasibility_rel" =>
+            converge_info.l_inf_rel_primal_res,
+        "comparison_dual_infeasibility_abs" =>
+            converge_info.l_inf_abs_dual_res,
+        "comparison_dual_infeasibility_rel" =>
+            converge_info.l_inf_rel_dual_res,
+        "comparison_primal_dual_gap_abs" => converge_info.abs_gap,
+        "comparison_primal_dual_gap_rel" => converge_info.rel_gap,
+        "solution_primal_length" => length(primal),
+        "solution_dual_length" => length(solution.y.dual_sol.y),
+        "solution_slack_length" => 0,
+        "solution_vectors_finite" => all(isfinite, primal),
         "gpu_backend" => "PDCS_GPU.rpdhg_gpu_solve",
         "cuda_device" => CUDA.name(CUDA.device()),
     )
@@ -249,6 +321,12 @@ function solve_scs_gpu(instance, options)
     )
     solve_wall_seconds = time() - solve_started
     raw_status = SCS.raw_status(solution.info)
+    comparison = standard_comparison_metadata(
+        formulation,
+        solution.x,
+        solution.y,
+        solution.s,
+    )
     metadata = Dict{String,Any}(
         "termination_status" => normalize_scs_status(raw_status),
         "raw_status" => raw_status,
@@ -265,6 +343,7 @@ function solve_scs_gpu(instance, options)
         "gpu_backend" => "SCS.GpuIndirectSolver",
         "gpu_index_type" => string(SCS.scsint_t(SCS.GpuIndirectSolver)),
     )
+    merge!(metadata, comparison)
     return (
         primal = solution.x,
         metadata = metadata,
@@ -312,6 +391,15 @@ function solve_cuclarabel(instance, options)
     solution = Clarabel.solve!(solver)
     CUDA.synchronize()
     solve_wall_seconds = time() - solve_started
+    primal = Array(solution.x)
+    dual = Array(solution.z)
+    slack = Array(solution.s)
+    comparison = standard_comparison_metadata(
+        formulation,
+        primal,
+        dual,
+        slack,
+    )
     metadata = Dict{String,Any}(
         "termination_status" =>
             normalize_clarabel_status(solution.status),
@@ -330,8 +418,9 @@ function solve_cuclarabel(instance, options)
         "gpu_backend" => "Clarabel direct_solve_method=:cudss",
         "cuda_device" => CUDA.name(CUDA.device()),
     )
+    merge!(metadata, comparison)
     return (
-        primal = Array(solution.x),
+        primal = primal,
         metadata = metadata,
         setup_seconds = setup_seconds,
         solve_wall_seconds = solve_wall_seconds,
@@ -361,8 +450,11 @@ function main()
         "run_status" => "runtime_error",
         "termination_status" => "EXCEPTION",
         "error" => "",
+        "measurement_schema_version" => 2,
         "status_accepted" => false,
         "validation_accepted" => false,
+        "comparison_tolerance_accepted" => false,
+        "native_solver_tolerance_accepted" => false,
         "solver_tolerance_accepted" => false,
     )
     exit_code = 1
@@ -413,12 +505,14 @@ function main()
         instance = nothing
         GC.gc()
 
+        # The raw EXP log violation remains useful for diagnosis, but it is an
+        # absolute quantity.  Acceptance uses the original-scale relative
+        # primal-feasibility upper bound so it is comparable with cuPDCS.
         validation_values = Float64[
-            result["supply_rel_residual"],
-            result["utility_rel_residual"],
-            result["nonnegative_violation"],
-            result["exponential_log_violation"],
+            result["relative_primal_violation_upper_bound"],
         ]
+        result["validation_metric"] =
+            "relative_primal_feasibility_upper_bound_v1"
         result["normalized_violation"] = maximum(validation_values)
         solver_values = abs.(Float64[
             result["solver_primal_residual"],
@@ -426,20 +520,31 @@ function main()
             result["solver_relative_gap"],
         ])
         result["solver_relative_kkt_max"] = maximum(solver_values)
+        comparison_values = abs.(Float64[
+            result["comparison_primal_infeasibility_rel"],
+            result["comparison_dual_infeasibility_rel"],
+            result["comparison_primal_dual_gap_rel"],
+        ])
+        result["comparison_relative_kkt_max"] =
+            maximum(comparison_values)
         result["status_accepted"] =
             result["termination_status"] in ("OPTIMAL", "ALMOST_OPTIMAL")
         result["validation_accepted"] =
             all(isfinite, validation_values) &&
             result["normalized_violation"] <= OPTIONS.tolerance
-        # cuPDCS reports the same normalized KKT quantities used by its
-        # stopping rule, so enforce the requested tolerance directly.  SCS
-        # and Clarabel expose residual fields with solver-specific scalings;
-        # their common cross-solver acceptance test is the independently
-        # recomputed primal violation above.
+        result["comparison_tolerance_accepted"] =
+            all(isfinite, comparison_values) &&
+            result["comparison_relative_kkt_max"] <= OPTIONS.tolerance
+        # Preserve each package's native measurements for diagnosis.  The
+        # acceptance decision uses comparison_* recomputed in the original
+        # unscaled problem so all three solvers face the same test.
+        result["native_solver_tolerance_accepted"] =
+            all(isfinite, solver_values) &&
+            result["solver_relative_kkt_max"] <= OPTIONS.tolerance
+        # Backward-compatible acceptance field now follows the unified
+        # original-scale comparison metric for every solver.
         result["solver_tolerance_accepted"] =
-            OPTIONS.solver != :cupdcs ||
-            (all(isfinite, solver_values) &&
-             result["solver_relative_kkt_max"] <= OPTIONS.tolerance)
+            result["comparison_tolerance_accepted"]
         passed = result["status_accepted"] &&
             result["validation_accepted"] &&
             result["solver_tolerance_accepted"] &&
@@ -453,14 +558,37 @@ function main()
             "instance=$(OPTIONS.instance_id) " *
             "termination=$(result["termination_status"]) " *
             "run_status=$(result["run_status"]) " *
-            "normalized_violation=$(result["normalized_violation"]) " *
-            "solver_kkt=$(result["solver_relative_kkt_max"]) " *
+            "validation_relative=$(result["normalized_violation"]) " *
+            "comparison_kkt=$(result["comparison_relative_kkt_max"]) " *
+            "native_solver_kkt=$(result["solver_relative_kkt_max"]) " *
             "iterations=$(result["iterations"]) " *
             "objective=$(result["objective_value"]) " *
             "supply_rel=$(result["supply_rel_residual"]) " *
             "utility_rel=$(result["utility_rel_residual"]) " *
-            "exp_log_violation=$(result["exponential_log_violation"])",
+            "exp_log_abs=$(result["exponential_log_violation"]) " *
+            "exp_relative_upper=$(result["exponential_cone_relative_violation_upper_bound"])",
         )
+        println(
+            "FISHER_RELATIVE_ERRORS solver=$(OPTIONS.solver) " *
+            "instance=$(OPTIONS.instance_id) " *
+            "metric=$(result["comparison_metric"]) " *
+            "measurement_source=$(result["comparison_measurement_source"]) " *
+            "primal_infeasibility_abs=$(result["comparison_primal_infeasibility_abs"]) " *
+            "primal_infeasibility_rel=$(result["comparison_primal_infeasibility_rel"]) " *
+            "dual_infeasibility_abs=$(result["comparison_dual_infeasibility_abs"]) " *
+            "dual_infeasibility_rel=$(result["comparison_dual_infeasibility_rel"]) " *
+            "primal_dual_gap_abs=$(result["comparison_primal_dual_gap_abs"]) " *
+            "primal_dual_gap_rel=$(result["comparison_primal_dual_gap_rel"]) " *
+            "primal_objective=$(result["comparison_primal_objective"]) " *
+            "dual_objective=$(result["comparison_dual_objective"])",
+        )
+        if !isempty(result["comparison_error"])
+            println(
+                "FISHER_RELATIVE_ERROR_FAILURE solver=$(OPTIONS.solver) " *
+                "instance=$(OPTIONS.instance_id) " *
+                "error=$(repr(result["comparison_error"]))",
+            )
+        end
         exit_code = passed ? 0 : 3
     catch error_value
         result["error"] = sprint(showerror, error_value, catch_backtrace())

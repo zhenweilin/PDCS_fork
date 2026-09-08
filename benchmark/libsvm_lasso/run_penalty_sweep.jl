@@ -4,6 +4,8 @@ using JuMP
 using SparseArrays
 using TOML
 
+import MathOptInterface as MOI
+
 include(joinpath(@__DIR__, "realistic_lasso.jl"))
 using .RealisticLasso
 
@@ -37,6 +39,8 @@ function parse_options(args::Vector{String})
         "abs-tol",
         "verbose",
         "alpha",
+        "resume",
+        "run-tag",
     ])
     unknown = setdiff(Set(keys(options)), allowed)
     isempty(unknown) || error("Unknown options: $(join(sort!(collect(unknown)), ", "))")
@@ -53,7 +57,8 @@ Usage:
       [--pdcs-root /path/to/PDCS] [--raw-dir raw] [--output-dir results] \\
       [--max-rows N] [--compact-zero-columns auto|true|false] \\
       [--index-type int32|int64] [--time-limit 3600] \\
-      [--rel-tol 1e-6] [--abs-tol 1e-6] [--verbose 2]
+      [--rel-tol 1e-6] [--abs-tol 1e-6] [--verbose 2] \\
+      [--resume true|false] [--run-tag TAG]
 
 With --dataset all, the default reproducibility set is:
   news20, E2006-log1p, rcv1-train
@@ -147,7 +152,14 @@ function materialize_bulk_model(
     )
     model_factory = getfield(pdcs_module, :model_from_conic_data)
     optimizer = Base.invokelatest(optimizer_factory)
-    return Base.invokelatest(model_factory, representation; optimizer)
+    model = Base.invokelatest(model_factory, representation; optimizer)
+    model.ext[:PDCS_raw_optimizer] = optimizer
+    return model
+end
+
+function safe_run_tag(value::AbstractString)
+    tag = replace(strip(value), r"[^A-Za-z0-9_.-]" => "_")
+    return isempty(tag) ? "local" : tag
 end
 
 function set_pdcs_options!(
@@ -155,6 +167,7 @@ function set_pdcs_options!(
     output_dir::AbstractString,
     dataset_id::String,
     alpha::Float64;
+    run_tag::String,
     time_limit::Float64,
     rel_tol::Float64,
     abs_tol::Float64,
@@ -176,9 +189,84 @@ function set_pdcs_options!(
     set_optimizer_attribute(
         model,
         "logfile",
-        joinpath(log_dir, "$(dataset_id)_alpha_$(alpha_tag).log"),
+        joinpath(log_dir, "$(dataset_id)_alpha_$(alpha_tag)_$(run_tag).log"),
     )
     return
+end
+
+
+function record_pdcs_metrics!(entry::Dict{String,Any}, model::JuMP.Model)
+    optimizer = haskey(model.ext, :PDCS_raw_optimizer) ?
+        model.ext[:PDCS_raw_optimizer] : JuMP.unsafe_backend(model)
+    metrics = MOI.get(optimizer, MOI.RawOptimizerAttribute("result_metrics"))
+    scalar_fields = (
+        :exit_code,
+        :exit_status,
+        :solve_time_sec,
+        :projection_time_sec,
+        :primal_projection_time_sec,
+        :dual_slack_projection_time_sec,
+        :preprocessing_time_sec,
+        :iterations,
+        :l_inf_rel_primal_res,
+        :l_inf_rel_dual_res,
+        :l_2_rel_primal_res,
+        :l_2_rel_dual_res,
+        :relative_gap,
+        :restart_count,
+        :restart_current_count,
+        :restart_mean_count,
+        :restart_halpern_count,
+        :objective_value,
+        :dual_objective_value,
+    )
+    for field in scalar_fields
+        hasproperty(metrics, field) || continue
+        value = getproperty(metrics, field)
+        entry["solver_$(field)"] = value isa Symbol ? string(value) : value
+    end
+    entry["solver_relative_kkt_max"] = maximum((
+        abs(Float64(metrics.l_inf_rel_primal_res)),
+        abs(Float64(metrics.l_inf_rel_dual_res)),
+        abs(Float64(metrics.relative_gap)),
+    ))
+    return entry
+end
+
+
+function completed_resume_runs(
+    output_path::AbstractString,
+    expected::Dict{String,Any},
+    alphas::Vector{Float64},
+)
+    isfile(output_path) || return Dict{Float64,Dict{String,Any}}()
+    previous = TOML.parsefile(output_path)
+    for key in (
+        "dataset",
+        "mode",
+        "modeling",
+        "index_type",
+        "time_limit_seconds",
+        "relative_tolerance",
+        "absolute_tolerance",
+    )
+        saved = get(previous, key, nothing)
+        saved == expected[key] || error(
+            "Cannot resume $output_path: saved $key=$saved does not match " *
+            "requested $(expected[key]).",
+        )
+    end
+    Float64.(get(previous, "alphas", Float64[])) == alphas || error(
+        "Cannot resume $output_path: saved penalty grid does not match.",
+    )
+    completed = Dict{Float64,Dict{String,Any}}()
+    for raw_entry in get(previous, "runs", Any[])
+        entry = Dict{String,Any}(raw_entry)
+        haskey(entry, "alpha") || continue
+        get(entry, "termination_status", "SCRIPT_ERROR") == "SCRIPT_ERROR" && continue
+        completed[Float64(entry["alpha"])] = entry
+    end
+    return completed
 end
 
 function add_if_available!(f::Function, entry::Dict{String, Any}, key::String)
@@ -200,9 +288,13 @@ function base_result(
     build_seconds::Float64,
     representation,
     alphas,
+    index_type::Type{<:Integer},
+    time_limit::Float64,
+    rel_tol::Float64,
+    abs_tol::Float64,
 )
     result = Dict{String, Any}(
-        "schema_version" => 1,
+        "schema_version" => 2,
         "dataset" => data.dataset_id,
         "mode" => mode,
         "modeling" => modeling,
@@ -214,6 +306,12 @@ function base_result(
         "lambda_reference" => data.lambda_reference,
         "lambda_zero_threshold" => 2.0 * data.lambda_reference,
         "alphas" => copy(alphas),
+        "index_type" => lowercase(string(index_type)),
+        "time_limit_seconds" => time_limit,
+        "relative_tolerance" => rel_tol,
+        "absolute_tolerance" => abs_tol,
+        "julia_version" => string(VERSION),
+        "julia_threads" => Threads.nthreads(),
         "load_seconds" => load_seconds,
         "build_seconds" => build_seconds,
         "objective" => "norm(A*x-b, 2)^2 + lambda*norm(x, 1)",
@@ -245,6 +343,8 @@ function run_dataset(
     abs_tol::Float64,
     verbose::Int,
     workers::Int,
+    resume::Bool,
+    run_tag::String,
     alphas::Vector{Float64} = ALPHAS,
 )
     spec = dataset_spec(dataset_id; raw_dir)
@@ -280,9 +380,17 @@ function run_dataset(
         build_seconds,
         representation,
         alphas,
+        index_type,
+        time_limit,
+        rel_tol,
+        abs_tol,
     )
     alpha_tag = length(alphas) == 1 ? replace(string(first(alphas)), "." => "p") : "sweep"
     output_path = joinpath(output_dir, "$(dataset_id)_penalty_$(alpha_tag).toml")
+    completed_runs = resume ? completed_resume_runs(output_path, result, alphas) :
+                     Dict{Float64,Dict{String,Any}}()
+    result["resumed_completed_runs"] = length(completed_runs)
+    result["run_tag"] = run_tag
     model = representation isa LassoSOCPModel ? representation.model : nothing
     if mode != "build" && representation isa LassoConicData
         cache_build_seconds = @elapsed model = materialize_bulk_model(
@@ -318,6 +426,15 @@ function run_dataset(
             "zero_solution_theory" => alpha >= 2.0,
         )
 
+        if haskey(completed_runs, alpha)
+            entry = deepcopy(completed_runs[alpha])
+            entry["resumed"] = true
+            push!(result["runs"], entry)
+            atomic_toml_write(output_path, result)
+            println("skip completed $dataset_id alpha=$alpha from $output_path")
+            continue
+        end
+
         if mode == "build"
             entry["status"] = "MODEL_BUILT"
             println("$dataset_id alpha=$alpha lambda=$lambda $modeling model built")
@@ -331,6 +448,7 @@ function run_dataset(
                 output_dir,
                 dataset_id,
                 alpha;
+                run_tag,
                 time_limit,
                 rel_tol,
                 abs_tol,
@@ -358,8 +476,10 @@ function run_dataset(
                 add_if_available!(entry, "dual_objective_value") do
                     dual_objective_value(model)
                 end
+                record_pdcs_metrics!(entry, model)
                 println(
                     "finished $dataset_id alpha=$alpha status=$(entry["termination_status"]) " *
+                    "relative_kkt_max=$(entry["solver_relative_kkt_max"]) " *
                     "wall=$(round(wall_seconds; digits=3)) s",
                 )
             catch error
@@ -404,6 +524,12 @@ function main(args = ARGS)
     rel_tol = parse(Float64, get(options, "rel-tol", "1e-6"))
     abs_tol = parse(Float64, get(options, "abs-tol", "1e-6"))
     verbose = parse(Int, get(options, "verbose", "2"))
+    resume = parse_bool(get(options, "resume", "true"))
+    run_tag = safe_run_tag(get(
+        options,
+        "run-tag",
+        get(ENV, "SLURM_JOB_ID", "local"),
+    ))
     alphas = haskey(options, "alpha") ?
         Float64[parse(Float64, options["alpha"])] : ALPHAS
     time_limit > 0 || error("--time-limit must be positive.")
@@ -435,6 +561,8 @@ function main(args = ARGS)
             abs_tol,
             verbose,
             workers,
+            resume,
+            run_tag,
             alphas,
         )
         GC.gc()
