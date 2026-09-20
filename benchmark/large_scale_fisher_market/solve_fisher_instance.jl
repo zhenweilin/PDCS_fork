@@ -188,7 +188,15 @@ end
 function solve_cupdcs(instance, options)
     CUDA.functional() || error("CUDA is not functional for cuPDCS")
     setup_started = time()
-    formulation = build_pdcs_formulation(instance)
+    formulation = build_compact_pdcs_formulation(instance)
+    println(
+        "FISHER_COMPACT_FORMULATION solver=cupdcs " *
+        "original_allocations=$(formulation.original_allocation_count) " *
+        "modeled_allocations=$(formulation.modeled_allocation_count) " *
+        "removed_zero_valuations=$(formulation.removed_zero_valuation_count) " *
+        "variables=$(formulation.variable_count) " *
+        "constraints=$(formulation.row_count)",
+    )
     setup_seconds = time() - setup_started
     solve_started = time()
     solution = PDCS_GPU.rpdhg_gpu_solve(
@@ -270,12 +278,21 @@ function solve_cupdcs(instance, options)
         "solution_vectors_finite" => all(isfinite, primal),
         "gpu_backend" => "PDCS_GPU.rpdhg_gpu_solve",
         "cuda_device" => CUDA.name(CUDA.device()),
+        "formulation_variant" => formulation.formulation_variant,
+        "original_allocation_count" =>
+            formulation.original_allocation_count,
+        "modeled_allocation_count" =>
+            formulation.modeled_allocation_count,
+        "removed_zero_valuation_count" =>
+            formulation.removed_zero_valuation_count,
     )
     return (
         primal = primal,
         metadata = metadata,
         setup_seconds = setup_seconds,
         solve_wall_seconds = solve_wall_seconds,
+        allocation_indices = formulation.allocation_indices,
+        allocation_values = formulation.allocation_values,
     )
 end
 
@@ -283,7 +300,15 @@ function solve_scs_gpu(instance, options)
     SCS.is_available(SCS.GpuIndirectSolver) ||
         error("SCS.GpuIndirectSolver is unavailable")
     setup_started = time()
-    formulation = build_standard_formulation(instance)
+    formulation = build_compact_standard_formulation(instance)
+    println(
+        "FISHER_COMPACT_FORMULATION solver=scs_gpu " *
+        "original_allocations=$(formulation.original_allocation_count) " *
+        "modeled_allocations=$(formulation.modeled_allocation_count) " *
+        "removed_zero_valuations=$(formulation.removed_zero_valuation_count) " *
+        "variables=$(formulation.variable_count) " *
+        "constraints=$(formulation.row_count)",
+    )
     quadratic = empty_quadratic(formulation.variable_count)
     primal = zeros(Float64, formulation.variable_count)
     dual = zeros(Float64, formulation.row_count)
@@ -342,6 +367,13 @@ function solve_scs_gpu(instance, options)
             max(1.0, abs(solution.info.pobj), abs(solution.info.dobj)),
         "gpu_backend" => "SCS.GpuIndirectSolver",
         "gpu_index_type" => string(SCS.scsint_t(SCS.GpuIndirectSolver)),
+        "formulation_variant" => formulation.formulation_variant,
+        "original_allocation_count" =>
+            formulation.original_allocation_count,
+        "modeled_allocation_count" =>
+            formulation.modeled_allocation_count,
+        "removed_zero_valuation_count" =>
+            formulation.removed_zero_valuation_count,
     )
     merge!(metadata, comparison)
     return (
@@ -349,6 +381,8 @@ function solve_scs_gpu(instance, options)
         metadata = metadata,
         setup_seconds = setup_seconds,
         solve_wall_seconds = solve_wall_seconds,
+        allocation_indices = formulation.allocation_indices,
+        allocation_values = formulation.allocation_values,
     )
 end
 

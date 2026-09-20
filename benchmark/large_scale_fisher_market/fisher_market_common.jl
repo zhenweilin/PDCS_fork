@@ -6,6 +6,7 @@ using SHA
 using SparseArrays
 
 export build_pdcs_formulation
+export build_compact_pdcs_formulation
 export build_compact_standard_formulation
 export build_standard_formulation
 export empty_quadratic
@@ -143,18 +144,10 @@ function build_standard_formulation(instance)
     return positive
 end
 
-"""
-Construct the standard conic form after removing allocation variables whose
-valuation is zero.  The returned allocation indices retain the original
-buyer-major positions, so primal feasibility and objectives can be checked
-against the unmodified Fisher instance without expanding a dense `m*n`
-vector.
-
-With equality supply constraints this reduction is equivalent only when every
-good has at least one strictly positive valuation.  Enforce that condition
-here instead of silently changing the original problem.
-"""
-function build_compact_standard_formulation(instance)
+function _build_compact_formulation(
+    instance;
+    explicit_nonnegative_rows::Bool,
+)
     m = Int(instance.summary.m)
     n = Int(instance.summary.n)
     original_allocation_count = Int(instance.summary.allocation_count)
@@ -191,9 +184,9 @@ function build_compact_standard_formulation(instance)
         )
 
     variable_count = allocation_count + 2m
-    nonnegative_rows = allocation_count
+    nonnegative_rows = explicit_nonnegative_rows ? allocation_count : 0
     row_count = n + m + nonnegative_rows + 3m
-    matrix_nnz = 3allocation_count + 3m
+    matrix_nnz = 2allocation_count + nonnegative_rows + 3m
 
     _checked_index(variable_count, "compact variable_count")
     _checked_index(row_count, "compact row_count")
@@ -216,9 +209,11 @@ function build_compact_standard_formulation(instance)
         rowval[position] = INDEX_TYPE(n + buyer)
         nzval[position] = allocation_values[compact_index]
         position += 1
-        rowval[position] = INDEX_TYPE(n + m + compact_index)
-        nzval[position] = 1.0
-        position += 1
+        if explicit_nonnegative_rows
+            rowval[position] = INDEX_TYPE(n + m + compact_index)
+            nzval[position] = 1.0
+            position += 1
+        end
     end
 
     exponential_offset = n + m + nonnegative_rows
@@ -264,18 +259,14 @@ function build_compact_standard_formulation(instance)
         objective[allocation_count + 2buyer - 1] = -instance.weights[buyer]
     end
 
-    # Convert `G*x - h in K` to the standard solver convention
-    # `A*x + s = b, s in K` with `A = -G` and `b = -h`.
-    matrix.nzval .*= -1.0
-    rhs .*= -1.0
-    return (
+    common = (
         A = matrix,
         b = rhs,
         c = objective,
         row_count = row_count,
         variable_count = variable_count,
         zero_count = n + m,
-        nonnegative_count = allocation_count,
+        nonnegative_count = nonnegative_rows,
         exponential_count = m,
         allocation_indices = allocation_indices,
         allocation_values = allocation_values,
@@ -284,6 +275,54 @@ function build_compact_standard_formulation(instance)
         removed_zero_valuation_count =
             original_allocation_count - allocation_count,
         formulation_variant = "positive_valuation_reduced_v1",
+    )
+    if explicit_nonnegative_rows
+        # Convert `G*x - h in K` to the standard solver convention
+        # `A*x + s = b, s in K` with `A = -G` and `b = -h`.
+        matrix.nzval .*= -1.0
+        rhs .*= -1.0
+        return common
+    end
+
+    lower_bounds = fill(-Inf, variable_count)
+    lower_bounds[1:allocation_count] .= 0.0
+    upper_bounds = fill(Inf, variable_count)
+    return merge(
+        common,
+        (
+            lower_bounds = lower_bounds,
+            upper_bounds = upper_bounds,
+        ),
+    )
+end
+
+"""
+Construct the canonical positive-sign cuPDCS form after removing allocation
+variables whose valuation is zero.  Allocation nonnegativity is represented
+by variable lower bounds.
+"""
+function build_compact_pdcs_formulation(instance)
+    return _build_compact_formulation(
+        instance;
+        explicit_nonnegative_rows = false,
+    )
+end
+
+"""
+Construct the SCS/Clarabel standard conic form after removing allocation
+variables whose valuation is zero.  The returned allocation indices retain
+the original buyer-major positions, so primal feasibility and objectives can
+be checked against the unmodified Fisher instance without expanding a dense
+`m*n` vector.
+
+With equality supply constraints this reduction is equivalent only when every
+good has at least one strictly positive valuation.  Enforce that condition
+here instead of silently changing the original problem.
+"""
+function build_compact_standard_formulation(instance)
+    return _build_compact_formulation(
+        instance;
+        explicit_nonnegative_rows = true,
     )
 end
 
