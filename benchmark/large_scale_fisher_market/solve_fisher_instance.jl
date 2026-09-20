@@ -355,7 +355,15 @@ end
 function solve_cuclarabel(instance, options)
     CUDA.functional() || error("CUDA is not functional for cuClarabel")
     setup_started = time()
-    formulation = build_standard_formulation(instance)
+    formulation = build_compact_standard_formulation(instance)
+    println(
+        "FISHER_COMPACT_FORMULATION solver=cuclarabel " *
+        "original_allocations=$(formulation.original_allocation_count) " *
+        "modeled_allocations=$(formulation.modeled_allocation_count) " *
+        "removed_zero_valuations=$(formulation.removed_zero_valuation_count) " *
+        "variables=$(formulation.variable_count) " *
+        "constraints=$(formulation.row_count)",
+    )
     quadratic = empty_quadratic(formulation.variable_count)
     cones = Clarabel.SupportedCone[
         Clarabel.ZeroConeT(formulation.zero_count),
@@ -417,6 +425,13 @@ function solve_cuclarabel(instance, options)
             max(1.0, abs(solution.obj_val), abs(solution.obj_val_dual)),
         "gpu_backend" => "Clarabel direct_solve_method=:cudss",
         "cuda_device" => CUDA.name(CUDA.device()),
+        "formulation_variant" => formulation.formulation_variant,
+        "original_allocation_count" =>
+            formulation.original_allocation_count,
+        "modeled_allocation_count" =>
+            formulation.modeled_allocation_count,
+        "removed_zero_valuation_count" =>
+            formulation.removed_zero_valuation_count,
     )
     merge!(metadata, comparison)
     return (
@@ -424,6 +439,8 @@ function solve_cuclarabel(instance, options)
         metadata = metadata,
         setup_seconds = setup_seconds,
         solve_wall_seconds = solve_wall_seconds,
+        allocation_indices = formulation.allocation_indices,
+        allocation_values = formulation.allocation_values,
     )
 end
 
@@ -498,7 +515,16 @@ function main()
         result["setup_seconds"] = solved.setup_seconds
         result["solve_wall_seconds"] = solved.solve_wall_seconds
 
-        metrics = independent_primal_metrics(solved.primal, instance)
+        metrics = if hasproperty(solved, :allocation_indices)
+            independent_primal_metrics(
+                solved.primal,
+                instance;
+                allocation_indices = solved.allocation_indices,
+                allocation_values = solved.allocation_values,
+            )
+        else
+            independent_primal_metrics(solved.primal, instance)
+        end
         for name in propertynames(metrics)
             result[string(name)] = getproperty(metrics, name)
         end

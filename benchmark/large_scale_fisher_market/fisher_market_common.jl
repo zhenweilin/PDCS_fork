@@ -6,6 +6,7 @@ using SHA
 using SparseArrays
 
 export build_pdcs_formulation
+export build_compact_standard_formulation
 export build_standard_formulation
 export empty_quadratic
 export generate_instance
@@ -65,12 +66,19 @@ function generate_instance(
     # utility. The formal densities make an empty row overwhelmingly unlikely;
     # fail loudly instead of silently changing a random instance.
     buyers_with_utility = falses(m)
-    for allocation_index in utility.nzind
+    goods_with_utility = falses(n)
+    for cursor in eachindex(utility.nzind)
+        utility.nzval[cursor] > 0.0 || continue
+        allocation_index = utility.nzind[cursor]
         buyer = fld(allocation_index - 1, n) + 1
+        good = mod(allocation_index - 1, n) + 1
         buyers_with_utility[buyer] = true
+        goods_with_utility[good] = true
     end
     all(buyers_with_utility) ||
         error("seed $seed generated a buyer with no positive utility")
+    all(goods_with_utility) ||
+        error("seed $seed generated a good with no positive valuation")
 
     supply = 0.25 * m
     digest = _numerical_digest(
@@ -133,6 +141,150 @@ function build_standard_formulation(instance)
     positive.A.nzval .*= -1.0
     positive.b .*= -1.0
     return positive
+end
+
+"""
+Construct the standard conic form after removing allocation variables whose
+valuation is zero.  The returned allocation indices retain the original
+buyer-major positions, so primal feasibility and objectives can be checked
+against the unmodified Fisher instance without expanding a dense `m*n`
+vector.
+
+With equality supply constraints this reduction is equivalent only when every
+good has at least one strictly positive valuation.  Enforce that condition
+here instead of silently changing the original problem.
+"""
+function build_compact_standard_formulation(instance)
+    m = Int(instance.summary.m)
+    n = Int(instance.summary.n)
+    original_allocation_count = Int(instance.summary.allocation_count)
+    utility = instance.utility
+    all(value -> isfinite(value) && value >= 0.0, utility.nzval) ||
+        error("compact Fisher formulation requires finite nonnegative valuations")
+
+    allocation_indices, allocation_values = if all(>(0.0), utility.nzval)
+        (utility.nzind, utility.nzval)
+    else
+        positive = findall(>(0.0), utility.nzval)
+        (utility.nzind[positive], utility.nzval[positive])
+    end
+    allocation_count = length(allocation_indices)
+    allocation_count > 0 ||
+        error("compact Fisher formulation has no positive valuations")
+
+    buyers_with_utility = falses(m)
+    goods_with_utility = falses(n)
+    for allocation_index in allocation_indices
+        1 <= allocation_index <= original_allocation_count ||
+            error("utility index $allocation_index is outside the allocation vector")
+        buyer = fld(allocation_index - 1, n) + 1
+        good = mod(allocation_index - 1, n) + 1
+        buyers_with_utility[buyer] = true
+        goods_with_utility[good] = true
+    end
+    all(buyers_with_utility) ||
+        error("compact Fisher formulation found a buyer with no positive valuation")
+    all(goods_with_utility) ||
+        error(
+            "compact Fisher formulation is not equivalent: " *
+            "a good has no positive valuation",
+        )
+
+    variable_count = allocation_count + 2m
+    nonnegative_rows = allocation_count
+    row_count = n + m + nonnegative_rows + 3m
+    matrix_nnz = 3allocation_count + 3m
+
+    _checked_index(variable_count, "compact variable_count")
+    _checked_index(row_count, "compact row_count")
+    _checked_index(matrix_nnz + 1, "compact matrix_nnz+1")
+
+    colptr = Vector{INDEX_TYPE}(undef, variable_count + 1)
+    rowval = Vector{INDEX_TYPE}(undef, matrix_nnz)
+    nzval = Vector{Float64}(undef, matrix_nnz)
+    position = 1
+
+    for compact_index in eachindex(allocation_indices)
+        allocation_index = allocation_indices[compact_index]
+        buyer = fld(allocation_index - 1, n) + 1
+        good = mod(allocation_index - 1, n) + 1
+        colptr[compact_index] = INDEX_TYPE(position)
+
+        rowval[position] = INDEX_TYPE(good)
+        nzval[position] = 1.0
+        position += 1
+        rowval[position] = INDEX_TYPE(n + buyer)
+        nzval[position] = allocation_values[compact_index]
+        position += 1
+        rowval[position] = INDEX_TYPE(n + m + compact_index)
+        nzval[position] = 1.0
+        position += 1
+    end
+
+    exponential_offset = n + m + nonnegative_rows
+    for buyer in 1:m
+        t_column = allocation_count + 2buyer - 1
+        z_column = t_column + 1
+        cone_row = exponential_offset + 3(buyer - 1)
+
+        colptr[t_column] = INDEX_TYPE(position)
+        rowval[position] = INDEX_TYPE(cone_row + 1)
+        nzval[position] = 1.0
+        position += 1
+
+        colptr[z_column] = INDEX_TYPE(position)
+        rowval[position] = INDEX_TYPE(n + buyer)
+        nzval[position] = -1.0
+        position += 1
+        rowval[position] = INDEX_TYPE(cone_row + 3)
+        nzval[position] = 1.0
+        position += 1
+    end
+    colptr[variable_count + 1] = INDEX_TYPE(position)
+    position == matrix_nnz + 1 ||
+        error(
+            "compact matrix nnz mismatch: filled $(position - 1), " *
+            "expected $matrix_nnz",
+        )
+
+    matrix = SparseMatrixCSC{Float64,INDEX_TYPE}(
+        row_count,
+        variable_count,
+        colptr,
+        rowval,
+        nzval,
+    )
+    rhs = zeros(Float64, row_count)
+    rhs[1:n] .= instance.supply
+    for buyer in 1:m
+        rhs[exponential_offset + 3(buyer - 1) + 2] = -1.0
+    end
+    objective = zeros(Float64, variable_count)
+    for buyer in 1:m
+        objective[allocation_count + 2buyer - 1] = -instance.weights[buyer]
+    end
+
+    # Convert `G*x - h in K` to the standard solver convention
+    # `A*x + s = b, s in K` with `A = -G` and `b = -h`.
+    matrix.nzval .*= -1.0
+    rhs .*= -1.0
+    return (
+        A = matrix,
+        b = rhs,
+        c = objective,
+        row_count = row_count,
+        variable_count = variable_count,
+        zero_count = n + m,
+        nonnegative_count = allocation_count,
+        exponential_count = m,
+        allocation_indices = allocation_indices,
+        allocation_values = allocation_values,
+        original_allocation_count = original_allocation_count,
+        modeled_allocation_count = allocation_count,
+        removed_zero_valuation_count =
+            original_allocation_count - allocation_count,
+        formulation_variant = "positive_valuation_reduced_v1",
+    )
 end
 
 function _build_formulation(instance; explicit_nonnegative_rows::Bool)
@@ -281,28 +433,55 @@ relative conic residual.  Decreasing `t` by the raw log violation produces a
 feasible exponential-cone point, so that quantity is a conservative upper
 bound on the cone distance rather than an unrelated absolute acceptance test.
 """
-function independent_primal_metrics(primal::AbstractVector, instance)
+function independent_primal_metrics(
+    primal::AbstractVector,
+    instance;
+    allocation_indices = nothing,
+    allocation_values = nothing,
+)
     m = Int(instance.summary.m)
     n = Int(instance.summary.n)
-    allocation_count = Int(instance.summary.allocation_count)
+    original_allocation_count = Int(instance.summary.allocation_count)
+    compact = allocation_indices !== nothing || allocation_values !== nothing
+    compact &&
+        (allocation_indices === nothing || allocation_values === nothing) &&
+        error("compact primal metrics require both allocation indices and values")
+    allocation_count = compact ?
+        length(allocation_indices) : original_allocation_count
     expected_length = allocation_count + 2m
     length(primal) == expected_length ||
         error("primal length $(length(primal)) != $expected_length")
 
     allocation = @view primal[1:allocation_count]
-    allocation_matrix = reshape(allocation, n, m)
-    supply_sums = vec(sum(allocation_matrix; dims = 2))
+    supply_sums = zeros(Float64, n)
+    utility_sums = zeros(Float64, m)
+    if compact
+        length(allocation_values) == allocation_count ||
+            error("compact allocation index/value lengths differ")
+        for cursor in eachindex(allocation_indices)
+            allocation_index = allocation_indices[cursor]
+            1 <= allocation_index <= original_allocation_count ||
+                error("compact allocation index $allocation_index is invalid")
+            buyer = fld(allocation_index - 1, n) + 1
+            good = mod(allocation_index - 1, n) + 1
+            allocation_value = allocation[cursor]
+            supply_sums[good] += allocation_value
+            utility_sums[buyer] +=
+                allocation_values[cursor] * allocation_value
+        end
+    else
+        allocation_matrix = reshape(allocation, n, m)
+        supply_sums .= vec(sum(allocation_matrix; dims = 2))
+        for cursor in eachindex(instance.utility.nzind)
+            allocation_index = instance.utility.nzind[cursor]
+            buyer = fld(allocation_index - 1, n) + 1
+            utility_sums[buyer] +=
+                instance.utility.nzval[cursor] * primal[allocation_index]
+        end
+    end
     supply_abs_residual = maximum(abs.(supply_sums .- instance.supply))
     supply_rel_residual =
         supply_abs_residual / max(1.0, abs(instance.supply))
-
-    utility_sums = zeros(Float64, m)
-    for cursor in eachindex(instance.utility.nzind)
-        allocation_index = instance.utility.nzind[cursor]
-        buyer = fld(allocation_index - 1, n) + 1
-        utility_sums[buyer] +=
-            instance.utility.nzval[cursor] * primal[allocation_index]
-    end
 
     utility_abs_residual = 0.0
     exponential_log_violation = 0.0
