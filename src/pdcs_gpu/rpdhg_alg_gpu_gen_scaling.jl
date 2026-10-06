@@ -152,6 +152,9 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     projection_start = time_proj
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
     global time_proj_dual_slack += time_proj - projection_start
+    # Normalize with proj_Kd(Gx - h), not the dual slack proj(c - G'y).
+    projectedInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    projectedNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.data.diagonal_scale.Dl_temp.y .= dual_sol_temp.dual_sol_mean.y .- dual_sol_temp.dual_sol_lag.y
 
 
@@ -160,14 +163,12 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     projection_start = time_proj
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
     global time_proj_dual_slack += time_proj - projection_start
-    sInf = norm(slack.primal_sol.x, Inf)
-    sNrm1 = norm(slack.primal_sol.x, 1)
 
     l_2_abs_primal_res = norm(solver.data.diagonal_scale.Dl_temp.y);
-    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(sNrm1, max(solver.data.raw_data.hNrm1, AxNrm1)));
+    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm1, solver.data.raw_data.hNrm1, AxNrm1));
 
     l_inf_abs_primal_res = CUDA.maximum(CUDA.abs.(solver.data.diagonal_scale.Dl_temp.y));
-    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(sInf, max(solver.data.raw_data.hNrmInf, AxInf)));
+    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(projectedInf, solver.data.raw_data.hNrmInf, AxInf));
 
     solver.data.diagonal_scale.Dr_temp.x .= slack.primal_sol.x .- slack.primal_sol_lag.x
     l_2_abs_dual_res = norm(solver.data.diagonal_scale.Dr_temp.x);

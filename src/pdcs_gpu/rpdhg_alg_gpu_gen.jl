@@ -242,12 +242,15 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     projection_start = time_proj
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
     global time_proj_dual_slack += time_proj - projection_start
+    # This buffer now contains proj_Kd(Gx - h), the primal normalization term.
+    projectedInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    projectedNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
 
     dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
     l_2_abs_primal_res = norm(dual_sol_temp.dual_sol_temp.y);
-    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(solver.data.hNrm1, AxNrm1));
+    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm1, solver.data.hNrm1, AxNrm1));
     l_inf_abs_primal_res = CUDA.maximum(abs.(dual_sol_temp.dual_sol_temp.y));
-    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(solver.data.hNrmInf, AxInf));
+    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(projectedInf, solver.data.hNrmInf, AxInf));
     
     slack.primal_sol_lag.x .= slack.primal_sol.x
     projection_start = time_proj

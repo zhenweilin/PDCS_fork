@@ -168,15 +168,20 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
 
     # dual_sol_temp.dual_sol_mean = Gx
     solver.primalMV!(solver.data.coeff, primal_sol.x, dual_sol_temp.dual_sol_mean);
+    AxInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
+    # This buffer now contains proj_Kd(Gx - h), the primal normalization term.
+    projectedInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
+    projectedNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
 
     dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
     l_2_abs_primal_res = norm(dual_sol_temp.dual_sol_temp.y);
-    l_2_rel_primal_res = l_2_abs_primal_res / (1 + solver.data.hNrm1);
+    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm1, solver.data.hNrm1, AxNrm1));
     l_inf_abs_primal_res = maximum(abs.(dual_sol_temp.dual_sol_temp.y));
-    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + solver.data.hNrmInf);
+    l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(projectedInf, solver.data.hNrmInf, AxInf));
     
     slack.primal_sol_lag.x .= slack.primal_sol.x
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
