@@ -223,20 +223,20 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     pObj = dot(primal_sol.x, solver.data.d_c)
     solver.adjointMV!(solver.data.coeffTrans, dual_sol, slack.primal_sol.x)
     AtyInf = norm(slack.primal_sol.x, Inf)
-    AtyNrm1 = norm(slack.primal_sol.x, 1)
-    slack.primal_sol.x .= solver.data.c - slack.primal_sol.x;
+    AtyNrm2 = norm(slack.primal_sol.x, 2)
+    slack.primal_sol.x .= solver.data.d_c - slack.primal_sol.x;
     slack.primal_sol_lag.x .= max.(0, slack.primal_sol.x)
     slack.primal_sol_mean.x .= min.(0, slack.primal_sol.x)
 
     dObj = solver.dotCoeffd(solver.data.coeff, dual_sol)
-    dObj += (solver.data.bl_finite' * slack.primal_sol_lag.xbox + solver.data.bu_finite' * slack.primal_sol_mean.xbox)
+    dObj += (solver.data.d_bl_finite' * slack.primal_sol_lag.xbox + solver.data.d_bu_finite' * slack.primal_sol_mean.xbox)
     abs_gap = abs(pObj - dObj)
     rel_gap = abs_gap / (1 + abs(pObj) + abs(dObj));
 
     # dual_sol_temp.dual_sol_mean = Gx
     solver.primalMV!(solver.data.coeff, primal_sol.x, dual_sol_temp.dual_sol_mean);
     AxInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
+    AxNrm2 = norm(dual_sol_temp.dual_sol_mean.y, 2)
     solver.addCoeffd!(solver.data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
     projection_start = time_proj
@@ -244,11 +244,11 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     global time_proj_dual_slack += time_proj - projection_start
     # This buffer now contains proj_Kd(Gx - h), the primal normalization term.
     projectedInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    projectedNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
+    projectedNrm2 = norm(dual_sol_temp.dual_sol_mean.y, 2)
 
     dual_sol_temp.dual_sol_temp.y .= dual_sol_temp.dual_sol_mean.y - dual_sol_temp.dual_sol_lag.y
     l_2_abs_primal_res = norm(dual_sol_temp.dual_sol_temp.y);
-    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm1, solver.data.hNrm1, AxNrm1));
+    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm2, solver.data.hNrm2, AxNrm2));
     l_inf_abs_primal_res = CUDA.maximum(abs.(dual_sol_temp.dual_sol_temp.y));
     l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(projectedInf, solver.data.hNrmInf, AxInf));
     
@@ -258,7 +258,7 @@ function converge_info_calculation(; solver::rpdhgSolver, primal_sol::primalVect
     global time_proj_dual_slack += time_proj - projection_start
     slack.primal_sol_mean.x .= slack.primal_sol.x - slack.primal_sol_lag.x
     l_2_abs_dual_res = norm(slack.primal_sol_mean.x);
-    l_2_rel_dual_res = l_2_abs_dual_res / (1 + max(solver.data.cNrm1, AxNrm1));
+    l_2_rel_dual_res = l_2_abs_dual_res / (1 + max(solver.data.cNrm2, AtyNrm2));
     l_inf_abs_dual_res = CUDA.maximum(abs.(slack.primal_sol_mean.x));
     l_inf_rel_dual_res = l_inf_abs_dual_res / (1 + max(solver.data.cNrmInf, AtyInf));
     
@@ -480,6 +480,14 @@ dGType<:Union{
     CUDA.CUSPARSE.CuSparseMatrixCSR{Float64,Int64},
     Adjoint{Float64, CUDA.CUSPARSE.CuSparseMatrixCSR{Float64, Int64}}
 }}
+    # The maintained GPU loop uses diagonal workspaces even without scaling.
+    # Match MOI's use_scaling=false path: :none leaves all scaling factors at
+    # one and bypasses data rescaling, while retaining complete solver state.
+    requested_preconditioner = use_preconditioner
+    if !use_preconditioner
+        rescaling_method = :none
+        use_preconditioner = true
+    end
     adaptive_projection_tolerance = resolve_adaptive_projection_tolerance(
         adaptive_projection_tolerance, socG, rsocG, soc_x, rsoc_x;
         expG=expG, dual_expG=dual_expG, exp_x=exp_x,
@@ -530,7 +538,7 @@ dGType<:Union{
         @info ("------------- Parameter Info Summary --------------")
         @info ("---------------------------------------------------")
         @info ("time limit: $time_limit")
-        @info ("use_preconditioner: $use_preconditioner")
+        @info ("use_preconditioner: $requested_preconditioner")
         @info ("rescaling_method: $rescaling_method")
         @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
         @info ("use_adaptive_diagonal_scalar_rescaling: $use_adaptive_diagonal_scalar_rescaling")
@@ -588,7 +596,7 @@ dGType<:Union{
     end
     if use_preconditioner
         if verbose > 0
-            @info "Using preconditioner"
+            @info (rescaling_method == :none ? "Using identity scaling" : "Using preconditioner")
         end
     else
         if verbose > 0
@@ -1416,6 +1424,14 @@ function rpdhg_gpu_solve(;
     sparse_index_type = :auto,
 )where {hType<:Union{Vector{rpdhg_float}, SparseVector{rpdhg_float}}
 }
+    # Keep unscaled solves on the same maintained loop as MOI's
+    # use_scaling=false path. Identity factors preserve the input problem and
+    # let restart, projection, and convergence checks share the GPU machinery.
+    requested_preconditioner = use_preconditioner
+    if !use_preconditioner
+        rescaling_method = :none
+        use_preconditioner = true
+    end
     adaptive_projection_tolerance = resolve_adaptive_projection_tolerance(
         adaptive_projection_tolerance, socG, rsocG, soc_x, rsoc_x;
         expG=expG, dual_expG=dual_expG, exp_x=exp_x,
@@ -1465,7 +1481,7 @@ function rpdhg_gpu_solve(;
         @info ("------------- Parameter Info Summary --------------")
         @info ("---------------------------------------------------")
         @info ("time limit: $time_limit")
-        @info ("use_preconditioner: $use_preconditioner")
+        @info ("use_preconditioner: $requested_preconditioner")
         @info ("rescaling_method: $rescaling_method")
         @info ("scalar_cone_rescaling: $scalar_cone_rescaling")
         @info ("use_adaptive_diagonal_scalar_rescaling: $use_adaptive_diagonal_scalar_rescaling")
@@ -1526,7 +1542,7 @@ function rpdhg_gpu_solve(;
     end
     if use_preconditioner
         if verbose > 0
-            @info "Using preconditioner"
+            @info (rescaling_method == :none ? "Using identity scaling" : "Using preconditioner")
         end
     else
         if verbose > 0

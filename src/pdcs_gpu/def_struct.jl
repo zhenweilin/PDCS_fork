@@ -1168,6 +1168,8 @@ mutable struct rpdhgRawData{
     bu_finite::CuArray # avoid 0.0 * Inf
     hNrm1::rpdhg_float
     cNrm1::rpdhg_float
+    hNrm2::rpdhg_float
+    cNrm2::rpdhg_float
     hNrmInf::rpdhg_float
     cNrmInf::rpdhg_float
     function rpdhgRawData(; m::Integer, n::Integer, nb::Integer,
@@ -1187,7 +1189,10 @@ mutable struct rpdhgRawData{
             # CUDA.@allowscalar bu_finite = replace(bu_finite, Inf=>0.0)
             replace_inf_with_zero(bl_finite, bu_finite, n)
         end
-        new{coeffType, coeffTransType}(m, n, nb, c, coeff, coeffTrans, bl, bu, bl_finite, bu_finite, hNrm1, cNrm1, hNrmInf, cNrmInf)
+        # Cache original-data norms once, outside GPU convergence checks.
+        hNrm2 = norm(coeff.d_h, 2)
+        cNrm2 = norm(c, 2)
+        new{coeffType, coeffTransType}(m, n, nb, c, coeff, coeffTrans, bl, bu, bl_finite, bu_finite, hNrm1, cNrm1, hNrm2, cNrm2, hNrmInf, cNrmInf)
     end
 end
 
