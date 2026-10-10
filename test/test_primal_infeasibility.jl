@@ -75,14 +75,16 @@ function convergence_fixture(backend, diagonal, x, h, c, y)
     raw_data = (
         c = copy(c), coeff, coeffTrans = (; G = transpose(G), h),
         bl_finite = zeros(2), bu_finite = zeros(2),
-        hNrm1 = norm(h, 1), hNrmInf = norm(h, Inf),
-        cNrm1 = norm(c, 1), cNrmInf = norm(c, Inf),
+        hNrm1 = norm(h, 1), hNrm2 = norm(h, 2), hNrmInf = norm(h, Inf),
+        cNrm1 = norm(c, 1), cNrm2 = norm(c, 2), cNrmInf = norm(c, Inf),
     )
     data = merge(raw_data, (
         d_c = copy(c), raw_data,
+        d_bl_finite = raw_data.bl_finite, d_bu_finite = raw_data.bu_finite,
         diagonal_scale = (; Dl_temp = dual(), Dr_temp = primal_buffer()),
         # A diagonal path must normalize recovered residuals with raw norms.
         hNrm1 = diagonal ? 1.0e12 : raw_data.hNrm1,
+        hNrm2 = diagonal ? 1.0e12 : raw_data.hNrm2,
         hNrmInf = diagonal ? 1.0e12 : raw_data.hNrmInf,
     ))
     solver = (;
@@ -107,17 +109,17 @@ end
     cases = (
         # Hand-calculated residuals and denominators for G defined above.
         (name = "projection dominates", x = [5.0, -1.0], h = [-5.0, -5.0, 5.0],
-         abs_inf = 1.0, abs_l2 = 1.0, scale_inf = 11.0, scale_l1 = 16.0),
+         abs_inf = 1.0, abs_l2 = 1.0, scale_inf = 11.0, scale_l2 = 1.0 + sqrt(116.0)),
         (name = "Gx dominates", x = [10.0, -1.0], h = [5.0, 1.0, 8.0],
-         abs_inf = 2.0, abs_l2 = 2.0, scale_inf = 11.0, scale_l1 = 21.0),
+         abs_inf = 2.0, abs_l2 = 2.0, scale_inf = 11.0, scale_l2 = 1.0 + sqrt(182.0)),
         (name = "h dominates", x = [1.0, 2.0], h = [10.0, -1.0, 1.0],
-         abs_inf = 9.0, abs_l2 = 9.0, scale_inf = 11.0, scale_l1 = 13.0),
+         abs_inf = 9.0, abs_l2 = 9.0, scale_inf = 11.0, scale_l2 = 1.0 + sqrt(102.0)),
         (name = "multiple violations", x = [-1.0, -2.0], h = zeros(3),
-         abs_inf = 3.0, abs_l2 = sqrt(14.0), scale_inf = 4.0, scale_l1 = 7.0),
+         abs_inf = 3.0, abs_l2 = sqrt(14.0), scale_inf = 4.0, scale_l2 = 1.0 + sqrt(14.0)),
         (name = "feasible", x = [1.0, 2.0], h = zeros(3),
-         abs_inf = 0.0, abs_l2 = 0.0, scale_inf = 4.0, scale_l1 = 7.0),
+         abs_inf = 0.0, abs_l2 = 0.0, scale_inf = 4.0, scale_l2 = 1.0 + sqrt(14.0)),
         (name = "zero", x = zeros(2), h = zeros(3),
-         abs_inf = 0.0, abs_l2 = 0.0, scale_inf = 1.0, scale_l1 = 1.0),
+         abs_inf = 0.0, abs_l2 = 0.0, scale_inf = 1.0, scale_l2 = 1.0),
     )
     for backend in (:cpu, :gpu), diagonal in (false, true)
         scope, calculate! = convergence_test_module(backend, diagonal)
@@ -135,7 +137,7 @@ end
                         @test info.l_inf_abs_primal_res ≈ case.abs_inf
                         @test info.l_inf_rel_primal_res ≈ case.abs_inf / case.scale_inf
                         @test info.l_2_abs_primal_res ≈ case.abs_l2
-                        @test info.l_2_rel_primal_res ≈ case.abs_l2 / case.scale_l1
+                        @test info.l_2_rel_primal_res ≈ case.abs_l2 / case.scale_l2
                     end
                 end
             end

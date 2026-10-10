@@ -37,13 +37,13 @@ end
     # initialization, rescaling, cuSPARSE products, and CUDA projections.
     cases = (
         (name = "projection dominates", x = [5.0, 0.0], h = [-5.0, -5.0, 6.0],
-         abs_res = 1.0, scale_inf = 11.0, scale_l1 = 17.0),
+         abs_res = 1.0, scale_inf = 11.0, scale_l2 = 1.0 + sqrt(125.0)),
         (name = "Gx dominates", x = [10.0, 1.0], h = [5.0, 2.0, 8.0],
-         abs_res = 1.0, scale_inf = 12.0, scale_l1 = 23.0),
+         abs_res = 1.0, scale_inf = 12.0, scale_l2 = 1.0 + sqrt(222.0)),
         (name = "h dominates", x = [1.0, 2.0], h = [10.0, -1.0, 1.0],
-         abs_res = 9.0, scale_inf = 11.0, scale_l1 = 13.0),
+         abs_res = 9.0, scale_inf = 11.0, scale_l2 = 1.0 + sqrt(102.0)),
         (name = "feasible", x = [1.0, 2.0], h = zeros(3),
-         abs_res = 0.0, scale_inf = 4.0, scale_l1 = 7.0),
+         abs_res = 0.0, scale_inf = 4.0, scale_l2 = 1.0 + sqrt(14.0)),
     )
     for scaling in (:none, :ruiz_pock_chambolle), case in cases,
         c in ([0.0, 10.0], [0.0, 5.0e8])
@@ -54,7 +54,7 @@ end
             @test Array(sol.x.recovered_primal.primal_sol.x) ≈ case.x
             @test info.l_inf_abs_primal_res ≈ case.abs_res atol = 1.0e-12
             @test info.l_inf_rel_primal_res ≈ case.abs_res / case.scale_inf atol = 1.0e-12
-            @test info.l_2_rel_primal_res ≈ case.abs_res / case.scale_l1 atol = 1.0e-12
+            @test info.l_2_rel_primal_res ≈ case.abs_res / case.scale_l2 atol = 1.0e-12
             if case.name == "projection dominates"
                 @test info.l_inf_rel_dual_res == 0.0
                 @test info.rel_gap == 0.0

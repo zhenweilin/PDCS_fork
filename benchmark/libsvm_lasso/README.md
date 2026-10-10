@@ -31,6 +31,7 @@ file.
 - `realistic_lasso.jl`: LIBSVM streaming loader, compact JuMP builder, and
   parallel direct-CSC builder.
 - `run_penalty_sweep.jl`: in-memory build/solve driver for CPU or GPU PDCS.
+- `run_rescaling_pair.jl`: matched diagonal versus scalar-cone GPU pair runner.
 - `datasets.toml`: source URLs, file names, dimensions, and label convention.
 - `test_realistic_lasso.jl`: parser, JuMP, CSC layout, objective, and
   multithreaded-construction tests.
@@ -166,3 +167,31 @@ or repair submission, and per-job GPU telemetry is recorded every five minutes.
 Result TOML files contain only scalar criteria and timings, including relative
 primal residual, relative dual residual, relative gap, and their maximum; they
 do not store primal, dual, or slack vectors.
+
+## Diagonal versus scalar-cone rescaling
+
+The R3.5-style paired experiment changes only `scalar_cone_rescaling` while
+keeping Ruiz--Pock--Chambolle scaling, solver tolerances, seed, and the compact
+direct-SOC formulation fixed. It alternates the order of the two modes across
+repetitions and stores both JSON records and verbose solver logs below
+`compact_logs`:
+
+```bash
+bash benchmark/libsvm_lasso/scripts/run_compact_rescaling_gpu3.sh
+```
+
+The launcher uses GPU 3, `alpha=1e-4`, two repetitions, and the default
+`news20`, `E2006-log1p`, and `rcv1-train` set. Set `ALPHA` or `TIME_LIMIT` in
+the environment to change the paired run budget.
+
+To compare both rescaling methods over the alpha/lambda values represented by
+the existing penalty logs, run:
+
+```bash
+bash benchmark/libsvm_lasso/scripts/run_compact_lambda_sweep_gpu3.sh
+```
+
+This covers `0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000` for the three default
+datasets, with one matched pair per dataset and alpha. Existing compact
+`alpha=0.0001` pairs are reused when present; new results are written under
+`compact_logs/<dataset>_alpha_<value>/`.

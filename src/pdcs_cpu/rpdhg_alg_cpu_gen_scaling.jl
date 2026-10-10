@@ -97,16 +97,16 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     # dual_sol_temp.dual_sol_mean = Gx
     solver.primalMV!(solver.data.raw_data.coeff, primal_sol.x, dual_sol_temp.dual_sol_mean);
     AxInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    AxNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
+    AxNrm2 = norm(dual_sol_temp.dual_sol_mean.y, 2)
     solver.addCoeffd!(solver.data.raw_data.coeff, dual_sol_temp.dual_sol_mean, -1.0);
     dual_sol_temp.dual_sol_lag.y .= dual_sol_temp.dual_sol_mean.y;
     solver.sol.y.con_proj!(dual_sol_temp.dual_sol_mean)
     # This buffer now contains proj_Kd(Gx - h), the primal normalization term.
     projectedInf = norm(dual_sol_temp.dual_sol_mean.y, Inf)
-    projectedNrm1 = norm(dual_sol_temp.dual_sol_mean.y, 1)
+    projectedNrm2 = norm(dual_sol_temp.dual_sol_mean.y, 2)
     solver.data.diagonal_scale.Dl_temp.y .= dual_sol_temp.dual_sol_mean.y .- dual_sol_temp.dual_sol_lag.y
     l_2_abs_primal_res = norm(solver.data.diagonal_scale.Dl_temp.y);
-    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm1, solver.data.raw_data.hNrm1, AxNrm1));
+    l_2_rel_primal_res = l_2_abs_primal_res / (1 + max(projectedNrm2, solver.data.raw_data.hNrm2, AxNrm2));
     l_inf_abs_primal_res = maximum(abs.(solver.data.diagonal_scale.Dl_temp.y));
     l_inf_rel_primal_res = l_inf_abs_primal_res / (1 + max(projectedInf, solver.data.raw_data.hNrmInf, AxInf));
     
@@ -114,7 +114,7 @@ function converge_info_calculation_diagonal!(; solver::rpdhgSolver, primal_sol::
     solver.sol.x.slack_proj!(slack.primal_sol, slack)
     solver.data.diagonal_scale.Dr_temp.x .= slack.primal_sol.x .- slack.primal_sol_lag.x
     l_2_abs_dual_res = norm(solver.data.diagonal_scale.Dr_temp.x);
-    l_2_rel_dual_res = l_2_abs_dual_res / (1 + solver.data.raw_data.cNrm1);
+    l_2_rel_dual_res = l_2_abs_dual_res / (1 + solver.data.raw_data.cNrm2);
     l_inf_abs_dual_res = maximum(abs.(solver.data.diagonal_scale.Dr_temp.x));
     l_inf_rel_dual_res = l_inf_abs_dual_res / (1 + solver.data.raw_data.cNrmInf);
     
