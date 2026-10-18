@@ -16,11 +16,14 @@ Key Features:
 import sys
 import os
 
-# Add local cvxpy directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cvxpy'))
+# Use the parameter bridge maintained in this checkout.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'pdcs_gpu', 'cvxpy_wrapper'))
 
 import cvxpy as cp
 import numpy as np
+from pdcs_cvxpy import register
+
+register()
 
 print("=" * 70)
 print("Simple example: Solve exponential cone problem with CVXPY + PDCS")
