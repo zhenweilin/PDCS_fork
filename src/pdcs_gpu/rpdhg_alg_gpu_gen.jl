@@ -422,13 +422,13 @@ function rpdhg_gpu_solve_input_gpu_data(;
     mGzero::Integer, # m of Q for zero cone
     mGnonnegative::Integer, # m of Q for positive cone
     socG::Vector{<:Integer},
-    rsocG::Vector{<:Integer},
+    rsocG::Vector{<:Integer} = Int[],
     expG::Integer,
     dual_expG::Integer,
     bl::CuArray{rpdhg_float},
     bu::CuArray{rpdhg_float},
     soc_x::Vector{<:Integer},
-    rsoc_x::Vector{<:Integer},
+    rsoc_x::Vector{<:Integer} = Int[],
     exp_x::Integer = 0,
     dual_exp_x::Integer = 0,
     Dl::CuArray{rpdhg_float} = CuArray(ones(m)),
@@ -1287,13 +1287,13 @@ end # end rpdhg_cpu_solve
     - `mGzero`: the number of zero constraints
     - `mGnonnegative`: the number of nonnegative constraints
     - `socG`: a `Vector` of sizes of SOCs
-    - `rsocG`: a `Vector` of sizes of rotated SOCs
+    - `rsocG`: a `Vector` of sizes of rotated SOCs; defaults to `Int[]`
     - `expG`: the number of exponential cones
     - `dual_expG`: the number of dual exponential cones
     - `bl`: the `Vector` of lower bounds for the box cone, length `nb`
     - `bu`: the `Vector` of upper bounds for the box cone, length `nb`
     - `soc_x`: the `Vector` of indices of variables in `x` that belong to SOCs
-    - `rsoc_x`: the `Vector` of indices of variables in `x` that belong to rotated SOCs
+    - `rsoc_x`: the `Vector` of indices of variables in `x` that belong to rotated SOCs; defaults to `Int[]`
     - `exp_x`: the number of exponential cones
     - `dual_exp_x`: the number of dual exponential cones
     - `Dl`: the `Vector` of length `m` to scale the constraints
@@ -1370,13 +1370,13 @@ function rpdhg_gpu_solve(;
     mGzero::Integer, # m of Q for zero cone
     mGnonnegative::Integer, # m of Q for positive cone
     socG::Vector{<:Integer},
-    rsocG::Vector{<:Integer},
+    rsocG::Vector{<:Integer} = Int[],
     expG::Integer,
     dual_expG::Integer,
     bl::Vector{rpdhg_float},
     bu::Vector{rpdhg_float},
     soc_x::Vector{<:Integer},
-    rsoc_x::Vector{<:Integer},
+    rsoc_x::Vector{<:Integer} = Int[],
     exp_x::Integer = 0,
     dual_exp_x::Integer = 0,
     Dl::Vector{rpdhg_float} = ones(m),

@@ -35,7 +35,7 @@ const ThreadPerBlock = 256
 # from silently drifting apart.
 const DEFAULT_SCALAR_CONE_RESCALING = false
 const DEFAULT_USE_ADAPTIVE_DIAGONAL_SCALAR_RESCALING = true
-const DEFAULT_USE_ADAPTIVE_STEP = false
+const DEFAULT_USE_ADAPTIVE_STEP = true
 const DEFAULT_USE_ADAPTIVE_STEP_SIZE_WEIGHT = true
 
 const MODULE_DIR = @__DIR__

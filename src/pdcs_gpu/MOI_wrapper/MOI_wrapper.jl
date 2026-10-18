@@ -665,7 +665,7 @@ function MOI.optimize!(
     if !haskey(options, :use_adaptive_step)
         options[:use_adaptive_step] = DEFAULT_USE_ADAPTIVE_STEP
         if options[:verbose] > 0
-            println("use_adaptive_step is not set, using default value: false.")
+            println("use_adaptive_step is not set, using default value: $(DEFAULT_USE_ADAPTIVE_STEP).")
         end
     end
     if !haskey(options, :adaptive_projection_tolerance)
